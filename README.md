@@ -8,7 +8,7 @@
 ## 1. Introduction
 
 ### 1.1 Purpose
-The purpose of this document is to define the software requirements for LearnLM, an intelligent, cloud-hosted collaborative learning platform. This document outlines the system architecture, AI/ML integrations, API constraints, and cloud infrastructure required to build the platform.
+The purpose of this document is to define the software requirements for LearnLM, an intelligent, cloud-hosted collaborative learning platform. This document outlines the system architecture, AI/ML integrations, API constraints, and cloud infrastructure which is required to build the platform.
 
 ### 1.2 Intended Audience
 This document is intended for frontend developers, backend engineers, AI/ML engineers, and technical recruiters reviewing the project architecture. 

@@ -24,6 +24,7 @@ from .views import (
     UserSearchView, FriendRequestView, FriendRequestActionView, FriendsListView,
     # Legacy
     process_document,
+    HealthCheckView,
 )
 
 from .settings_views import ProfileSettingsView, TestEmailView
@@ -97,6 +98,9 @@ urlpatterns = [
     # ── Legacy ──────────────────────────────────────────────
     path('upload-pdf/', process_document, name='process_document'),
     path("user/activity/", views.update_user_activity, name="update_user_activity"),
+
+    # ── Observability ───────────────────────────────────────
+    path('health/', HealthCheckView.as_view(), name='health-check'),
 
     # Day 4: UI Polish Endpoints
     path("settings/profile/", ProfileSettingsView.as_view(), name="settings_profile"),

@@ -707,3 +707,20 @@ def process_document(request):
 def update_user_activity(request):
     """Stub endpoint for user activity tracking"""
     return Response({"status": "success"})
+
+class HealthCheckView(APIView):
+    """
+    Public health check endpoint for Datadog / Load Balancers.
+    Pings the DB to ensure full connectivity.
+    """
+    permission_classes = [] # Publicly accessible for automated checkers
+    throttle_classes = []
+
+    def get(self, request):
+        try:
+            # Simple query to verify DB is alive
+            from django.contrib.auth import get_user_model
+            get_user_model().objects.exists()
+            return Response({"status": "ok", "db": "connected"}, status=200)
+        except Exception as e:
+            return Response({"status": "error", "db": "disconnected", "message": str(e)}, status=503)

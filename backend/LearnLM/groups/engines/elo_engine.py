@@ -64,7 +64,11 @@ class EloEngine:
                     insight = "⚠️ Fast, but heavy memory usage. Can you solve this without creating extra arrays?"
 
         final_change = raw_change * time_multiplier * space_multiplier
-        final_change = min(max(final_change, 2.0), 50.0)
+        # Clamp gains to [0, 50]. The old floor of +2 guaranteed rating
+        # points for ANY accepted solution, letting users inflate Elo by
+        # grinding problems far below their level — the expected-score
+        # curve should be what makes trivial wins worth ~0.
+        final_change = min(max(final_change, 0.0), 50.0)
         new_rating = round(user_rating + final_change, 2)
 
         return {

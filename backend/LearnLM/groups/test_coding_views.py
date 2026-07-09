@@ -159,6 +159,25 @@ class Solution {
     assert response.data["status"] == "accepted"
 
 
+@pytest.mark.django_db
+def test_repeat_solve_does_not_farm_elo(api_client, user, question, monkeypatch):
+    monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_mock(stdout="1"))
+    api_client.force_authenticate(user=user)
+
+    first = submit(api_client, question)
+    assert first.data["elo_update"]["rating_change"] > 0
+    rating_after_first = UserCodingProfile.objects.get(user=user).elo_rating
+
+    second = submit(api_client, question)
+    assert second.data["status"] == "accepted"
+    assert second.data["elo_update"]["rating_change"] == 0.0
+    assert UserCodingProfile.objects.get(user=user).elo_rating == rating_after_first
+
+    # Repeats still count as spaced repetition — only the rating is guarded.
+    mastery = UserTopicMastery.objects.get(user=user, topic=question.topic)
+    assert mastery.reviews == 2
+
+
 # ─────────────────────────────────────────────────────────────
 # Agentic coach trigger + escalation
 # ─────────────────────────────────────────────────────────────

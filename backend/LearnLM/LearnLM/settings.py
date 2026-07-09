@@ -20,9 +20,18 @@ load_dotenv(dotenv_path=env_path)
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key-for-local-dev")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Defaults keep local development working; production flips these in .env:
+#   DJANGO_DEBUG=false
+#   DJANGO_ALLOWED_HOSTS=sparklm.example.com,api.sparklm.example.com
+DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if h.strip()]
+
+if not DEBUG:
+    # Sensible HTTPS-deployment defaults (behind a TLS-terminating proxy).
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Application definition
 INSTALLED_APPS = [
@@ -73,17 +82,37 @@ WSGI_APPLICATION = "LearnLM.wsgi.application"
 ASGI_APPLICATION = 'LearnLM.asgi.application'
 
 
-# Database
+# Database — credentials come from .env in production; defaults match the
+# existing local setup so development keeps working unchanged.
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'learnlm_db',
-        'USER': 'postgres',
-        'PASSWORD': 'yourpassword',
-        'HOST': '127.0.0.1',
-        'PORT': '5432',
+        'NAME': os.getenv('POSTGRES_DB', 'learnlm_db'),
+        'USER': os.getenv('POSTGRES_USER', 'postgres'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'yourpassword'),
+        'HOST': os.getenv('POSTGRES_HOST', '127.0.0.1'),
+        'PORT': os.getenv('POSTGRES_PORT', '5432'),
     }
 }
+
+# Cache — the DAG graph cache (hybrid_router) and DRF throttles live here.
+# With the default per-process LocMemCache, cache invalidation only reaches
+# the worker that made the change; set REDIS_URL in production so all
+# Gunicorn/Daphne workers share one cache.
+REDIS_URL = os.getenv("REDIS_URL")
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
 
 import sys
 if 'pytest' in sys.modules or 'pytest' in sys.argv[0]:
@@ -127,8 +156,9 @@ CORS_ALLOWED_ORIGINS = [
     "http://172.19.0.1:8080",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True # Enabled for local development across different IP networks
-CORS_ALLOW_CREDENTIALS = True  
+# Allow-all only in development; production uses the explicit whitelist above.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOW_CREDENTIALS = True
 
 
 # REST_FRAMEWORK is the master config for your API
@@ -143,8 +173,16 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '5/minute',
-        'user': '20/minute',
+        # Global defaults. The SPA fires several API calls per page load
+        # (dashboard, portals, profile, notifications), so 20/min per user
+        # 429s legitimate browsing — 120/min ≈ 2 req/s sustained.
+        'anon': '30/minute',
+        'user': '120/minute',
+        # Scoped rates for expensive endpoints (see throttle_scope on views):
+        # each code run/submit fans out to N Judge0 calls (paid API), and
+        # /code/next/ can trigger an LLM test-case generation.
+        'judge0': '10/minute',
+        'recommend': '30/minute',
     }
 }
 

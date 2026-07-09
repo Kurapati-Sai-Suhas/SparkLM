@@ -151,6 +151,78 @@ class MasteryDefinitionTests(TestCase):
         self.assertEqual(mastered, {"MasteredTopic", "EdgeTopic"})
 
 
+class OutcomeClassifierTests(TestCase):
+    """
+    Phase 3 flywheel: the router must learn from OUTCOMES and pick the
+    engine with the higher predicted success for this student — not
+    relearn its own past routing decisions.
+    """
+
+    def test_predict_route_scores_both_engines(self):
+        import numpy as np
+        from .management.commands.retrain_ai import train_outcome_classifier
+
+        # Synthetic ground truth with the interaction the model must learn:
+        # strong students succeed on the hierarchical track, weak students
+        # succeed in flat practice.
+        X, y = [], []
+        rng = np.random.RandomState(0)
+        for _ in range(200):
+            acc = rng.uniform(0, 1)
+            var = rng.uniform(0, 0.25)
+            elo = rng.uniform(0.4, 0.9)
+            for engine in (0.0, 1.0):
+                if engine == 1.0:
+                    success = 1 if acc > 0.6 else 0
+                else:
+                    success = 1 if acc <= 0.6 else 0
+                X.append([acc, var, elo, engine])
+                y.append(success)
+
+        clf = train_outcome_classifier(X, y)
+        self.assertIsNotNone(clf)
+
+        router = RoutingClassifier()
+        router.clf = clf
+        self.assertEqual(router.predict_route(0.9, 0.05, 0.6), 'hierarchical')
+        self.assertEqual(router.predict_route(0.3, 0.05, 0.6), 'flat')
+
+    def test_train_returns_none_without_outcome_variance(self):
+        from .management.commands.retrain_ai import train_outcome_classifier
+        # All-success data carries no signal — must refuse to train rather
+        # than save a degenerate model.
+        X = [[0.5, 0.1, 0.6, 0.0], [0.8, 0.1, 0.7, 1.0]]
+        y = [1, 1]
+        self.assertIsNone(train_outcome_classifier(X, y))
+
+    def test_build_outcome_dataset_labels_outcomes(self):
+        from .models import CodingPortal, UserCodingProfile, UserTopicMastery, RecommendationLog
+        from .management.commands.retrain_ai import build_outcome_dataset
+
+        user = User.objects.create_user(
+            username='flywheeluser', password='testpassword123', email='fly@test.com'
+        )
+        UserCodingProfile.objects.create(user=user, elo_rating=1400)
+        portal = CodingPortal.objects.create(name="Flywheel Portal")
+        topic = Topic.objects.create(name="FlywheelTopic", structure_type="hierarchical", portal=portal)
+        UserTopicMastery.objects.create(user=user, topic=topic, accuracy=0.9)
+
+        RecommendationLog.objects.create(
+            user=user, recommended_topic=topic, engine_used='hierarchical', actual_result_correct=True
+        )
+        RecommendationLog.objects.create(
+            user=user, recommended_topic=topic, engine_used='flat', actual_result_correct=False
+        )
+
+        X, y = build_outcome_dataset(RecommendationLog.objects.all().order_by('created_at'))
+
+        self.assertEqual(len(X), 2)
+        self.assertEqual(y, [1, 0])
+        self.assertEqual(X[0][3], 1.0)   # hierarchical engine flag
+        self.assertEqual(X[1][3], 0.0)   # flat engine flag
+        self.assertAlmostEqual(X[0][2], 0.7)  # elo 1400 / 2000
+
+
 class DagCacheInvalidationTests(TestCase):
     """
     Curriculum edits must invalidate the cached NetworkX DAG immediately.

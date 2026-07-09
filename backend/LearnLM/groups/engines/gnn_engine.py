@@ -107,8 +107,11 @@ class GNNKnowledgeGraph:
         if not self.nodes:
             return {"recommended_topic": None, "reason": "Empty graph"}
             
-        mastery_records = UserTopicMastery.objects.filter(user=user)
-        mastery_dict = {m.topic: m for m in mastery_records}
+        mastery_records = UserTopicMastery.objects.filter(user=user).select_related('topic')
+        # Keyed by topic NAME — the graph nodes are name strings. Keying by
+        # the Topic object meant every lookup below missed, so the GCN
+        # always saw cold-start features for every node.
+        mastery_dict = {m.topic.name: m for m in mastery_records}
         
         # Build full graph state for GCN
         node_features = []

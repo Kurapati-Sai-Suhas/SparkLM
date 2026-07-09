@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
 
 # Import Models
 from .models import (
@@ -146,6 +147,8 @@ class CodeRunView(APIView):
     POST /api/code/run/
     """
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'judge0'
 
     def post(self, request):
         raw_code = request.data.get('code', '').strip()
@@ -182,6 +185,8 @@ class CodeSubmitView(APIView):
     POST /api/code/submit/
     """
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'judge0'
 
     def post(self, request):
         serializer = CodeSubmitSerializer(data=request.data)
@@ -415,6 +420,12 @@ public class Main {
                 final_status = "runtime_error"
                 break
 
+        # Elo farming guard: check for a prior accepted solve BEFORE the
+        # new submission row is created.
+        already_solved = CodeSubmission.objects.filter(
+            user=request.user, question=question, status='accepted'
+        ).exists()
+
         # 2. Log submission to the database and update metrics transactionally
         with transaction.atomic():
             submission = CodeSubmission.objects.create(
@@ -477,14 +488,25 @@ public class Main {
         exec_time = int(float(results[0]['time'] or 0) * 1000) if results and results[0].get('time') else None
         mem_used = results[0]['memory'] if results else None
 
-        elo_result = EloEngine.calculate_new_rating(
-            user_rating=profile.elo_rating, 
-            question_difficulty=difficulty, 
-            is_correct=all_passed,
-            execution_time_ms=exec_time,
-            memory_used_kb=mem_used
-        )
-        
+        if all_passed and already_solved:
+            # Re-solving an already-accepted problem is legitimate spaced
+            # repetition (mastery/HLR still update below), but it must not
+            # farm rating points.
+            elo_result = {
+                "old_rating": round(profile.elo_rating, 2),
+                "new_rating": round(profile.elo_rating, 2),
+                "rating_change": 0.0,
+                "insight": "✅ Solved again! Repeat solves keep your memory fresh but don't change your rating.",
+            }
+        else:
+            elo_result = EloEngine.calculate_new_rating(
+                user_rating=profile.elo_rating,
+                question_difficulty=difficulty,
+                is_correct=all_passed,
+                execution_time_ms=exec_time,
+                memory_used_kb=mem_used
+            )
+
         profile.elo_rating = elo_result["new_rating"]
 
         # 🚀 ADVANCED ML: Multi-dimensional IRT (MIRT) (Experimental, disabled schema update for now)
@@ -604,6 +626,8 @@ class NextProblemView(APIView):
     GET /api/code/next/?topic=Array
     """
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'recommend'
 
     def get(self, request):
         from .hybrid_router import RoutingClassifier

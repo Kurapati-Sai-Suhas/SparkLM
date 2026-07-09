@@ -99,8 +99,20 @@ class RoutingClassifier:
 
     def predict_route(self, avg_acc, var_acc, avg_elo, subject=None):
         if self.clf:
+            n_features = getattr(self.clf, 'n_features_in_', 3)
+
+            # Outcome model (Phase 3 retrain_ai): trained on
+            # [avg_acc, var_acc, avg_elo, engine_flag] -> success.
+            # Score both engines and route to the higher predicted success.
+            if n_features == 4 and hasattr(self.clf, 'predict_proba'):
+                flat_p = self.clf.predict_proba([[avg_acc, var_acc, avg_elo, 0.0]])[0][1]
+                hier_p = self.clf.predict_proba([[avg_acc, var_acc, avg_elo, 1.0]])[0][1]
+                return "hierarchical" if hier_p >= flat_p else "flat"
+
+            # Legacy models predicted the engine label directly (3 plain
+            # features, or 771 with a subject embedding appended).
             features = [avg_acc, var_acc, avg_elo]
-            if self.clf.n_features_in_ > 3:
+            if n_features > 4:
                 if subject:
                     from .ai_services import get_gemini_embedding
                     emb = get_gemini_embedding(subject)

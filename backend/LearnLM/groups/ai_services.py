@@ -338,6 +338,60 @@ def get_gemini_embedding(text: str) -> list:
         return [0.0] * 768
 
 
+def generate_full_question(title):
+    """
+    Generates the complete content package for a placeholder question:
+    problem statement, Python starter code, and hidden test cases.
+
+    Used by the reseed_questions management command, which performs its own
+    strict validation (_validate_ai_payload) on the returned dict — this
+    function only guarantees shape: a dict with content / starter_code /
+    hidden_test_cases keys, or None on any failure. Never returns filler
+    data (same policy as generate_test_cases).
+    """
+    logger.info("Generating full question content via LLM for: %s", title)
+
+    prompt = f"""
+    You are an expert competitive programming problem setter.
+    Write the complete package for the classic coding problem titled: "{title}".
+
+    You MUST respond with ONLY a raw, valid JSON object. No markdown, no backticks, no commentary.
+    Exact format:
+    {{
+      "content": "<p>Full problem statement in simple HTML: description, input/output format, constraints.</p>",
+      "starter_code": "class Solution:\\n    def methodName(self, param1):\\n        # Write your code here\\n        pass",
+      "hidden_test_cases": [
+        {{"stdin": "2 7 11 15\\n9", "expected_output": "0 1", "explanation": "nums[0] + nums[1] == 9"}},
+        {{"stdin": "...", "expected_output": "...", "explanation": "..."}}
+      ]
+    }}
+
+    Rules:
+    - Provide at least 4 diverse hidden_test_cases, including edge cases, each with different stdin.
+    - stdin holds the raw input lines the program reads (newline-separated values).
+    - expected_output is the exact stdout string the correct solution prints.
+    - starter_code must be a Python class Solution with one public method and no solution logic.
+    """
+
+    try:
+        if not groq_client:
+            raise Exception("Groq API key missing")
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        clean_text = response.choices[0].message.content.replace('```json', '').replace('```', '').strip()
+        data = json.loads(clean_text)
+        if not isinstance(data, dict):
+            logger.error("LLM returned non-object question payload for %r", title)
+            return None
+        return data
+    except Exception as e:
+        logger.error("Full question generation failed for %r: %s", title, e)
+        return None
+
+
 def _valid_test_cases(cases) -> bool:
     """A usable LLM response is a non-empty list of {stdin, expected_output} dicts."""
     return (

@@ -23,7 +23,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ── Single clean import block — no duplicates ────────────────
 from .ai_services import AIService, VectorSearchService, RAGService
-from .hybrid_router import route_recommendation, HierarchicalEngine
+from .hybrid_router import route_recommendation, HierarchicalEngine, get_mastered_topic_names
 from .utils import extract_text_from_file, load_image_for_ai
 from .models import (
     StudyGroup, StudyMaterial, QuizResult, UserActivity,
@@ -437,12 +437,10 @@ class HybridRouterView(APIView):
         
         subject = clean['subject']
         
-        from .models import UserTopicMastery, UserCodingProfile
-        mastered = list(UserTopicMastery.objects.filter(
-            user=request.user, 
-            accuracy__gte=0.8
-        ).values_list('topic__name', flat=True))
-        
+        from .models import UserCodingProfile
+        # SRS FR-HRCH-01: shared mastery definition (accuracy >= 0.8).
+        mastered = get_mastered_topic_names(request.user)
+
         profile, _ = UserCodingProfile.objects.get_or_create(user=request.user)
 
         user_data = {
@@ -467,12 +465,10 @@ class MasteryMapView(APIView):
 
     def get(self, request):
         from django.core.exceptions import ValidationError
-        from .models import UserTopicMastery
 
         subject  = request.query_params.get('subject', 'DSA')
-        mastered = list(UserTopicMastery.objects.filter(
-            user=request.user, accuracy__gte=0.8
-        ).values_list('topic__name', flat=True))
+        # SRS FR-HRCH-01: shared mastery definition (accuracy >= 0.8).
+        mastered = get_mastered_topic_names(request.user)
         try:
             mastery_map = HierarchicalEngine.get_mastery_map(subject, mastered)
         except ValidationError:

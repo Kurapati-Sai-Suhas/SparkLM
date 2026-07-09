@@ -53,6 +53,104 @@ class HybridRouterHeuristicTests(TestCase):
         self.assertEqual(route, 'hierarchical')
 
 
+class RoutingTelemetryTests(TestCase):
+    """
+    SRS FR-RTR-01: the Traffic Cop must route on the mean and variance of
+    correctness over the user's last 20 submissions — not placeholders.
+    """
+
+    def setUp(self):
+        from .models import CodingPortal
+        self.user = User.objects.create_user(
+            username='telemetryuser', password='testpassword123', email='tel@test.com'
+        )
+        portal = CodingPortal.objects.create(name="Telemetry Portal")
+        topic = Topic.objects.create(name="TelemetryArrays", structure_type="flat", portal=portal)
+        self.question = Question.objects.create(
+            topic=topic, title="Telemetry Q", content="c", base_difficulty=1200.0
+        )
+
+    def _submit(self, sub_status):
+        from .models import CodeSubmission
+        CodeSubmission.objects.create(
+            user=self.user, question=self.question,
+            language='python', code='x', status=sub_status,
+        )
+
+    def test_cold_start_routes_hierarchical(self):
+        from .hybrid_router import compute_routing_telemetry
+        avg_acc, var_acc, n = compute_routing_telemetry(self.user)
+        self.assertEqual(n, 0)
+
+        router = RoutingClassifier()
+        router.clf = None
+        self.assertEqual(router.predict_route(avg_acc, var_acc, 0.6), 'hierarchical')
+
+    def test_erratic_history_routes_flat(self):
+        # Alternating pass/fail — maximal variance for binary outcomes (0.25 > 0.20)
+        for i in range(10):
+            self._submit('accepted' if i % 2 == 0 else 'wrong_answer')
+
+        from .hybrid_router import compute_routing_telemetry
+        avg_acc, var_acc, n = compute_routing_telemetry(self.user)
+        self.assertEqual(n, 10)
+        self.assertAlmostEqual(var_acc, 0.25, places=2)
+
+        router = RoutingClassifier()
+        router.clf = None
+        self.assertEqual(router.predict_route(avg_acc, var_acc, 0.6), 'flat')
+
+    def test_consistent_history_routes_hierarchical(self):
+        for _ in range(10):
+            self._submit('accepted')
+
+        from .hybrid_router import compute_routing_telemetry
+        avg_acc, var_acc, n = compute_routing_telemetry(self.user)
+        self.assertEqual(n, 10)
+        self.assertEqual(avg_acc, 1.0)
+        self.assertEqual(var_acc, 0.0)
+
+        router = RoutingClassifier()
+        router.clf = None
+        self.assertEqual(router.predict_route(avg_acc, var_acc, 0.6), 'hierarchical')
+
+    def test_telemetry_only_uses_last_20_submissions(self):
+        # 5 old failures followed by 20 clean accepts: the failures fall
+        # outside the FR-RTR-01 window and must not affect routing.
+        for _ in range(5):
+            self._submit('wrong_answer')
+        for _ in range(20):
+            self._submit('accepted')
+
+        from .hybrid_router import compute_routing_telemetry
+        avg_acc, var_acc, n = compute_routing_telemetry(self.user)
+        self.assertEqual(n, 20)
+        self.assertEqual(avg_acc, 1.0)
+
+
+class MasteryDefinitionTests(TestCase):
+    """SRS FR-HRCH-01: mastery = accuracy >= 0.8, one shared definition."""
+
+    def test_mastered_topics_use_accuracy_threshold(self):
+        from .models import CodingPortal, UserTopicMastery
+        from .hybrid_router import get_mastered_topic_names
+
+        user = User.objects.create_user(
+            username='masteryuser', password='testpassword123', email='m@test.com'
+        )
+        portal = CodingPortal.objects.create(name="Mastery Portal")
+        t_done = Topic.objects.create(name="MasteredTopic", structure_type="hierarchical", portal=portal)
+        t_wip  = Topic.objects.create(name="LearningTopic", structure_type="hierarchical", portal=portal)
+        t_edge = Topic.objects.create(name="EdgeTopic", structure_type="hierarchical", portal=portal)
+
+        UserTopicMastery.objects.create(user=user, topic=t_done, accuracy=0.85)
+        UserTopicMastery.objects.create(user=user, topic=t_wip, accuracy=0.50)
+        UserTopicMastery.objects.create(user=user, topic=t_edge, accuracy=0.80)  # boundary: counts
+
+        mastered = set(get_mastered_topic_names(user))
+        self.assertEqual(mastered, {"MasteredTopic", "EdgeTopic"})
+
+
 class HybridRouterEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()

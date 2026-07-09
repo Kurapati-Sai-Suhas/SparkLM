@@ -26,6 +26,54 @@ from django.utils import timezone
 import os
 
 # ─────────────────────────────────────────────────────────────
+# SHARED PEDAGOGICAL DEFINITIONS
+# ─────────────────────────────────────────────────────────────
+
+# SRS FR-HRCH-01: a topic counts as mastered at >= 80% accuracy. Defined
+# once here so every consumer (NextProblemView, HybridRouterView,
+# MasteryMapView) agrees — they previously used three different rules.
+MASTERY_ACCURACY_THRESHOLD = 0.8
+
+
+def get_mastered_topic_names(user) -> list:
+    """Names of every topic the user has mastered per FR-HRCH-01."""
+    from groups.models import UserTopicMastery
+    return list(
+        UserTopicMastery.objects.filter(
+            user=user, accuracy__gte=MASTERY_ACCURACY_THRESHOLD
+        ).values_list('topic__name', flat=True)
+    )
+
+
+def compute_routing_telemetry(user, window: int = 20):
+    """
+    SRS FR-RTR-01: mean and variance of correctness over the user's last
+    `window` submissions. Correctness is binary per submission (accepted
+    or not) — per-test-case pass fractions aren't persisted on
+    CodeSubmission, so binary outcomes are the available signal.
+
+    Returns (avg_acc, var_acc, sample_size). Cold start (no submissions)
+    returns consistent-looking defaults so a brand-new user routes to the
+    hierarchical DAG and starts at a foundation topic, rather than being
+    treated as "struggling" and dropped into flat practice.
+    """
+    from groups.models import CodeSubmission
+
+    statuses = list(
+        CodeSubmission.objects.filter(user=user)
+        .order_by('-submitted_at')
+        .values_list('status', flat=True)[:window]
+    )
+    if not statuses:
+        return 0.7, 0.1, 0
+
+    outcomes = [1.0 if s == 'accepted' else 0.0 for s in statuses]
+    avg_acc = float(np.mean(outcomes))
+    var_acc = float(np.var(outcomes))
+    return avg_acc, var_acc, len(outcomes)
+
+
+# ─────────────────────────────────────────────────────────────
 # META CLASSIFIER (TRAFFIC COP)
 # ─────────────────────────────────────────────────────────────
 _classifier_model = None
@@ -260,10 +308,13 @@ def route_recommendation(subject: str, user_data: dict) -> dict:
 
     router = RoutingClassifier()
 
-    # TODO (Phase 1 / FR-RTR-01): replace placeholder stats with real
-    # aggregates over the user's recent submissions.
-    avg_acc = 0.6
-    var_acc = 0.2
+    # FR-RTR-01: real aggregates over the user's recent submissions.
+    user = user_data.get("user")
+    if user is not None and getattr(user, "is_authenticated", False):
+        avg_acc, var_acc, _ = compute_routing_telemetry(user)
+    else:
+        avg_acc, var_acc = 0.7, 0.1  # no user context — cold-start defaults
+
     elo_rating = float(user_data.get("elo_rating", 1200.0))
 
     route_decision = router.predict_route(

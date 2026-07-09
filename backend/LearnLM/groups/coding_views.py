@@ -21,7 +21,10 @@ from .models import CodingPortal
 # Import AI Engines & Services
 from .engines.elo_engine import EloEngine
 from .engines.mirt_engine import MIRTEngine
-from .hybrid_router import GDCPEngine, HierarchicalEngine, IRTEngine
+from .hybrid_router import (
+    GDCPEngine, HierarchicalEngine, IRTEngine,
+    compute_routing_telemetry, get_mastered_topic_names,
+)
 # import torch
 from .engines.agentic_coach import trigger_agentic_coach
 from .ai_services import generate_test_cases
@@ -434,19 +437,27 @@ public class Main {
                 recent_log.actual_result_correct = all_passed
                 recent_log.save()
 
-        # 🚀 AGENTIC COACH TRIGGER (3 Consecutive Failures)
+        # 🚀 AGENTIC COACH TRIGGER (3+ consecutive failures, escalating tiers)
         agentic_hint = None
         if not all_passed:
-            recent_subs = CodeSubmission.objects.filter(user=request.user, question=question).order_by('-submitted_at')[1:3]
-            failed_count = 1
-            for sub in recent_subs:
-                if sub.status != 'accepted':
+            # Count consecutive failures on this question, newest first,
+            # stopping at the last accepted submission. The current failed
+            # submission is already persisted, so it's included in the scan.
+            # Scanning 15 back keeps the 5-fail (pseudocode) and 7-fail
+            # (worked example) escalation tiers reachable — the old [1:3]
+            # slice capped the count at 3, so those tiers could never fire.
+            recent_statuses = CodeSubmission.objects.filter(
+                user=request.user, question=question
+            ).order_by('-submitted_at').values_list('status', flat=True)[:15]
+
+            failed_count = 0
+            for sub_status in recent_statuses:
+                if sub_status != 'accepted':
                     failed_count += 1
                 else:
                     break
-            
-            if failed_count >= 3:
 
+            if failed_count >= 3:
                 agentic_hint = trigger_agentic_coach(
                     user=request.user,
                     problem_id=problem_id,
@@ -488,13 +499,24 @@ public class Main {
             topic=question.topic
         )
         
-        # Calculate SM-2 Quality
-        recent_fails = CodeSubmission.objects.filter(
-            user=request.user, question=question, status__in=['wrong_answer', 'compile_error', 'runtime_error', 'time_limit']
-        ).count()
-        
+        # Calculate SM-2 Quality from the failures immediately preceding
+        # this attempt (consecutive, newest first). The old version counted
+        # lifetime failures for the question, which permanently capped
+        # quality at 3 after two historic fails, no matter how cleanly the
+        # user solves it on later reviews.
         quality = 0
         if all_passed:
+            prior_statuses = CodeSubmission.objects.filter(
+                user=request.user, question=question
+            ).exclude(pk=submission.pk).order_by('-submitted_at').values_list('status', flat=True)[:10]
+
+            recent_fails = 0
+            for sub_status in prior_statuses:
+                if sub_status != 'accepted':
+                    recent_fails += 1
+                else:
+                    break
+
             if recent_fails == 0: quality = 5
             elif recent_fails == 1: quality = 4
             else: quality = 3
@@ -617,19 +639,23 @@ class NextProblemView(APIView):
 
         # 🚥 ML-BASED TRAFFIC COP
         router = RoutingClassifier()
-        # TODO (Phase 1 / FR-RTR-01): replace these placeholder stats with real
-        # aggregates (mean + variance of accuracy over the user's last 20
-        # submissions). With the placeholders, every user routes 'hierarchical'.
-        route_decision = router.predict_route(avg_acc=0.6, var_acc=0.2, avg_elo=target_elo/2000.0)
+        # FR-RTR-01: mean + variance of correctness over the last 20 submissions.
+        avg_acc, var_acc, sample_size = compute_routing_telemetry(request.user)
+        route_decision = router.predict_route(avg_acc, var_acc, target_elo / 2000.0)
+        logger.info(
+            "[Traffic Cop] user=%s route=%s (avg_acc=%.2f var_acc=%.3f n=%d elo=%.0f)",
+            request.user.id, route_decision, avg_acc, var_acc, sample_size, target_elo,
+        )
 
         # ROUTE 1: HIERARCHICAL (DAG PREREQUISITE TRAVERSAL)
         if route_decision == 'hierarchical' and topic:
             logger.info("[Traffic Cop] Routing to Hierarchical DAG engine for %s", topic.name)
 
-            # Get user's mastered topics
-            mastered_topics = list(UserTopicMastery.objects.filter(
-                user=request.user, elo_rating__gte=1300
-            ).values_list('topic__name', flat=True))
+            # SRS FR-HRCH-01: mastery = accuracy >= 0.8, shared definition.
+            # (The old per-topic elo_rating >= 1300 check could never be
+            # satisfied — per-topic Elo is not updated anywhere — so the
+            # DAG recommended the root topic forever.)
+            mastered_topics = get_mastered_topic_names(request.user)
 
             portal_name = topic.portal.name if topic.portal else "dsa"
             optimal_node = HierarchicalEngine.get_next_topic(portal_name, mastered_topics)

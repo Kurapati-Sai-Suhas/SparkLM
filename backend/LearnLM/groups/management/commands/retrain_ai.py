@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from groups.models import RecommendationLog, UserTopicMastery, UserCodingProfile
 from groups.engines.gnn_engine import train_and_save_gcn
-from groups.hybrid_router import DSA_GRAPH, OS_GRAPH, CN_GRAPH, SequentialKnowledgeTracer
+from groups.hybrid_router import DSA_GRAPH, OS_GRAPH, CN_GRAPH
 from sklearn.linear_model import LogisticRegression
 import torch.nn as nn
 import torch.optim as optim
@@ -97,24 +97,8 @@ class Command(BaseCommand):
                 lstm_labels.append([seq[i+5][1]]) # The label is the correctness of the NEXT question
                 
         if len(lstm_data) > 0:
-            lstm = SequentialKnowledgeTracer(input_dim=3, hidden_dim=16, num_layers=1)
             criterion = nn.BCELoss()
-            optimizer = optim.Adam(lstm.parameters(), lr=0.01)
-            
-            X_tensor = torch.tensor(lstm_data, dtype=torch.float32)
-            y_tensor = torch.tensor(lstm_labels, dtype=torch.float32)
-            
-            lstm.train()
-            for epoch in range(10): # Quick fine-tuning
-                optimizer.zero_grad()
-                outputs = lstm(X_tensor)
-                loss = criterion(outputs, y_tensor)
-                loss.backward()
-                optimizer.step()
-                
-            torch.save(lstm.state_dict(), "models_data/dkt_lstm.pth")
-            self.stdout.write(self.style.SUCCESS("[OK] DKT LSTM Model saved!"))
-        else:
-            self.stdout.write(self.style.WARNING("[WARN] Not enough sequence data to train LSTM. Skipping."))
-
-        self.stdout.write(self.style.SUCCESS("[DONE] MLOps Pipeline Complete!"))
+        
+        # NOTE: DKT LSTM retraining was removed as the experimental model was trimmed for production.
+        
+        self.stdout.write(self.style.SUCCESS('✅ AI Models Retrained and Saved to Disk Successfully!'))

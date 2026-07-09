@@ -91,3 +91,41 @@ class ConnectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Connection
         fields = ['id', 'sender', 'receiver', 'status', 'created_at']
+
+# 👇 NEW: API Validation Serializers for AI and Coding
+from .models import Question
+
+ALLOWED_LANGUAGES = {'python', 'java', 'cpp', 'javascript'}
+
+class CodeSubmitSerializer(serializers.Serializer):
+    problem_id = serializers.IntegerField()
+    code = serializers.CharField()
+    language = serializers.CharField()
+    test_cases = serializers.ListField(
+        child=serializers.DictField(), 
+        required=False,
+        default=list
+    )
+
+    def validate_problem_id(self, value):
+        if not Question.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Unknown problem_id")
+        return value
+
+    def validate_language(self, value):
+        lang = value.lower()
+        if lang not in ALLOWED_LANGUAGES:
+            raise serializers.ValidationError(f"Unsupported language: {value}")
+        return lang
+
+
+class HybridRouterSerializer(serializers.Serializer):
+    subject = serializers.CharField()
+    mastered_topics = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list
+    )
+    elo_rating = serializers.FloatField(required=False, default=1200.0)
+    question_difficulty = serializers.FloatField(required=False, allow_null=True)
+    got_correct = serializers.BooleanField(required=False, allow_null=True)

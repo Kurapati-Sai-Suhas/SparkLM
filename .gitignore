@@ -27,6 +27,12 @@ env1/
 venv/
 .venv/
 
+# --- ML MODEL ARTIFACTS ---
+models_data/
+*.pkl
+*.pth
+*.onnx
+
 # --- SYSTEM & EDITOR FILES ---
 .DS_Store
 .vscode/

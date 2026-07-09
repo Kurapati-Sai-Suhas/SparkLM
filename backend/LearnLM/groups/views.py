@@ -31,7 +31,8 @@ from .models import (
 )
 from .serializers import (
     ConnectionSerializer, QuizResultSerializer, StudyGroupSerializer,
-    UserBasicSerializer, UserSerializer, StudyMaterialSerializer, AssignedQuizSerializer
+    UserBasicSerializer, UserSerializer, StudyMaterialSerializer, AssignedQuizSerializer,
+    HybridRouterSerializer
 )
 
 User = get_user_model()
@@ -430,15 +431,26 @@ class HybridRouterView(APIView):
     throttle_classes = [UserRateThrottle, AnonRateThrottle]
 
     def post(self, request):
-        subject = request.data.get('subject', '').strip()
-        if not subject:
-            return Response({"error": "subject is required"}, status=400)
+        serializer = HybridRouterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        clean = serializer.validated_data
+        
+        subject = clean['subject']
+        
+        from .models import UserTopicMastery, UserCodingProfile
+        mastered = list(UserTopicMastery.objects.filter(
+            user=request.user, 
+            accuracy__gte=0.8
+        ).values_list('topic__name', flat=True))
+        
+        profile, _ = UserCodingProfile.objects.get_or_create(user=request.user)
 
         user_data = {
-            "mastered_topics":     request.data.get('mastered_topics', []),
-            "elo_rating":          request.data.get('elo_rating', 1200.0),
-            "question_difficulty": request.data.get('question_difficulty'),
-            "got_correct":         request.data.get('got_correct'),
+            "mastered_topics":     mastered,
+            "elo_rating":          profile.elo_rating,
+            "question_difficulty": clean.get('question_difficulty'),
+            "got_correct":         clean.get('got_correct'),
+            "user":                request.user,
         }
         return Response(route_recommendation(subject, user_data))
 

@@ -18,7 +18,7 @@ class MLOpsTelemetryView(APIView):
             data.append({
                 "id": log.id,
                 "user": log.user.username,
-                "topic": log.recommended_topic,
+                "topic": log.recommended_topic.name,
                 "engine": log.engine_used,
                 "predicted_prob": log.predicted_success_prob,
                 "actual_result": log.actual_result_correct,

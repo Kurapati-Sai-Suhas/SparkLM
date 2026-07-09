@@ -4,6 +4,12 @@ from datetime import timedelta, timezone
 from django.conf import settings
 from django.utils import timezone
 from pgvector.django import VectorField
+import networkx as nx
+from django.core.exceptions import ValidationError
+
+
+def default_deadline():
+    return timezone.now() + timedelta(days=7)
 
 
 class User(AbstractUser):
@@ -24,8 +30,8 @@ class User(AbstractUser):
 class StudyGroup(models.Model):
     name = models.CharField(max_length=100)
     description = models.TextField()
-    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_groups')
-    members = models.ManyToManyField(User, related_name='joined_groups', blank=True)
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='created_groups')
+    members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='joined_groups', blank=True)
     join_code = models.CharField(max_length=10, unique=True)
     capacity = models.IntegerField(default=50)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -48,7 +54,7 @@ class Subject(models.Model):
 class StudyMaterial(models.Model):
     title = models.CharField(max_length=200)
     file = models.FileField(upload_to='study_materials/')
-    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     study_group = models.ForeignKey(StudyGroup, on_delete=models.CASCADE, related_name='files')
     upload_date = models.DateTimeField(auto_now_add=True)
 
@@ -57,7 +63,7 @@ class StudyMaterial(models.Model):
 
 
 class UserActivityLog(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     activity_type = models.CharField(max_length=100)
     timestamp = models.DateTimeField(default=timezone.now)
     last_updated = models.DateTimeField(auto_now=True)
@@ -98,14 +104,14 @@ class AssignedQuiz(models.Model):
     quiz_data = models.JSONField()
     assigned_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     assigned_at = models.DateTimeField(auto_now_add=True)
-    deadline = models.DateTimeField(default=timedelta(days=7))
+    deadline = models.DateTimeField(default=default_deadline)
 
     def __str__(self):
         return f"{self.study_group.name} - {self.topic}"
 
 
 class DoubtChatHistory(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     material = models.ForeignKey(StudyMaterial, on_delete=models.CASCADE)
     question = models.TextField()
     answer = models.TextField()
@@ -121,8 +127,8 @@ class Connection(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
     )
-    sender = models.ForeignKey(User, related_name='sent_requests', on_delete=models.CASCADE)
-    receiver = models.ForeignKey(User, related_name='received_requests', on_delete=models.CASCADE)
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='sent_requests', on_delete=models.CASCADE)
+    receiver = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='received_requests', on_delete=models.CASCADE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -134,8 +140,8 @@ class Connection(models.Model):
 
 
 class DirectMessage(models.Model):
-    sender = models.ForeignKey(User, related_name='sent_messages', on_delete=models.CASCADE)
-    receiver = models.ForeignKey(User, related_name='received_messages', on_delete=models.CASCADE)
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='sent_messages', on_delete=models.CASCADE)
+    receiver = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='received_messages', on_delete=models.CASCADE)
     content = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
@@ -155,7 +161,7 @@ class Document(models.Model):
         ("other", "Other"),
     ]
     group = models.ForeignKey(StudyGroup, on_delete=models.CASCADE, related_name="documents")
-    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="documents")
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="documents")
     title = models.CharField(max_length=300)
     file_url = models.URLField(max_length=500, blank=True)
     file = models.FileField(upload_to="documents/", blank=True, null=True)
@@ -209,6 +215,33 @@ class Topic(models.Model):
         return f"[{portal_name}] {self.name}"
 
 
+
+class TopicPrerequisite(models.Model):
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='prerequisites')
+    prerequisite = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='unlocks')
+    
+    class Meta:
+        unique_together = ('topic', 'prerequisite')
+
+    def clean(self):
+        if self.topic_id == self.prerequisite_id:
+            raise ValidationError("A topic cannot be its own prerequisite.")
+            
+        graph = nx.DiGraph(
+            list(TopicPrerequisite.objects.exclude(pk=self.pk).values_list('prerequisite_id', 'topic_id'))
+        )
+        graph.add_edge(self.prerequisite_id, self.topic_id)
+        if not nx.is_directed_acyclic_graph(graph):
+            raise ValidationError("This prerequisite would create a cycle in the curriculum graph.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.prerequisite.name} -> {self.topic.name}"
+
+
 class Question(models.Model):
     topic = models.ForeignKey(Topic, on_delete=models.CASCADE)
     title = models.CharField(max_length=255)
@@ -223,7 +256,7 @@ class Question(models.Model):
 
 
 class UserCodingProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="coding_profile")
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coding_profile")
     elo_rating = models.FloatField(default=1200.0)
     irt_latent_logic = models.FloatField(default=0.0) # Theta value for logic
     irt_latent_syntax = models.FloatField(default=0.0) # Theta value for syntax
@@ -252,8 +285,8 @@ class CodeSubmission(models.Model):
         ("runtime_error", "Runtime Error"),
         ("compile_error", "Compile Error"),
     ]
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="submissions")
-    problem_id = models.CharField(max_length=100)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="submissions")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="submissions", null=True, blank=True)
     language = models.CharField(max_length=20)
     code = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
@@ -267,21 +300,12 @@ class CodeSubmission(models.Model):
 
 # ── AI Analytics ──────────────────────────────────────────────
 
-class UserProgress(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    topic = models.ForeignKey(Topic, on_delete=models.CASCADE)
-    elo_rating = models.FloatField(default=1200.0)
-    gnn_embedding = models.JSONField(null=True, blank=True)
-    last_practiced = models.DateTimeField(default=timezone.now) 
-    
-    
 class UserTopicMastery(models.Model):
     """
     Tracks a user's specific performance on individual topics to feed the PyTorch Tensor.
     """
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='topic_mastery')
-    subject = models.CharField(max_length=100, default="Data Structures")
-    topic = models.CharField(max_length=100)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='topic_mastery')
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE)
     
     accuracy = models.FloatField(default=0.0)  
     reviews = models.IntegerField(default=0)
@@ -294,30 +318,30 @@ class UserTopicMastery(models.Model):
     last_practiced = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        unique_together = ('user', 'subject', 'topic')
+        unique_together = ('user', 'topic')
 
     def __str__(self):
         return f"{self.user.username} - {self.topic} ({self.elo_rating})"
 
 
 class AgenticCoachLog(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='coach_logs')
-    problem_id = models.CharField(max_length=100)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='coach_logs')
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="coach_logs_on_question", null=True, blank=True)
     failed_attempts_count = models.IntegerField(default=3)
     generated_hint = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     webhook_fired = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"Hint for {self.user.username} on problem {self.problem_id}"
+        return f"Hint for {self.user.username} on problem {self.question.id if self.question else 'Unknown'}"
 
 
 class RecommendationLog(models.Model):
     """
     Phase 1 Production Flywheel: Captures real AI recommendations and user outcomes.
     """
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='recommendation_logs')
-    recommended_topic = models.CharField(max_length=100)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='recommendation_logs')
+    recommended_topic = models.ForeignKey(Topic, on_delete=models.CASCADE)
     engine_used = models.CharField(max_length=50) # 'hierarchical' or 'flat'
     predicted_success_prob = models.FloatField(null=True, blank=True)
     problem_id = models.CharField(max_length=100, null=True, blank=True) # The specific problem recommended
@@ -332,7 +356,7 @@ class RecommendationLog(models.Model):
 
 class GroupMessage(models.Model):
     group = models.ForeignKey(StudyGroup, on_delete=models.CASCADE, related_name='messages')
-    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_messages')
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='group_messages')
     content = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
 
@@ -343,12 +367,11 @@ class GroupMessage(models.Model):
         return f"[{self.group.name}] {self.sender.username}: {self.content[:40]}"
     
 class Profile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
     skills = models.CharField(max_length=255, blank=True, null=True)
     achievements = models.TextField(blank=True, null=True)
     major = models.CharField(max_length=100, blank=True, null=True)
     graduation_year = models.IntegerField(blank=True, null=True)
-    bio = models.TextField(blank=True, null=True)
     email_alerts = models.BooleanField(default=True)
 
     def __str__(self):
@@ -395,7 +418,7 @@ class Badge(models.Model):
 
 
 class UserBadge(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='earned_badges')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='earned_badges')
     badge = models.ForeignKey(Badge, on_delete=models.CASCADE)
     awarded_at = models.DateTimeField(auto_now_add=True)
 

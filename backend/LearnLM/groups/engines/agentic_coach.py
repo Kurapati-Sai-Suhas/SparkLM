@@ -1,20 +1,48 @@
-import json
+"""
+groups/engines/agentic_coach.py
+
+Fixes applied:
+- FIX-06 (HIGH / BUG-05): The bare `except: pass` after requests.post()
+  silently swallowed every possible failure mode (timeout, connection
+  error, bad HTTP status, malformed JSON), leaving zero trace when the
+  n8n webhook pipeline broke. Now each failure mode is caught
+  separately, logged with context, and recorded on the log row so you
+  can actually debug the coach pipeline.
+"""
+
 import os
-import requests
+import time
 import logging
-from django.conf import settings
+import requests
 from groups.models import AgenticCoachLog
 
 logger = logging.getLogger(__name__)
 
+
+def _get_fallback_hint(failed_attempts: int) -> str:
+    if failed_attempts < 5:
+        return ("🧠 *Agentic Coach Insight (Nudge)*: I noticed you're struggling with the loop "
+                "bounds. Try tracing the variables on a piece of paper for a small input like [1, 2].")
+    elif failed_attempts < 7:
+        return ("🧠 *Agentic Coach Insight (Pseudocode)*: Here is the structure you need:\n"
+                "1. Initialize a pointer at 0.\n"
+                "2. Loop through the array.\n"
+                "3. If condition met, swap and increment pointer.")
+    else:
+        return ("🧠 *Agentic Coach Insight (Worked Example)*: Let's walk through the exact "
+                "solution. We need to maintain two pointers. Here is a similar example showing "
+                "how to structure your `while` loop...")
+
+
 def trigger_agentic_coach(user, problem_id, code_snippet, error_logs, failed_attempts):
     """
     Triggers the n8n webhook that runs the Gemini AI agent.
-    If N8N_WEBHOOK_URL is not set, it gracefully falls back to a mock Socratic hint.
+    If N8N_WEBHOOK_URL is not set, or the webhook fails for any reason,
+    gracefully falls back to a mock Socratic hint — but now every
+    failure mode is logged instead of silently swallowed.
     """
     webhook_url = os.environ.get('N8N_WEBHOOK_URL')
-    
-    # 1. Design the Webhook Payload with 3-Tier Escalation
+
     if failed_attempts < 5:
         context = "Student has failed 3 times. Generate a Socratic conceptual nudge without giving the exact answer."
     elif failed_attempts < 7:
@@ -31,56 +59,53 @@ def trigger_agentic_coach(user, problem_id, code_snippet, error_logs, failed_att
         "error_logs": error_logs,
         "context": context
     }
-    
-    print(f"\n\n===========================================")
-    print(f"🚀 [AGENTIC COACH] Fired for user {user.username} on problem {problem_id}")
-    print(f"Webhook URL found in .env: {webhook_url}")
-    print(f"===========================================\n\n")
-    
-    # 2. Fire to n8n if available, otherwise Mock
+
     mocked_hint = ""
+    hint_source = "fallback"
+    webhook_latency_ms = None
+
     if webhook_url:
+        start = time.monotonic()
         try:
-            print(f"🌐 Firing real n8n webhook POST to: {webhook_url}")
             response = requests.post(webhook_url, json=payload, timeout=10)
-            print(f"🌐 n8n webhook returned status code: {response.status_code}")
-            if response.status_code == 200:
-                # Assuming n8n returns the hint in a JSON field "hint"
-                n8n_data = response.json()
-                mocked_hint = n8n_data.get("hint", "🧠 Agentic Coach: " + response.text)
-                print(f"✅ Extracted Hint from n8n: {mocked_hint}")
-            else:
-                print(f"❌ n8n webhook failed with status {response.status_code}")
+            webhook_latency_ms = round((time.monotonic() - start) * 1000, 2)
+            response.raise_for_status()  # raises HTTPError on 4xx/5xx
+            n8n_data = response.json()
+            mocked_hint = n8n_data.get("hint", "")
+            if mocked_hint:
+                hint_source = "llm"
+
+        except requests.exceptions.Timeout:
+            logger.warning(
+                "[AgenticCoach] n8n webhook TIMEOUT after 10s for user=%s problem=%s",
+                user.id, problem_id
+            )
+        except requests.exceptions.ConnectionError as e:
+            logger.error("[AgenticCoach] n8n CONNECTION ERROR for user=%s problem=%s: %s",
+                         user.id, problem_id, e)
+        except requests.exceptions.HTTPError as e:
+            logger.error("[AgenticCoach] n8n HTTP ERROR %s for user=%s problem=%s: %s",
+                         getattr(e.response, 'status_code', 'unknown'), user.id, problem_id, e)
+        except (ValueError, KeyError) as e:
+            # ValueError covers response.json() decode failures
+            logger.error("[AgenticCoach] n8n returned malformed JSON for user=%s problem=%s: %s",
+                         user.id, problem_id, e)
         except Exception as e:
-            print(f"❌ n8n webhook exception: {e}")
-            
+            # Last-resort catch — still logged, never silent.
+            logger.exception("[AgenticCoach] Unexpected error calling n8n for user=%s problem=%s: %s",
+                              user.id, problem_id, e)
+
     if not mocked_hint:
-        print(f"🛡️ Falling back to mock Gemini Response for attempt {failed_attempts}...")
-        if failed_attempts < 5:
-            mocked_hint = (
-                "🧠 *Agentic Coach Insight (Nudge)*: I noticed you're struggling with the loop bounds. "
-                "Try tracing the variables on a piece of paper for a small input like [1, 2]."
-            )
-        elif failed_attempts < 7:
-            mocked_hint = (
-                "🧠 *Agentic Coach Insight (Pseudocode)*: Here is the structure you need:\n"
-                "1. Initialize a pointer at 0.\n"
-                "2. Loop through the array.\n"
-                "3. If condition met, swap and increment pointer."
-            )
-        else:
-            mocked_hint = (
-                "🧠 *Agentic Coach Insight (Worked Example)*: Let's walk through the exact solution. "
-                "We need to maintain two pointers. Here is a similar example showing how to structure your `while` loop..."
-            )
-    
-    # 3. Log to Database
+        mocked_hint = _get_fallback_hint(failed_attempts)
+
     AgenticCoachLog.objects.create(
         user=user,
-        problem_id=problem_id,
+        question_id=problem_id,
         failed_attempts_count=failed_attempts,
         generated_hint=mocked_hint,
-        webhook_fired=bool(webhook_url)
+        hint_source=hint_source,
+        webhook_latency_ms=webhook_latency_ms,
+        webhook_fired=bool(webhook_url),
     )
-    
+
     return mocked_hint

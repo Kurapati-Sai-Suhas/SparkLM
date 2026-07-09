@@ -156,6 +156,9 @@ class GDCPEngine:
 class HierarchicalEngine:
     # FIX-04: cache timeout for the NetworkX DAG
     CACHE_TIMEOUT = 60 * 30  # 30 minutes
+    # Registry of every dag_graph_* key we've set, so invalidation works
+    # on any cache backend (LocMemCache has no delete_pattern).
+    CACHE_KEYS_REGISTRY = 'dag_graph_keys'
 
     @staticmethod
     def _get_graph(subject: str) -> nx.DiGraph:
@@ -187,6 +190,14 @@ class HierarchicalEngine:
             graph.add_edge(p.prerequisite.name, p.topic.name)
 
         cache.set(cache_key, graph, HierarchicalEngine.CACHE_TIMEOUT)
+
+        # Track the key so invalidate_dag_cache can clear it later even on
+        # backends without pattern deletes.
+        known_keys = cache.get(HierarchicalEngine.CACHE_KEYS_REGISTRY) or set()
+        if cache_key not in known_keys:
+            known_keys.add(cache_key)
+            cache.set(HierarchicalEngine.CACHE_KEYS_REGISTRY, known_keys, None)
+
         return graph
 
     @classmethod
@@ -353,19 +364,30 @@ def route_recommendation(subject: str, user_data: dict) -> dict:
 
 def invalidate_dag_cache(subject: str = None):
     """
-    FIX-04 helper: call this from TopicPrerequisite.save()/delete() to bust
-    the cache when curriculum edges change. If your cache backend is
-    django-redis, cache.delete_pattern('dag_graph_*') works directly.
-    If you're on Django's default LocMemCache, delete_pattern is NOT
-    available and will raise AttributeError — in that case, either:
-      (a) switch CACHES to django_redis.cache.RedisCache, or
-      (b) track known subject keys explicitly and delete them one by one.
+    FIX-04 helper: bust every cached DAG when curriculum edges change.
+    Wired to TopicPrerequisite post_save/post_delete signals in models.py.
+
+    Different callers cache the graph under different subject strings
+    ("DSA Masterclass", "DSA", "Array", ...), so a single-subject delete is
+    never sufficient — we clear all dag_graph_* keys. django-redis supports
+    delete_pattern directly; on other backends we fall back to the key
+    registry maintained by HierarchicalEngine._get_graph.
+
+    Note: with the default per-process LocMemCache this only clears the
+    process that made the change; other workers stay stale until
+    CACHE_TIMEOUT. Use a shared backend (Redis) in production.
     """
     try:
         cache.delete_pattern('dag_graph_*')
+        return
     except AttributeError:
-        # Fallback for non-Redis cache backends: caller should pass the
-        # specific subject so we can at least clear that one key.
-        if subject:
-            cache_key = f'dag_graph_{hashlib.md5(subject.lower().strip().encode()).hexdigest()}'
-            cache.delete(cache_key)
+        pass
+
+    known_keys = cache.get(HierarchicalEngine.CACHE_KEYS_REGISTRY) or set()
+    if known_keys:
+        cache.delete_many(list(known_keys))
+        cache.delete(HierarchicalEngine.CACHE_KEYS_REGISTRY)
+
+    if subject:
+        cache_key = f'dag_graph_{hashlib.md5(subject.lower().strip().encode()).hexdigest()}'
+        cache.delete(cache_key)

@@ -242,6 +242,28 @@ class TopicPrerequisite(models.Model):
         return f"{self.prerequisite.name} -> {self.topic.name}"
 
 
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+
+
+@receiver(post_save, sender=TopicPrerequisite)
+@receiver(post_delete, sender=TopicPrerequisite)
+def _bust_dag_cache_on_edge_change(sender, instance, **kwargs):
+    """
+    Curriculum edges changed — invalidate every cached NetworkX DAG so the
+    HierarchicalEngine doesn't serve a stale graph for up to 30 minutes.
+    Signals (rather than an overridden delete()) also cover queryset
+    deletes like the one in seed_dsa_dag.
+    """
+    from groups.hybrid_router import invalidate_dag_cache
+    try:
+        subject = instance.topic.portal.name if instance.topic.portal else None
+    except Exception:
+        # topic may already be gone in a cascade delete
+        subject = None
+    invalidate_dag_cache(subject)
+
+
 class Question(models.Model):
     topic = models.ForeignKey(Topic, on_delete=models.CASCADE)
     title = models.CharField(max_length=255)

@@ -362,26 +362,22 @@ public class Main {
                 return Response({"error": "Code Execution Service Unavailable", "details": verdict["error"]}, status=503)
 
             expected = tc.get('expected_output', '').strip()
-            
-            # 🚀 AI FIX: Patch AI-hallucinated test cases for Two Sum
-            if "Two Sum" in question.title:
-                if expected == "2 4": expected = "2 3"
-                if expected == "-1 -1": expected = ""
+
             # If stdout is None, fallback to empty string
             raw_actual = verdict.get('stdout')
             if raw_actual is None:
                 raw_actual = ''
             actual = raw_actual.strip()
-            
-            # 🚀 AI FORMATTING FIX: Split by line and trim trailing whitespace to avoid masking actual bugs
+
+            # Normalize line endings / trailing whitespace before comparing
             expected_norm = normalize_output(expected)
             actual_norm = normalize_output(actual)
-            print("INPUT:", repr(tc.get('stdin', '')))
-            print("EXPECTED:", repr(expected_norm))
-            print("ACTUAL:", repr(actual_norm))
-            print("STDERR:", repr(verdict.get('stderr')))
-            print("COMPILE:", repr(verdict.get('compile_output')))
-            
+            logger.debug(
+                "Judge0 case %d q=%s stdin=%r expected=%r actual=%r stderr=%r compile=%r",
+                i + 1, question.pk, tc.get('stdin', ''), expected_norm, actual_norm,
+                verdict.get('stderr'), verdict.get('compile_output'),
+            )
+
             ok       = (actual_norm == expected_norm) and verdict.get('status_id') == 3
 
             if ok:
@@ -391,6 +387,11 @@ public class Main {
                 "test_case":       i + 1,
                 "passed":          ok,
                 "status":          verdict.get('status'),
+                # status_id is required by the final-status detection loop
+                # below — without it every non-pass collapsed to
+                # wrong_answer and TLE/compile/runtime errors were never
+                # reported (or fed to the MIRT/quality engines) correctly.
+                "status_id":       verdict.get('status_id'),
                 "your_output":     actual,
                 "expected_output": expected,
                 "time":            verdict.get('time'),
@@ -716,10 +717,17 @@ class NextProblemView(APIView):
 
         # 🤖 AI TEST CASE GENERATION FALLBACK
         if not question.hidden_test_cases:
-            print(f"🤖 Booting Gemini to generate test cases for: {question.title}...")
             generated_cases = generate_test_cases(question.title, question.content)
-            question.hidden_test_cases = generated_cases
-            question.save()
+            if generated_cases:
+                question.hidden_test_cases = generated_cases
+                question.save(update_fields=['hidden_test_cases'])
+            else:
+                # Never persist a failed generation — serve the problem
+                # without hidden tests and let a later request retry.
+                logger.error(
+                    "Test-case generation failed for question %s (%s); serving without hidden tests",
+                    question.pk, question.title,
+                )
 
         if question.base_difficulty < 1100: diff_text = "Easy"
         elif question.base_difficulty < 1400: diff_text = "Medium"

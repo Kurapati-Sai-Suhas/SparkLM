@@ -151,6 +151,57 @@ class MasteryDefinitionTests(TestCase):
         self.assertEqual(mastered, {"MasteredTopic", "EdgeTopic"})
 
 
+class DagCacheInvalidationTests(TestCase):
+    """
+    Curriculum edits must invalidate the cached NetworkX DAG immediately.
+    Before the signal wiring, a changed TopicPrerequisite served a stale
+    graph for up to 30 minutes (HierarchicalEngine.CACHE_TIMEOUT).
+    """
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_prerequisite_change_invalidates_cached_graph(self):
+        from .models import CodingPortal, TopicPrerequisite
+        from .hybrid_router import HierarchicalEngine
+
+        portal = CodingPortal.objects.create(name="Cache Portal")
+        a = Topic.objects.create(name="CacheTopicA", structure_type="hierarchical", portal=portal)
+        b = Topic.objects.create(name="CacheTopicB", structure_type="hierarchical", portal=portal)
+
+        graph = HierarchicalEngine._get_graph("Cache Portal")
+        self.assertEqual(graph.number_of_edges(), 0)
+
+        edge = TopicPrerequisite.objects.create(topic=b, prerequisite=a)
+
+        graph = HierarchicalEngine._get_graph("Cache Portal")
+        self.assertTrue(graph.has_edge("CacheTopicA", "CacheTopicB"))
+
+        edge.delete()
+
+        graph = HierarchicalEngine._get_graph("Cache Portal")
+        self.assertEqual(graph.number_of_edges(), 0)
+
+    def test_queryset_delete_also_invalidates(self):
+        from .models import CodingPortal, TopicPrerequisite
+        from .hybrid_router import HierarchicalEngine
+
+        portal = CodingPortal.objects.create(name="Cache Portal 2")
+        a = Topic.objects.create(name="CacheTopicC", structure_type="hierarchical", portal=portal)
+        b = Topic.objects.create(name="CacheTopicD", structure_type="hierarchical", portal=portal)
+        TopicPrerequisite.objects.create(topic=b, prerequisite=a)
+
+        graph = HierarchicalEngine._get_graph("Cache Portal 2")
+        self.assertEqual(graph.number_of_edges(), 1)
+
+        # seed_dsa_dag uses queryset deletes — post_delete must still fire
+        TopicPrerequisite.objects.filter(topic=b).delete()
+
+        graph = HierarchicalEngine._get_graph("Cache Portal 2")
+        self.assertEqual(graph.number_of_edges(), 0)
+
+
 class HybridRouterEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()

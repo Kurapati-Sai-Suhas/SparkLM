@@ -1,5 +1,6 @@
 import json
 import io
+import logging
 import PyPDF2
 import numpy as np
 from django.conf import settings
@@ -8,6 +9,8 @@ import google.generativeai as genai
 from groq import Groq
 from transformers import CLIPProcessor, CLIPModel
 import torch
+
+logger = logging.getLogger(__name__)
 
 # Configure the SDKs
 genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -335,20 +338,38 @@ def get_gemini_embedding(text: str) -> list:
         return [0.0] * 768
 
 
-# --- NEW: Standalone AI Test Case Generator for Coding Portal ---
+def _valid_test_cases(cases) -> bool:
+    """A usable LLM response is a non-empty list of {stdin, expected_output} dicts."""
+    return (
+        isinstance(cases, list)
+        and len(cases) > 0
+        and all(
+            isinstance(c, dict) and 'stdin' in c and 'expected_output' in c
+            for c in cases
+        )
+    )
+
+
+# --- Standalone AI Test Case Generator for Coding Portal ---
 def generate_test_cases(title, description):
     """
-    Forces Gemini to read a problem and generate valid JSON test cases.
+    Asks the LLM to generate JSON test cases for a problem.
+
+    Returns a validated list of {stdin, expected_output} dicts, or None on
+    any failure. Callers must NOT persist anything when this returns None —
+    the old fallback ([{"stdin": "1", "expected_output": "1"}]) used to get
+    saved permanently to Question.hidden_test_cases, after which any code
+    that printed "1" was graded as accepted.
     """
-    print(f"🤖 Booting up Gemini to generate test cases for: {title}...")
-    
+    logger.info("Generating test cases via LLM for: %s", title)
+
     prompt = f"""
-    You are an expert competitive programming backend judge. 
+    You are an expert competitive programming backend judge.
     Read the following coding problem and generate 4 diverse test cases (including edge cases).
-    
+
     Problem Title: {title}
     Description: {description}
-    
+
     You MUST respond with ONLY a raw, valid JSON array. Do not include markdown formatting, backticks, or introductory text.
     Format exact example:
     [
@@ -356,7 +377,7 @@ def generate_test_cases(title, description):
         {{"stdin": "2 7\\n9", "expected_output": "0 1"}}
     ]
     """
-    
+
     try:
         if not groq_client:
             raise Exception("Groq API key missing")
@@ -364,12 +385,15 @@ def generate_test_cases(title, description):
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}]
         )
-        
+
         # Clean up any potential markdown backticks
         clean_text = response.choices[0].message.content.replace('```json', '').replace('```', '').strip()
-        
-        return json.loads(clean_text)
+
+        cases = json.loads(clean_text)
+        if not _valid_test_cases(cases):
+            logger.error("LLM returned malformed test cases for %r: %r", title, cases)
+            return None
+        return cases
     except Exception as e:
-        print(f"❌ AI Test Case Generation Failed: {e}")
-        # Fallback safety array so the app doesn't crash
-        return [{"stdin": "1", "expected_output": "1"}]
+        logger.error("AI test case generation failed for %r: %s", title, e)
+        return None

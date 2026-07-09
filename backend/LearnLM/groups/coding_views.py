@@ -4,6 +4,7 @@ import requests
 import logging
 from django.db import transaction
 from django.db.models import F, Func
+from django.utils import timezone
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -20,7 +21,7 @@ from .models import CodingPortal
 # Import AI Engines & Services
 from .engines.elo_engine import EloEngine
 from .engines.mirt_engine import MIRTEngine
-from .hybrid_router import GDCPEngine, HierarchicalEngine
+from .hybrid_router import GDCPEngine, HierarchicalEngine, IRTEngine
 # import torch
 from .engines.agentic_coach import trigger_agentic_coach
 from .ai_services import generate_test_cases
@@ -508,6 +509,10 @@ public class Main {
         mastery.reviews += 1
         mastery.save()
 
+        # A real submission ends any inactivity window: move last_practiced
+        # forward and reset the decay checkpoint (FIX-05 support).
+        EloEngine.record_real_submission(mastery)
+
         # GDCP: Graph-Decay Cross-Pollination (If failed, penalize downstream dependencies)
         if not all_passed:
             try:
@@ -612,49 +617,36 @@ class NextProblemView(APIView):
 
         # 🚥 ML-BASED TRAFFIC COP
         router = RoutingClassifier()
-        # In a real scenario, we'd query past performance for these stats.
-        # For now, we mock some stats to get a route
+        # TODO (Phase 1 / FR-RTR-01): replace these placeholder stats with real
+        # aggregates (mean + variance of accuracy over the user's last 20
+        # submissions). With the placeholders, every user routes 'hierarchical'.
         route_decision = router.predict_route(avg_acc=0.6, var_acc=0.2, avg_elo=target_elo/2000.0)
 
-        # ROUTE 1: HIERARCHICAL (PYTORCH GNN ENGINE)
+        # ROUTE 1: HIERARCHICAL (DAG PREREQUISITE TRAVERSAL)
         if route_decision == 'hierarchical' and topic:
-            print(f"[ML Traffic Cop] Routing to PyTorch GNN Engine for {topic.name}")
-            from .hybrid_router import HierarchicalEngine
-            
+            logger.info("[Traffic Cop] Routing to Hierarchical DAG engine for %s", topic.name)
+
             # Get user's mastered topics
-            from .models import UserTopicMastery
             mastered_topics = list(UserTopicMastery.objects.filter(
                 user=request.user, elo_rating__gte=1300
             ).values_list('topic__name', flat=True))
-            
-            optimal_node = HierarchicalEngine.get_next_topic(topic.portal.name if hasattr(topic, 'portal') and topic.portal else "dsa", mastered_topics)
-            
-            target_topic_name = optimal_node.get("recommended_topic", topic.name)
-            if target_topic_name is None:
-                target_topic_name = topic.name
-                
-                    from .engines.hlr_engine import HLREngine
-        hlr_state = HLREngine.calculate_memory_state(
-            time_since_last_review_days=0,
-            halflife=mastery.hlr_halflife if hasattr(mastery, 'hlr_halflife') else 1.0,
-        )
-        xai_payload = self._compute_xai(request.user, question.topic.name if question else 'fallback', hlr_state)
-        advanced_data = {"xai": xai_payload, "decay_info": {"decay_percent": 0}}
-question = Question.objects.filter(topic__name=target_topic_name).exclude(id__in=solved_ids).annotate(
+
+            portal_name = topic.portal.name if topic.portal else "dsa"
+            optimal_node = HierarchicalEngine.get_next_topic(portal_name, mastered_topics)
+
+            target_topic_name = optimal_node.get("recommended_topic") or topic.name
+            xai_explanation = optimal_node.get("reason", "")
+
+            question = Question.objects.filter(topic__name=target_topic_name).exclude(id__in=solved_ids).annotate(
                 elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
             ).order_by('elo_diff').first()
 
         # 🚥 ROUTE 2: FLAT (ELO ENGINE)
         else:
-            print(f"🚥 ML Traffic Cop: Routing to Flat Elo Engine for {topic.name if topic else 'Fallback'}")
-                    from .engines.hlr_engine import HLREngine
-        hlr_state = HLREngine.calculate_memory_state(
-            time_since_last_review_days=0,
-            halflife=mastery.hlr_halflife if hasattr(mastery, 'hlr_halflife') else 1.0,
-        )
-        xai_payload = self._compute_xai(request.user, question.topic.name if question else 'fallback', hlr_state)
-        advanced_data = {"xai": xai_payload, "decay_info": {"decay_percent": 0}}
-if topic:
+            logger.info("[Traffic Cop] Routing to Flat Elo engine for %s", topic.name if topic else "fallback")
+            xai_explanation = f"📈 Matched to your current skill level (Elo: {round(target_elo)})."
+
+            if topic:
                 question = Question.objects.filter(topic__name=topic.name).exclude(id__in=solved_ids).annotate(
                     elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
                 ).order_by('elo_diff').first()
@@ -669,6 +661,22 @@ if topic:
                     'next_problem': None,
                 }, status=200)
             question = unsolved_qs.first()
+
+        # 🧠 XAI PAYLOAD — computed once, after the final question is known
+        from .engines.hlr_engine import HLREngine
+        mastery = UserTopicMastery.objects.filter(user=request.user, topic=question.topic).first()
+        if mastery:
+            days_since = (timezone.now() - mastery.last_practiced).total_seconds() / 86400.0
+            halflife = mastery.hlr_halflife
+        else:
+            days_since = 0.0
+            halflife = 1.0
+        hlr_state = HLREngine.calculate_memory_state(days_since, halflife)
+        xai_payload = self._compute_xai(request.user, question.topic.name, hlr_state)
+        advanced_data = {
+            "xai": xai_payload,
+            "decay_info": {"decay_percent": round((1.0 - hlr_state) * 100, 1)},
+        }
 
         # 🚀 LOG THE RECOMMENDATION TO THE DATA FLYWHEEL
         prob = advanced_data.get("xai", {}).get("success_probability", None) if advanced_data else None
@@ -760,30 +768,37 @@ class CodingOnboardingView(APIView):
             try:
                 question = Question.objects.filter(topic__name__iexact=topic_name).first()
                 if question:
-                    CodeSubmission.objects.get_or_create(
-                        user=request.user,
-                        problem_id=str(question.pk),
-                        defaults={
-                            'language': 'python',
-                            'code': '# Skipped via Onboarding',
-                            'status': 'accepted',
-                            'execution_time_ms': 10,
-                            'memory_used_kb': 1024
-                        }
-                    )
-            except Exception as e:
-                print(f"Error onboarding topic {topic_name}: {e}")
+                    already_accepted = CodeSubmission.objects.filter(
+                        user=request.user, question=question, status='accepted'
+                    ).exists()
+                    if not already_accepted:
+                        CodeSubmission.objects.create(
+                            user=request.user,
+                            question=question,
+                            language='python',
+                            code='# Skipped via Onboarding',
+                            status='accepted',
+                            execution_time_ms=10,
+                            memory_used_kb=1024,
+                        )
+            except Exception:
+                logger.exception("Error onboarding topic %s", topic_name)
 
         # 🚀 ADVANCED ML: 3-Parameter IRT Cold Start Calibration
         profile, _ = UserCodingProfile.objects.get_or_create(user=request.user)
         # Assuming a diagnostic test of 10 average questions
         num_known = len(known_topics)
         theta_guess = (num_known / 10.0) * 4.0 - 2.0 # Maps 0-10 scale to -2.0 to 2.0 theta range
-        
-        # Calculate expected score using IRT to see if it aligns
+        theta_guess = max(-4.0, min(4.0, theta_guess))
+
+        # Sanity-check the calibration against the 3PL IRT curve
         expected = IRTEngine.expected_score(theta=theta_guess, a=1.0, b=0.0, c=0.2)
-        profile.irt_latent_ability = theta_guess
-        
+        logger.info("Onboarding IRT calibration: theta=%.2f expected_score=%.2f", theta_guess, expected)
+
+        profile.irt_latent_logic = theta_guess
+        profile.irt_latent_syntax = theta_guess
+        profile.irt_latent_optimization = theta_guess
+
         # Also boost Elo to skip "Cold Start" problem
         profile.elo_rating = 1200 + (num_known * 50)
         profile.save()

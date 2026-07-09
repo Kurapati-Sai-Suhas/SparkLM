@@ -11,7 +11,7 @@ class TensorBuilder:
         """
         # 1. Fetch Mastery Data
         try:
-            mastery = UserTopicMastery.objects.get(user=user, topic=topic_name)
+            mastery = UserTopicMastery.objects.get(user=user, topic__name=topic_name)
             accuracy_norm = float(mastery.accuracy)  # Assuming it's already 0.0 to 1.0
             
             # Recency: Normalize based on a 14-day window

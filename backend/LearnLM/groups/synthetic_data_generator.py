@@ -121,8 +121,8 @@ def bootstrap_all_models():
     
     # 2. Train GCN (using dummy training loop to satisfy requirement)
     from groups.engines.gnn_engine import train_and_save_gcn
-    from groups.hybrid_router import DSA_GRAPH, OS_GRAPH, CN_GRAPH
-    graphs = {"dsa": DSA_GRAPH, "os": OS_GRAPH, "cn": CN_GRAPH}
+    from groups.hybrid_router import get_curriculum_graphs
+    graphs = get_curriculum_graphs()
     
     for name, graph in graphs.items():
         if len(graph.nodes) > 0:

@@ -314,8 +314,11 @@ class UserTopicMastery(models.Model):
     # Half-Life Regression Fields
     hlr_halflife = models.FloatField(default=1.0)
     hlr_alpha = models.FloatField(default=1.0)
-    
+
     last_practiced = models.DateTimeField(default=timezone.now)
+    # Checkpoint for inactivity Elo decay (FIX-05): when a penalty was last
+    # charged, so repeated decay sweeps don't re-charge the same window.
+    last_decay_applied_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ('user', 'topic')
@@ -331,6 +334,10 @@ class AgenticCoachLog(models.Model):
     generated_hint = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     webhook_fired = models.BooleanField(default=False)
+    # Observability for the coach pipeline (FIX-06): where the hint came
+    # from ('llm' via n8n webhook, or 'fallback') and how long n8n took.
+    hint_source = models.CharField(max_length=20, default='fallback')
+    webhook_latency_ms = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return f"Hint for {self.user.username} on problem {self.question.id if self.question else 'Unknown'}"

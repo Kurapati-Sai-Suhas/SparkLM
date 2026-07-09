@@ -9,34 +9,48 @@ from .models import Question, Topic
 User = get_user_model()
 
 class HybridRouterHeuristicTests(TestCase):
-    def test_routing_heuristic_prefers_hierarchical_for_low_variance(self):
-        """
-        Ensures the fallback heuristic correctly routes high variance to the hierarchical engine.
-        """
+    """
+    SRS FR-RTR-02 (as corrected by FIX-03): struggling users — high accuracy
+    variance (> 0.20) OR low accuracy (< 0.60) — route to the FLAT Elo engine
+    to rebuild confidence with skill-matched problems. Consistent, performing
+    users route to the HIERARCHICAL DAG to advance the curriculum.
+    (The previous version of these tests asserted the inverted pre-fix
+    behavior.)
+    """
+
+    def test_routing_heuristic_prefers_flat_for_high_variance(self):
         router = RoutingClassifier()
         # Force classifier to None to test the fallback heuristic
-        router.clf = None 
-
-        avg_acc = 0.8
-        var_acc = 0.20 # High variance (>0.15) should trigger hierarchical
-        elo = 1400
-
-        route = router.predict_route(avg_acc, var_acc, elo)
-        self.assertEqual(route, 'hierarchical')
-        
-    def test_routing_heuristic_prefers_flat_for_consistency(self):
-        """
-        Ensures the fallback heuristic routes consistent (low variance, high accuracy) to flat Elo.
-        """
-        router = RoutingClassifier()
         router.clf = None
 
         avg_acc = 0.8
-        var_acc = 0.05 # Low variance
+        var_acc = 0.25  # High variance (> 0.20) — erratic guessing
         elo = 1400
 
         route = router.predict_route(avg_acc, var_acc, elo)
         self.assertEqual(route, 'flat')
+
+    def test_routing_heuristic_prefers_flat_for_low_accuracy(self):
+        router = RoutingClassifier()
+        router.clf = None
+
+        avg_acc = 0.4   # Low accuracy (< 0.60) — struggling
+        var_acc = 0.05
+        elo = 1400
+
+        route = router.predict_route(avg_acc, var_acc, elo)
+        self.assertEqual(route, 'flat')
+
+    def test_routing_heuristic_prefers_hierarchical_for_consistency(self):
+        router = RoutingClassifier()
+        router.clf = None
+
+        avg_acc = 0.8
+        var_acc = 0.05  # Low variance, high accuracy — ready to advance
+        elo = 1400
+
+        route = router.predict_route(avg_acc, var_acc, elo)
+        self.assertEqual(route, 'hierarchical')
 
 
 class HybridRouterEndpointTests(TestCase):

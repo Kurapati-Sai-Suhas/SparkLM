@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from groups.models import RecommendationLog, UserTopicMastery, UserCodingProfile
 from groups.engines.gnn_engine import train_and_save_gcn
-from groups.hybrid_router import DSA_GRAPH, OS_GRAPH, CN_GRAPH
+from groups.hybrid_router import get_curriculum_graphs
 from sklearn.linear_model import LogisticRegression
 import torch.nn as nn
 import torch.optim as optim
@@ -57,7 +57,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("[WARN] Not enough variance in route usage. Skipping Meta-Classifier."))
 
         # 2. FINE-TUNE GCNs
-        graphs = {"dsa": DSA_GRAPH, "os": OS_GRAPH, "cn": CN_GRAPH}
+        graphs = get_curriculum_graphs()
         
         for name, graph in graphs.items():
             if len(graph.nodes) > 0:
@@ -79,13 +79,13 @@ class Command(BaseCommand):
         lstm_labels = []
         
         for profile in users:
-            subs = CodeSubmission.objects.filter(user=profile.user).order_by('submitted_at')
+            subs = CodeSubmission.objects.filter(user=profile.user).select_related('question').order_by('submitted_at')
             if subs.count() < 3: continue
-            
+
             # Create sequences of length 5
             seq = []
             for sub in subs:
-                q_diff = Question.objects.filter(id=sub.problem_id).first()
+                q_diff = sub.question
                 diff_val = (q_diff.base_difficulty / 2000.0) if q_diff else 0.5
                 corr_val = 1.0 if sub.status == 'accepted' else 0.0
                 time_val = min(1.0, (sub.execution_time_ms or 0) / 5000.0)

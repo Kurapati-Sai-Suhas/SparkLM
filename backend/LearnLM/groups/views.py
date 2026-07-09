@@ -458,9 +458,26 @@ class HybridRouterView(APIView):
 class MasteryMapView(APIView):
     """
     Returns full prerequisite graph with mastery status per node.
+    GET  /api/ai/mastery-map/?subject=DSA   (mastered topics derived from DB;
+                                             returns the map at the top level,
+                                             as LearningPathVisualizer expects)
     POST { "subject": "DSA", "mastered_topics": ["Variables", "Arrays"] }
     """
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.core.exceptions import ValidationError
+        from .models import UserTopicMastery
+
+        subject  = request.query_params.get('subject', 'DSA')
+        mastered = list(UserTopicMastery.objects.filter(
+            user=request.user, accuracy__gte=0.8
+        ).values_list('topic__name', flat=True))
+        try:
+            mastery_map = HierarchicalEngine.get_mastery_map(subject, mastered)
+        except ValidationError:
+            mastery_map = {}
+        return Response(mastery_map)
 
     def post(self, request):
         subject  = request.data.get('subject', 'DSA')

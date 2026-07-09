@@ -25,6 +25,60 @@ def normalize_output(raw: str) -> str:
     return '\n'.join(lines)
 
 
+def extract_text_from_file(file_path):
+    """Reads text from PDF, DOCX, or TXT files based on extension.
+
+    (Restored — the FIX-01 rewrite of this module dropped it while
+    views.py still imports it for document processing.)
+    """
+    import os
+    import PyPDF2
+    import docx
+
+    print(f"🔍 Attempting to read file at: {file_path}")
+    ext = os.path.splitext(file_path)[1].lower()
+    text = ""
+
+    try:
+        if ext == '.pdf':
+            with open(file_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                for page in reader.pages:
+                    extracted = page.extract_text()
+                    if extracted:
+                        text += extracted + "\n"
+        elif ext == '.docx':
+            doc = docx.Document(file_path)
+            for para in doc.paragraphs:
+                text += para.text + "\n"
+        elif ext == '.txt':
+            with open(file_path, 'r', encoding='utf-8') as file:
+                text = file.read()
+        else:
+            print(f"⚠️ Unsupported file type: {ext}")
+            return None
+
+        print(f"✅ Extracted {len(text)} characters from {ext} file.")
+        return text
+
+    except Exception as e:
+        print(f"❌ File Read Error: {e}")
+        return ""
+
+
+def load_image_for_ai(file_path):
+    """Opens an image file and prepares it for Gemini Vision. (Restored.)"""
+    import PIL.Image
+
+    print(f"🖼️ Opening Image: {file_path}")
+    try:
+        img = PIL.Image.open(file_path)
+        return img
+    except Exception as e:
+        print(f"❌ Image Load Error: {e}")
+        return None
+
+
 def all_test_cases_passed(judge0_results: list, hidden_test_cases: list) -> bool:
     """
     FIX-01 (extension): Guard against silent truncation.

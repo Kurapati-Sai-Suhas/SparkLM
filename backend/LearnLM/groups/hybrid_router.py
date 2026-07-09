@@ -16,6 +16,7 @@ Fixes applied:
 """
 
 import hashlib
+import math
 import networkx as nx
 import joblib
 import numpy as np
@@ -70,6 +71,25 @@ class RoutingClassifier:
         if var_acc > self.VARIANCE_THRESHOLD or avg_acc < self.ACCURACY_THRESHOLD:
             return "flat"           # was 'hierarchical' — inverted bug (GAP-01)
         return "hierarchical"       # was 'flat' — inverted bug (GAP-01)
+
+
+# ─────────────────────────────────────────────────────────────
+# 3-PARAMETER ITEM RESPONSE THEORY (IRT) ENGINE
+# (restored — the router rewrite dropped it while
+#  CodingOnboardingView still uses it for cold-start calibration)
+# ─────────────────────────────────────────────────────────────
+class IRTEngine:
+    @staticmethod
+    def expected_score(theta, a, b, c):
+        """
+        theta: user latent ability
+        a: discrimination parameter (how well it separates students)
+        b: difficulty parameter
+        c: guessing parameter (probability of getting it right by chance)
+        """
+        # Prevent math overflow
+        exponent = min(709.0, max(-709.0, -a * (theta - b)))
+        return c + (1 - c) / (1 + math.exp(exponent))
 
 
 class GDCPEngine:
@@ -164,6 +184,120 @@ class HierarchicalEngine:
             "unlocks":              list(graph.successors(best)),
             "mastery_percentage":   round(len(mastered) / total_nodes * 100, 1),
         }
+
+    @classmethod
+    def get_mastery_map(cls, subject: str, mastered_topics: list) -> dict:
+        """
+        Full prerequisite graph annotated with per-node mastery status.
+        (Restored after the router rewrite dropped it — MasteryMapView
+        depends on this.) Shape: {topic: {mastered, unlocked,
+        prerequisites, unlocks}}.
+        """
+        graph    = cls._get_graph(subject)
+        mastered = set(mastered_topics)
+        result   = {}
+        for node in graph.nodes:
+            prereqs  = list(graph.predecessors(node))
+            unlocked = all(p in mastered for p in prereqs) if prereqs else True
+            result[node] = {
+                "mastered":      node in mastered,
+                "unlocked":      unlocked,
+                "prerequisites": prereqs,
+                "unlocks":       list(graph.successors(node)),
+            }
+        return result
+
+
+def get_curriculum_graphs(subjects=("dsa", "os", "cn")) -> dict:
+    """
+    Lazy, DB-backed replacement for the old module-level DSA_GRAPH /
+    OS_GRAPH / CN_GRAPH constants (used by retrain_ai, export_onnx and
+    synthetic_data_generator). Unlike HierarchicalEngine._get_graph, this
+    does NOT fall back to "all topics" when a subject has no matching
+    portal — an unseeded subject yields an empty graph so ML pipelines
+    skip it instead of training on the wrong curriculum.
+    """
+    from groups.models import Topic, TopicPrerequisite
+
+    graphs = {}
+    for subject in subjects:
+        s = subject.lower().strip()
+        graph = nx.DiGraph()
+        topics = Topic.objects.filter(portal__name__icontains=s)
+        for t in topics:
+            graph.add_node(t.name)
+        prereqs = TopicPrerequisite.objects.filter(topic__in=topics).select_related('topic', 'prerequisite')
+        for p in prereqs:
+            graph.add_edge(p.prerequisite.name, p.topic.name)
+        graphs[subject] = graph
+    return graphs
+
+
+def _pick_next_difficulty(player_rating: float) -> dict:
+    """Flat-Elo helper: suggest the next problem difficulty band."""
+    target = player_rating + 50
+    if target < 1000:   band = "beginner"
+    elif target < 1200: band = "easy"
+    elif target < 1400: band = "medium"
+    elif target < 1600: band = "hard"
+    else:               band = "expert"
+    return {
+        "target_difficulty": round(target),
+        "difficulty_band":   band,
+        "player_rating":     player_rating,
+        "tip":               f"Next question should be rated ~{round(target)} ({band}).",
+    }
+
+
+def route_recommendation(subject: str, user_data: dict) -> dict:
+    """
+    Entry point for HybridRouterView (/api/ai/recommend/). Restored after
+    the router rewrite dropped it. Routes between the hierarchical DAG
+    engine and flat Elo practice using the ML Traffic Cop.
+    """
+    from django.core.exceptions import ValidationError
+    from groups.engines.elo_engine import EloEngine
+
+    router = RoutingClassifier()
+
+    # TODO (Phase 1 / FR-RTR-01): replace placeholder stats with real
+    # aggregates over the user's recent submissions.
+    avg_acc = 0.6
+    var_acc = 0.2
+    elo_rating = float(user_data.get("elo_rating", 1200.0))
+
+    route_decision = router.predict_route(
+        avg_acc, var_acc, elo_rating / 2000.0, subject=subject
+    )
+
+    if route_decision == "hierarchical":
+        mastered = user_data.get("mastered_topics") or []
+        try:
+            return {
+                "engine_used":    "hierarchical_prerequisite_graph",
+                "subject":        subject,
+                "recommendation": HierarchicalEngine.get_next_topic(subject, mastered),
+            }
+        except ValidationError:
+            # No topics seeded at all — fall through to flat Elo below.
+            pass
+
+    difficulty = user_data.get("question_difficulty")
+    correct    = user_data.get("got_correct")
+
+    if difficulty is not None and correct is not None:
+        update = EloEngine.calculate_new_rating(elo_rating, float(difficulty), bool(correct))
+        return {
+            "engine_used":   "elo_rating",
+            "subject":       subject,
+            "rating_update": update,
+            "next_question": _pick_next_difficulty(update["new_rating"]),
+        }
+    return {
+        "engine_used":   "elo_rating",
+        "subject":       subject,
+        "next_question": _pick_next_difficulty(elo_rating),
+    }
 
 
 def invalidate_dag_cache(subject: str = None):

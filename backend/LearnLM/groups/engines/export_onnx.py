@@ -1,13 +1,13 @@
 import os
 import torch
 from groups.engines.gnn_engine import TrueGCNKnowledgeGraph
-from groups.hybrid_router import DSA_GRAPH, OS_GRAPH, CN_GRAPH
+from groups.hybrid_router import get_curriculum_graphs
 
 def export_all_to_onnx():
     print("Starting ONNX Compilation for GCN Models...")
     os.makedirs("models_data", exist_ok=True)
-    
-    graphs = {"dsa": DSA_GRAPH, "os": OS_GRAPH, "cn": CN_GRAPH}
+
+    graphs = get_curriculum_graphs()
     
     for subject, graph in graphs.items():
         if len(graph.nodes) == 0:

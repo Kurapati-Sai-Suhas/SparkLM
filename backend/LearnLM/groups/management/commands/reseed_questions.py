@@ -43,11 +43,11 @@ from django.core.management.base import BaseCommand
 from django.db import transaction, connection, OperationalError
 
 from groups.models import Question
-from groups.ai_services import generate_full_question
+from groups.ai_services import generate_full_question, DailyQuotaExhausted
 
 logger = logging.getLogger("reseed_questions")
 
-PLACEHOLDER_MARKER = "In this problem, you are tasked with solving the"
+PLACEHOLDER_MARKER = Question.PLACEHOLDER_MARKER
 
 MIN_TEST_CASES = 2
 MAX_RETRIES = 3
@@ -110,7 +110,17 @@ class Command(BaseCommand):
                 title = q.title.strip()
                 self.stdout.write(f"[{processed + 1}/{total}] Generating for: {title!r} ...")
 
-                ai_data = self._generate_with_retry(title, delay)
+                try:
+                    ai_data = self._generate_with_retry(title, delay)
+                except DailyQuotaExhausted as e:
+                    # Every remaining question would hit the same wall —
+                    # stop cleanly. Untouched questions still carry the
+                    # placeholder marker, so the next run resumes here.
+                    self.stdout.write(self.style.ERROR(
+                        f"\n🛑 Daily LLM token quota exhausted — stopping. "
+                        f"Remaining questions resume automatically on the next run.\n({e})"
+                    ))
+                    break
                 processed += 1
 
                 if ai_data is None:
@@ -190,6 +200,8 @@ class Command(BaseCommand):
                 if ai_data:
                     return ai_data
                 logger.warning("Empty AI response for %r (attempt %d/%d)", title, attempt, MAX_RETRIES)
+            except DailyQuotaExhausted:
+                raise  # handled by the main loop — retrying is pointless
             except Exception as e:
                 logger.warning("AI call raised for %r (attempt %d/%d): %s", title, attempt, MAX_RETRIES, e)
                 time.sleep(delay)

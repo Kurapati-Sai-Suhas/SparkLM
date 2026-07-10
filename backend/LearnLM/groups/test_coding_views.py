@@ -261,6 +261,35 @@ def test_next_problem_returns_frontend_schema(api_client, user, question, monkey
 
 
 @pytest.mark.django_db
+def test_placeholder_questions_are_never_served(api_client, user, question, monkeypatch):
+    from groups.hybrid_router import RoutingClassifier
+    monkeypatch.setattr(RoutingClassifier, "predict_route", lambda self, *a, **k: "flat")
+
+    # An unseeded placeholder sits at a closer Elo distance than the real
+    # question — it must still never be recommended.
+    Question.objects.create(
+        title="Unseeded Placeholder",
+        topic=question.topic,
+        content=f"{Question.PLACEHOLDER_MARKER} Unseeded Placeholder problem.",
+        base_difficulty=1200.0,
+        hidden_test_cases=[],
+    )
+    api_client.force_authenticate(user=user)
+
+    response = api_client.get(reverse("code-next-problem"), {"topic": "Array"})
+
+    assert response.status_code == 200
+    assert response.data["id"] == str(question.pk)  # the real question, not the placeholder
+
+    # With ONLY placeholders left, the endpoint reports completion instead
+    # of serving boilerplate content to a student.
+    question.delete()
+    response = api_client.get(reverse("code-next-problem"), {"topic": "Array"})
+    assert response.status_code == 200
+    assert response.data.get("status") == "completed"
+
+
+@pytest.mark.django_db
 def test_failed_generation_is_never_persisted(api_client, user, question, monkeypatch):
     from groups.hybrid_router import RoutingClassifier
     monkeypatch.setattr(RoutingClassifier, "predict_route", lambda self, *a, **k: "flat")

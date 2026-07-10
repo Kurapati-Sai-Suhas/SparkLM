@@ -338,6 +338,17 @@ def get_gemini_embedding(text: str) -> list:
         return [0.0] * 768
 
 
+class DailyQuotaExhausted(Exception):
+    """The LLM provider's daily token quota is used up — no point retrying
+    until the quota window resets. Raised only by generate_full_question
+    (management-command context); request-path helpers keep returning None."""
+
+
+def _is_daily_quota_error(exc) -> bool:
+    s = str(exc)
+    return 'rate_limit_exceeded' in s and ('per day' in s or 'TPD' in s)
+
+
 def generate_full_question(title):
     """
     Generates the complete content package for a placeholder question:
@@ -347,7 +358,9 @@ def generate_full_question(title):
     strict validation (_validate_ai_payload) on the returned dict — this
     function only guarantees shape: a dict with content / starter_code /
     hidden_test_cases keys, or None on any failure. Never returns filler
-    data (same policy as generate_test_cases).
+    data (same policy as generate_test_cases). Raises DailyQuotaExhausted
+    when the provider's daily token cap is hit, so batch callers can stop
+    instead of burning hours on doomed retries.
     """
     logger.info("Generating full question content via LLM for: %s", title)
 
@@ -388,6 +401,10 @@ def generate_full_question(title):
             return None
         return data
     except Exception as e:
+        if _is_daily_quota_error(e):
+            # Per-day cap — retries are pointless until the window resets.
+            # (Per-minute limits fall through to the normal retry path.)
+            raise DailyQuotaExhausted(str(e))
         logger.error("Full question generation failed for %r: %s", title, e)
         return None
 

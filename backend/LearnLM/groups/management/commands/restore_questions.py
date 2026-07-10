@@ -39,9 +39,9 @@ DEFAULT_TOPICS = [
     "Greedy", "Backtracking", "Bit Manipulation",
 ]
 
-# Must match reseed_questions.PLACEHOLDER_MARKER so restored rows are
-# picked up by the reseed pipeline.
-PLACEHOLDER_MARKER = "In this problem, you are tasked with solving the"
+# Shared marker so restored rows are picked up by the reseed pipeline and
+# excluded from recommendations until seeded.
+PLACEHOLDER_MARKER = Question.PLACEHOLDER_MARKER
 
 
 class Command(BaseCommand):

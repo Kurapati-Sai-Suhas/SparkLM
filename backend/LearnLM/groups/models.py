@@ -265,6 +265,12 @@ def _bust_dag_cache_on_edge_change(sender, instance, **kwargs):
 
 
 class Question(models.Model):
+    # Content marker identifying unseeded placeholder questions (written by
+    # bulk imports / restore_questions, replaced by reseed_questions).
+    # Questions still carrying this marker are excluded from
+    # recommendations until they receive real content and test cases.
+    PLACEHOLDER_MARKER = "In this problem, you are tasked with solving the"
+
     topic = models.ForeignKey(Topic, on_delete=models.CASCADE)
     title = models.CharField(max_length=255)
     content = models.TextField() 

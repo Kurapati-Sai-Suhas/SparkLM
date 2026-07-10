@@ -692,7 +692,9 @@ class NextProblemView(APIView):
             target_topic_name = optimal_node.get("recommended_topic") or topic.name
             xai_explanation = optimal_node.get("reason", "")
 
-            question = Question.objects.filter(topic__name=target_topic_name).exclude(id__in=solved_ids).annotate(
+            question = Question.objects.filter(topic__name=target_topic_name).exclude(id__in=solved_ids).exclude(
+                content__icontains=Question.PLACEHOLDER_MARKER  # unseeded placeholders are not servable
+            ).annotate(
                 elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
             ).order_by('elo_diff').first()
 
@@ -702,12 +704,16 @@ class NextProblemView(APIView):
             xai_explanation = f"📈 Matched to your current skill level (Elo: {round(target_elo)})."
 
             if topic:
-                question = Question.objects.filter(topic__name=topic.name).exclude(id__in=solved_ids).annotate(
+                question = Question.objects.filter(topic__name=topic.name).exclude(id__in=solved_ids).exclude(
+                    content__icontains=Question.PLACEHOLDER_MARKER
+                ).annotate(
                     elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
                 ).order_by('elo_diff').first()
 
         if not question:
-            unsolved_qs = Question.objects.exclude(id__in=solved_ids)
+            unsolved_qs = Question.objects.exclude(id__in=solved_ids).exclude(
+                content__icontains=Question.PLACEHOLDER_MARKER
+            )
             if not unsolved_qs.exists():
                 return Response({
                     'status': 'completed',

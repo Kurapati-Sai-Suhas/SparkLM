@@ -1,10 +1,47 @@
+# SparkLM backend dependencies — pinned from the working environment.
+# The previous version of this file listed only 9 packages; a fresh
+# environment could not boot the app.
+
+# ── Core web stack ───────────────────────────────────────────
 Django==5.2.8
-djangorestframework
-djangorestframework-simplejwt
-django-cors-headers
-django-filter
-langchain
-# google-generative-ai  # Gemini client may not provide wheels for Python 3.14; install with a compatible Python (3.10/3.11) if needed
-PyPDF2
-python-docx
-Pillow
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+django-filter==25.2
+daphne==4.2.1
+channels==4.3.2
+psycopg[binary]==3.3.4
+pgvector==0.4.2
+redis==7.4.0
+python-dotenv==1.2.2
+requests==2.33.1
+
+# ── Math / routing engines (hybrid router, Elo, HLR, flywheel) ──
+numpy==2.4.6
+networkx==3.6.1
+scikit-learn==1.8.0
+joblib==1.5.3
+
+# ── LLM services (test-case generation, coach, embeddings) ──
+groq==1.5.0
+google-generativeai==0.8.6   # EOL — migrate to google-genai (tracked backlog)
+langchain==1.2.17
+
+# ── Document / media processing ──────────────────────────────
+PyPDF2==3.0.1                # deprecated — migrate to pypdf (tracked backlog)
+python-docx==1.2.0
+pillow==12.2.0
+
+# ── Heavy ML extras (GNN + SHAP XAI + visual search) ─────────
+# Only needed with ENABLE_SHAP_XAI=true or the visual-search module.
+# These add ~2GB to the image; slim deploys can comment them out once
+# ai_services' CLIP import is made lazy (visual search would be disabled).
+torch==2.12.0
+torch-geometric==2.8.0
+onnxruntime==1.27.0
+shap==0.52.0
+transformers==5.9.0
+
+# ── Testing ──────────────────────────────────────────────────
+pytest==9.1.1
+pytest-django==4.12.0

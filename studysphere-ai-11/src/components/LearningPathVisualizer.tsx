@@ -111,7 +111,7 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
     const fetchMasteryMap = async () => {
       try {
         const token = localStorage.getItem('authToken') || localStorage.getItem('access');
-        const res = await fetch(`http://localhost:8000/api/ai/mastery-map/?subject=${subject}`, {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/ai/mastery-map/?subject=${subject}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {

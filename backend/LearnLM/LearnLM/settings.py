@@ -19,6 +19,16 @@ load_dotenv(dotenv_path=env_path)
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key-for-local-dev")
 
+def _guard_production_secret_key():
+    # Refuse to start a production instance on the well-known dev key —
+    # a leaked SECRET_KEY invalidates sessions, password reset tokens and
+    # JWT signing (SIMPLE_JWT signs with it).
+    from django.core.exceptions import ImproperlyConfigured
+    if SECRET_KEY == "fallback-secret-key-for-local-dev":
+        raise ImproperlyConfigured(
+            "Set a real SECRET_KEY in the environment before running with DJANGO_DEBUG=false."
+        )
+
 # SECURITY WARNING: don't run with debug turned on in production!
 # Defaults keep local development working; production flips these in .env:
 #   DJANGO_DEBUG=false
@@ -32,6 +42,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    _guard_production_secret_key()
 
 # Application definition
 INSTALLED_APPS = [
@@ -145,6 +156,8 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = "static/"
+# Required for `collectstatic` on deploy (admin CSS/JS etc.).
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -207,12 +220,26 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 JUDGE0_API_KEY = os.getenv("JUDGE0_API_KEY")
 JUDGE0_API_HOST = os.getenv("JUDGE0_API_HOST", "judge0-extra-ce.p.rapidapi.com")
 
-# Use In-Memory channel layer for local testing without Docker/Redis
+# Channel layer for Daphne/Channels WebSockets.
+# In-memory works for a SINGLE Daphne process only — with multiple
+# instances, group messages don't cross processes. When REDIS_URL is set
+# and channels-redis is installed, use Redis so chat works fleet-wide.
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels.layers.InMemoryChannelLayer"
     }
 }
+if REDIS_URL:
+    try:
+        import channels_redis  # noqa: F401
+        CHANNEL_LAYERS = {
+            "default": {
+                "BACKEND": "channels_redis.core.RedisChannelLayer",
+                "CONFIG": {"hosts": [REDIS_URL]},
+            }
+        }
+    except ImportError:
+        pass  # keep in-memory; install channels-redis for multi-instance
 
 # --- EMAIL SETTINGS (Day 4 Integration) ---
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

@@ -279,6 +279,24 @@ def test_failed_generation_is_never_persisted(api_client, user, question, monkey
     assert question.hidden_test_cases == []
 
 
+@pytest.mark.django_db
+def test_shap_xai_payload_matches_frontend_schema(user, monkeypatch):
+    # With ENABLE_SHAP_XAI on, the payload must keep the exact schema the
+    # frontend reads — whether real SHAP succeeds or the heuristic
+    # fallback kicks in, the caller can't tell the difference.
+    monkeypatch.setattr(coding_views, "USE_REAL_SHAP", True)
+
+    view = coding_views.NextProblemView()
+    payload = view._compute_xai(user, "Array", hlr_state=1.0)
+
+    assert {"source", "dominant_factor", "success_probability", "shap_values"} <= set(payload)
+    assert payload["source"] in ("shap", "heuristic")
+    assert 0 <= payload["success_probability"] <= 100
+    assert {v["subject"] for v in payload["shap_values"]} == {
+        "Time Complexity", "Space Complexity", "Logic Accuracy", "Topic Recency",
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 # Onboarding (Phase 0 repair regression test)
 # ─────────────────────────────────────────────────────────────

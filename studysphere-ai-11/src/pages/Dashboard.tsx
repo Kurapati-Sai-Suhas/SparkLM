@@ -72,7 +72,7 @@ export default function Dashboard() {
 
         // Load MLOps Data
         try {
-          const mlopsRes = await fetch("http://localhost:8000/api/mlops/telemetry/", {
+          const mlopsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/mlops/telemetry/`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` }
           });
           if (mlopsRes.ok) {

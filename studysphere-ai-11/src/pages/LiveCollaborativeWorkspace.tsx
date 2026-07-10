@@ -97,7 +97,7 @@ export default function LiveCollaborativeWorkspace() {
 
     // Use standard WS connection, y-websocket appends the room name
     const provider = new WebsocketProvider(
-      'ws://localhost:8000/ws',
+      `${import.meta.env.VITE_WS_URL || 'ws://localhost:8000'}/ws`,
       `code/${groupId}/?token=${token}`,
       ydoc
     );

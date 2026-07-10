@@ -19,7 +19,7 @@ export function useGroupChat(groupId: string) {
     }
 
     // 2. Connect to the Daphne ASGI server we just started
-    const wsUrl = `ws://127.0.0.1:8000/ws/chat/${groupId}/?token=${token}`;
+    const wsUrl = `${import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000'}/ws/chat/${groupId}/?token=${token}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

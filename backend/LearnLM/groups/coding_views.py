@@ -45,7 +45,11 @@ LANGUAGE_IDS = {
     "js":     63,
 }
 
-JUDGE0_BASE = os.environ.get('JUDGE0_URL', 'https://judge0-ce.p.rapidapi.com')
+# Host and base URL are config-driven; the host header MUST match the
+# RapidAPI product the key is registered for (settings.py previously
+# defaulted to judge0-extra-ce while this file hardcoded judge0-ce).
+JUDGE0_HOST = os.environ.get('JUDGE0_API_HOST', 'judge0-ce.p.rapidapi.com')
+JUDGE0_BASE = os.environ.get('JUDGE0_URL', f'https://{JUDGE0_HOST}')
 JUDGE0_KEY  = os.environ.get('JUDGE0_API_KEY')
 
 def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
@@ -64,7 +68,7 @@ def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
     headers = {
         "Content-Type":    "application/json",
         "X-RapidAPI-Key":  JUDGE0_KEY,
-        "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
+        "X-RapidAPI-Host": JUDGE0_HOST,
     }
 
     def decode(val):
@@ -770,24 +774,19 @@ class NextProblemView(APIView):
     
 
     def _compute_xai(self, user, topic_name, hlr_state):
-        if USE_REAL_SHAP:
-            from .engines.gnn_engine import TrueGCNKnowledgeGraph
-            from .engines.shap_explainer import XAIEngine
-            import torch
-            gnn_model = TrueGCNKnowledgeGraph()
-            background = torch.zeros((10, 4))
-            xai_engine = XAIEngine(gnn_model, background)
-            user_tensor = TensorBuilder.build_user_feature_tensor(user, topic_name)
-            feature_names = ['Time Complexity', 'Space Complexity', 'Logic Accuracy', 'Topic Recency']
-            payload = xai_engine.generate_radar_data(user_tensor, feature_names)
-            payload['source'] = 'shap'
-            return payload
+        features = TensorBuilder.build_user_feature_tensor(user, topic_name)
 
-        tensor = TensorBuilder.build_user_feature_tensor(user, topic_name)
-        time_score = round(float(tensor[0]) * 100, 1)
-        space_score = round(float(tensor[1]) * 100, 1)
-        logic_score = round(float(tensor[2]) * 100, 1)
-        recency_score = round(float(tensor[3]) * 100, 1)
+        if USE_REAL_SHAP:
+            payload = self._compute_shap_xai(features, hlr_state)
+            if payload is not None:
+                return payload
+            # SHAP unavailable/failed — fall through to the heuristic so
+            # the recommendation endpoint never 500s over explainability.
+
+        time_score = round(features[0] * 100, 1)
+        space_score = round(features[1] * 100, 1)
+        logic_score = round(features[2] * 100, 1)
+        recency_score = round(features[3] * 100, 1)
 
         if hlr_state < 0.50:
             dominant = 'Topic Recency'
@@ -811,6 +810,40 @@ class NextProblemView(APIView):
                 {'subject': 'Topic Recency', 'A': recency_score, 'fullMark': 100},
             ],
         }
+
+    def _compute_shap_xai(self, features, hlr_state):
+        """
+        Real SHAP attributions over the trained GCN, normalized to the SAME
+        schema the frontend reads for the heuristic path (shap_values /
+        dominant_factor / success_probability). Returns None on any failure.
+        """
+        try:
+            import torch
+            from .engines.shap_explainer import get_xai_engine
+
+            engine = get_xai_engine()
+            if engine is None:
+                return None
+
+            user_tensor = torch.tensor(features, dtype=torch.float32)
+            result = engine.generate_radar_data(user_tensor)
+            if result is None:
+                return None  # degenerate attributions — use heuristic
+            success_prob = engine.predict_success(user_tensor)
+
+            # Same memory-atrophy override as the heuristic path.
+            dominant = 'Topic Recency' if hlr_state < 0.50 else result['dominant_factor']
+
+            return {
+                'source': 'shap',
+                'dominant_factor': dominant,
+                'success_probability': round(success_prob * 100, 1),
+                'shap_values': result['radar_data'],
+                'insight_text': result['insight_text'],
+            }
+        except Exception:
+            logger.exception("SHAP XAI computation failed; using heuristic payload")
+            return None
 
 class CodingOnboardingView(APIView):
     """

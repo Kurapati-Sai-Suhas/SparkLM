@@ -110,7 +110,7 @@ export default function GamificationDashboard() {
   const [badges, setBadges] = useState<any[]>(BADGES);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/coding-portals/gamification/", {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/coding-portals/gamification/`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` }
     })
     .then(res => res.json())

@@ -20,7 +20,7 @@ const CodingPortal = () => {
         try {
             const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('access'); 
             
-            const response = await axios.get('http://localhost:8000/api/code/next/', {
+            const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/next/`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             
@@ -49,7 +49,7 @@ const CodingPortal = () => {
         try {
             const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('access'); 
             
-            const response = await axios.post('http://localhost:8000/api/code/run/', {
+            const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/run/`, {
                 code: code,
                 language: language,
                 stdin: currentProblem.examples[0]?.input || "" // Uses Example 1 input safely
@@ -78,7 +78,7 @@ const CodingPortal = () => {
         try {
             const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('access'); 
             
-            const response = await axios.post('http://localhost:8000/api/code/submit/', {
+            const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/submit/`, {
                 code: code,
                 language: language,
                 problem_id: currentProblem.id,

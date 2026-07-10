@@ -46,7 +46,7 @@ export default function AdaptiveCodingPortal() {
     const token = localStorage.getItem('authToken') || localStorage.getItem('access');
 
     try {
-      const response = await fetch(`http://localhost:8000/api/code/next/?topic=${topic}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/next/?topic=${topic}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
@@ -79,7 +79,7 @@ export default function AdaptiveCodingPortal() {
     const token = localStorage.getItem('authToken') || localStorage.getItem('access');
 
     try {
-      const response = await fetch(`http://localhost:8000/api/code/submit/`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/submit/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

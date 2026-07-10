@@ -20,7 +20,7 @@ export default function GroupChat({
 
   useEffect(() => {
     const token = localStorage.getItem("authToken") || localStorage.getItem("access") || "";
-    const wsUrl = `ws://127.0.0.1:8000/ws/chat/${groupId}/?token=${token}`;
+    const wsUrl = `${import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000'}/ws/chat/${groupId}/?token=${token}`;
 
     ws.current = new WebSocket(wsUrl);
 

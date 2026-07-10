@@ -1,4 +1,3 @@
-import torch
 from django.utils import timezone
 from groups.models import UserTopicMastery, CodeSubmission
 
@@ -6,8 +5,13 @@ class TensorBuilder:
     @staticmethod
     def build_user_feature_tensor(user, topic_name):
         """
-        Converts Django database metrics into a normalized 1D PyTorch tensor.
-        Features: [Time_Efficiency, Space_Efficiency, Logic_Accuracy, Topic_Recency]
+        Converts Django database metrics into a normalized feature list:
+        [Time_Efficiency, Space_Efficiency, Logic_Accuracy, Topic_Recency]
+
+        Returns a plain list of floats — torch-free on purpose, so the
+        default (heuristic) XAI path never loads PyTorch. The SHAP path
+        converts to a tensor at its own boundary. This keeps slim
+        deployments (without the ML extras installed) bootable.
         """
         # 1. Fetch Mastery Data
         try:
@@ -40,8 +44,6 @@ class TensorBuilder:
             time_norm = 0.5
             space_norm = 0.5
 
-        # 3. Compile the PyTorch Tensor
+        # 3. Compile the feature vector
         # IMPORTANT: The order here MUST match the feature_names array in your views!
-        feature_array = [time_norm, space_norm, accuracy_norm, recency_norm]
-        
-        return torch.tensor(feature_array, dtype=torch.float32)
+        return [float(time_norm), float(space_norm), float(accuracy_norm), float(recency_norm)]

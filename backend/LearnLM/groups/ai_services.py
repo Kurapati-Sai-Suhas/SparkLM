@@ -381,7 +381,11 @@ def generate_full_question(title):
 
     Rules:
     - Provide at least 4 diverse hidden_test_cases, including edge cases, each with different stdin.
-    - stdin holds the raw input lines the program reads (newline-separated values).
+    - stdin holds the raw input lines the program reads (newline-separated values). stdin must NEVER be empty.
+    - If the problem involves a binary tree, encode it in stdin as ONE line of space-separated
+      level-order values using the word null for missing children (e.g. "3 9 20 null null 15 7"),
+      and write the problem content so the solution is expected to parse that encoding.
+    - If the problem involves a linked list, encode it as one line of space-separated values.
     - expected_output is the exact stdout string the correct solution prints.
     - starter_code must be a Python class Solution with one public method and no solution logic.
     """

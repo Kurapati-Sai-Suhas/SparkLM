@@ -193,7 +193,9 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
     def _generate_with_retry(self, title, delay):
         for attempt in range(1, MAX_RETRIES + 1):
-            connection.close()
+            # Never close inside an atomic block (e.g. under test runners).
+            if not connection.in_atomic_block:
+                connection.close()
             try:
                 ai_data = generate_full_question(title)
                 time.sleep(delay)

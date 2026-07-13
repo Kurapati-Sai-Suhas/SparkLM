@@ -418,6 +418,58 @@ def generate_full_question(title):
         return None
 
 
+def generate_starter_stubs(title, python_starter, languages):
+    """
+    Generates ONLY starter-code templates for the given languages, mirroring
+    an existing Python starter (same Solution class, method name, params).
+    Much cheaper than generate_full_question (~200 tokens vs ~1000) — used
+    by backfill_boilerplate to add missing languages to already-seeded
+    questions without regenerating their content and test cases.
+
+    Returns {lang: stub} containing only valid entries, or None on failure.
+    Raises DailyQuotaExhausted on the provider's per-day cap.
+    """
+    langs = ", ".join(languages)
+    prompt = f"""
+    You are generating starter code templates for a coding-practice platform.
+
+    Problem title: "{title}"
+    The platform already has this Python starter code for the problem:
+    {python_starter}
+
+    Write matching starter code for these languages: {langs}.
+    Mirror the same class name (Solution), method name, and parameters.
+    No solution logic — just the empty template with a comment where the
+    code goes, returning a default value where the language requires one.
+
+    Respond with ONLY a raw, valid JSON object keyed by language, e.g.:
+    {{"java": "class Solution {{\\n    public int methodName(int x) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}", "cpp": "...", "javascript": "..."}}
+    """
+
+    try:
+        if not groq_client:
+            raise Exception("Groq API key missing")
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        clean_text = response.choices[0].message.content.replace('```json', '').replace('```', '').strip()
+        data = json.loads(clean_text)
+        if not isinstance(data, dict):
+            return None
+        stubs = {
+            lang: code for lang, code in data.items()
+            if lang in languages and isinstance(code, str) and "Solution" in code
+        }
+        return stubs or None
+    except Exception as e:
+        if _is_daily_quota_error(e):
+            raise DailyQuotaExhausted(str(e))
+        logger.error("Starter-stub generation failed for %r: %s", title, e)
+        return None
+
+
 def _valid_test_cases(cases) -> bool:
     """A usable LLM response is a non-empty list of {stdin, expected_output} dicts."""
     return (

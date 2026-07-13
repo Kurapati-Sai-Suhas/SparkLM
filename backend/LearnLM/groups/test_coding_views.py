@@ -346,6 +346,38 @@ def test_shap_xai_payload_matches_frontend_schema(user, monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────
+# Boilerplate backfill command
+# ─────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_backfill_adds_missing_languages_and_preserves_python(question, monkeypatch):
+    from django.core.management import call_command
+    import groups.management.commands.backfill_boilerplate as backfill
+
+    question.boilerplate_code = {"python": "class Solution:\n    def solve(self, x):\n        pass"}
+    question.save(update_fields=["boilerplate_code"])
+
+    fake_stubs = {
+        "java": "class Solution {\n    public int solve(int x) { return 0; }\n}",
+        "cpp": "class Solution {\npublic:\n    int solve(int x) { return 0; }\n};",
+        "javascript": "class Solution {\n    solve(x) {}\n}",
+    }
+    monkeypatch.setattr(backfill, "generate_starter_stubs", lambda *a, **k: fake_stubs)
+
+    call_command("backfill_boilerplate", delay=0)
+
+    question.refresh_from_db()
+    assert set(question.boilerplate_code.keys()) == {"python", "java", "cpp", "javascript"}
+    assert "def solve" in question.boilerplate_code["python"]  # original preserved
+
+    # Second run: nothing left to do (resume/skip behavior)
+    calls = []
+    monkeypatch.setattr(backfill, "generate_starter_stubs", lambda *a, **k: calls.append(1) or fake_stubs)
+    call_command("backfill_boilerplate", delay=0)
+    assert calls == []
+
+
+# ─────────────────────────────────────────────────────────────
 # Onboarding (Phase 0 repair regression test)
 # ─────────────────────────────────────────────────────────────
 

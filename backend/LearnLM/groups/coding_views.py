@@ -38,11 +38,14 @@ logger = logging.getLogger(__name__)
 
 
 LANGUAGE_IDS = {
-    "python": 71,
-    "java":   62,
-    "cpp":    54,
-    "c":      50,
-    "js":     63,
+    "python":     71,
+    "java":       62,
+    "cpp":        54,
+    "c":          50,
+    "js":         63,
+    # The serializer validates 'javascript' but this map only had 'js',
+    # so every JS submission errored with "Unsupported language".
+    "javascript": 63,
 }
 
 # Host and base URL are config-driven; the host header MUST match the
@@ -779,43 +782,114 @@ class NextProblemView(APIView):
         })
     
 
+    # Concrete techniques to drill per curriculum topic — turns the XAI
+    # panel from a diagnosis into actionable advice.
+    PRACTICE_TIPS = {
+        "Array": "prefix sums and two-pointer sweeps",
+        "String": "sliding-window substring patterns",
+        "Hash Table": "hash-map lookups that replace nested loops",
+        "Two Pointers": "left/right pointer convergence problems",
+        "Stack": "monotonic stack problems",
+        "Binary Search": "binary search on the answer space",
+        "Linked List": "dummy-head and fast/slow pointer techniques",
+        "Tree": "recursive DFS with clear return values",
+        "Trie": "prefix-tree insert and search implementations",
+        "Backtracking": "choose-explore-unchoose templates",
+        "Depth-First Search": "grid flood-fill and component counting",
+        "Breadth-First Search": "level-order traversal with a queue",
+        "Graph": "adjacency-list building plus BFS/DFS traversal",
+        "Union Find": "parent-array union/find with path compression",
+        "Greedy": "sort-then-sweep with an exchange argument",
+        "Divide and Conquer": "merge-sort style splitting",
+        "Dynamic Programming": "1-D DP tables before 2-D ones",
+        "Math": "modular arithmetic and digit manipulation",
+        "Bit Manipulation": "XOR tricks and bit masking",
+    }
+
+    FACTOR_TIPS = {
+        'Time Complexity': "Watch your time complexity — try replacing nested loops with hash maps or sorting.",
+        'Space Complexity': "Watch your memory — reuse structures in place instead of building extra arrays.",
+        'Logic Accuracy': "Slow down and trace edge cases (empty input, single element, duplicates) before submitting.",
+        'Topic Recency': "You haven't practiced this topic recently — do a quick review problem before advancing.",
+    }
+
+    def _build_recommendation(self, user, dominant):
+        """
+        The student's weakest reviewed topics plus a concrete technique to
+        drill for each. Returns (weak_topics, recommendation_text).
+        """
+        weak_rows = (
+            UserTopicMastery.objects.filter(user=user, reviews__gte=1, accuracy__lt=0.8)
+            .select_related('topic')
+            .order_by('accuracy')[:3]
+        )
+        weak_topics = [
+            {'topic': m.topic.name, 'accuracy_pct': round(m.accuracy * 100, 1)}
+            for m in weak_rows
+        ]
+
+        parts = []
+        if weak_topics:
+            primary = weak_topics[0]
+            tip = self.PRACTICE_TIPS.get(primary['topic'], "the fundamentals of this topic")
+            parts.append(
+                f"📌 Your weakest area is {primary['topic']} ({primary['accuracy_pct']}% accuracy) — practice {tip}."
+            )
+            if len(weak_topics) > 1:
+                others = ", ".join(w['topic'] for w in weak_topics[1:])
+                parts.append(f"Also needs work: {others}.")
+        else:
+            parts.append("💪 No weak topics detected yet — keep advancing through the curriculum.")
+
+        factor_tip = self.FACTOR_TIPS.get(dominant)
+        if factor_tip:
+            parts.append(factor_tip)
+
+        return weak_topics, " ".join(parts)
+
     def _compute_xai(self, user, topic_name, hlr_state):
         features = TensorBuilder.build_user_feature_tensor(user, topic_name)
 
+        payload = None
         if USE_REAL_SHAP:
+            # None means SHAP unavailable/failed — fall through to the
+            # heuristic so the endpoint never 500s over explainability.
             payload = self._compute_shap_xai(features, hlr_state)
-            if payload is not None:
-                return payload
-            # SHAP unavailable/failed — fall through to the heuristic so
-            # the recommendation endpoint never 500s over explainability.
 
-        time_score = round(features[0] * 100, 1)
-        space_score = round(features[1] * 100, 1)
-        logic_score = round(features[2] * 100, 1)
-        recency_score = round(features[3] * 100, 1)
+        if payload is None:
+            time_score = round(features[0] * 100, 1)
+            space_score = round(features[1] * 100, 1)
+            logic_score = round(features[2] * 100, 1)
+            recency_score = round(features[3] * 100, 1)
 
-        if hlr_state < 0.50:
-            dominant = 'Topic Recency'
-        else:
-            scores = {
-                'Time Complexity': time_score,
-                'Space Complexity': space_score,
-                'Logic Accuracy': logic_score,
-                'Topic Recency': recency_score,
+            if hlr_state < 0.50:
+                dominant = 'Topic Recency'
+            else:
+                scores = {
+                    'Time Complexity': time_score,
+                    'Space Complexity': space_score,
+                    'Logic Accuracy': logic_score,
+                    'Topic Recency': recency_score,
+                }
+                dominant = max(scores, key=scores.get)
+
+            payload = {
+                'source': 'heuristic',
+                'dominant_factor': dominant,
+                'success_probability': round(logic_score * hlr_state, 1),
+                'shap_values': [
+                    {'subject': 'Time Complexity', 'A': time_score, 'fullMark': 100},
+                    {'subject': 'Space Complexity', 'A': space_score, 'fullMark': 100},
+                    {'subject': 'Logic Accuracy', 'A': logic_score, 'fullMark': 100},
+                    {'subject': 'Topic Recency', 'A': recency_score, 'fullMark': 100},
+                ],
             }
-            dominant = max(scores, key=scores.get)
 
-        return {
-            'source': 'heuristic',
-            'dominant_factor': dominant,
-            'success_probability': round(logic_score * hlr_state, 1),
-            'shap_values': [
-                {'subject': 'Time Complexity', 'A': time_score, 'fullMark': 100},
-                {'subject': 'Space Complexity', 'A': space_score, 'fullMark': 100},
-                {'subject': 'Logic Accuracy', 'A': logic_score, 'fullMark': 100},
-                {'subject': 'Topic Recency', 'A': recency_score, 'fullMark': 100},
-            ],
-        }
+        # Actionable layer, on top of whichever engine produced the payload
+        weak_topics, recommendation = self._build_recommendation(user, payload['dominant_factor'])
+        payload['weak_topics'] = weak_topics
+        payload['recommendation'] = recommendation
+        return payload
 
     def _compute_shap_xai(self, features, hlr_state):
         """

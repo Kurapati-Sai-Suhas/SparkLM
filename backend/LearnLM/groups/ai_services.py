@@ -372,7 +372,12 @@ def generate_full_question(title):
     Exact format:
     {{
       "content": "<p>Full problem statement in simple HTML: description, input/output format, constraints.</p>",
-      "starter_code": "class Solution:\\n    def methodName(self, param1):\\n        # Write your code here\\n        pass",
+      "starter_code": {{
+        "python": "class Solution:\\n    def methodName(self, param1):\\n        # Write your code here\\n        pass",
+        "java": "class Solution {{\\n    public int methodName(int param1) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}",
+        "cpp": "class Solution {{\\npublic:\\n    int methodName(int param1) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}};",
+        "javascript": "class Solution {{\\n    methodName(param1) {{\\n        // Write your code here\\n    }}\\n}}"
+      }},
       "hidden_test_cases": [
         {{"stdin": "2 7 11 15\\n9", "expected_output": "0 1", "explanation": "nums[0] + nums[1] == 9"}},
         {{"stdin": "...", "expected_output": "...", "explanation": "..."}}

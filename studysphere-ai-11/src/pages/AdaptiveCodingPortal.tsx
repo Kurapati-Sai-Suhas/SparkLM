@@ -302,6 +302,23 @@ export default function AdaptiveCodingPortal() {
 
               {problem.advanced_xai &&
                 problem.advanced_xai.xai &&
+                problem.advanced_xai.xai.recommendation && (
+                  <div
+                    data-testid="xai-recommendation"
+                    className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur p-3.5"
+                  >
+                    <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.2em] text-slate-400 mb-2 font-semibold">
+                      <Flame className="h-3 w-3" />
+                      Coach Recommendation
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      {problem.advanced_xai.xai.recommendation}
+                    </p>
+                  </div>
+                )}
+
+              {problem.advanced_xai &&
+                problem.advanced_xai.xai &&
                 problem.advanced_xai.xai.shap_values && (
                   <div
                     data-testid="xai-radar-container"

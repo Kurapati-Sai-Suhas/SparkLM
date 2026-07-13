@@ -324,6 +324,9 @@ def test_shap_xai_payload_matches_frontend_schema(user, monkeypatch):
     assert {v["subject"] for v in payload["shap_values"]} == {
         "Time Complexity", "Space Complexity", "Logic Accuracy", "Topic Recency",
     }
+    # Actionable layer: always present, whichever engine produced the payload
+    assert isinstance(payload["weak_topics"], list)
+    assert payload["recommendation"]
 
 
 # ─────────────────────────────────────────────────────────────

@@ -220,9 +220,12 @@ class Command(BaseCommand):
     def _save_question(self, q, ai_data, new_content):
         for attempt in range(2):
             try:
+                starter = ai_data["starter_code"]
+                if not isinstance(starter, dict):
+                    starter = {"python": starter}
                 with transaction.atomic():
                     q.content = new_content
-                    q.boilerplate_code = {"python": ai_data["starter_code"]}
+                    q.boilerplate_code = starter
                     q.hidden_test_cases = ai_data["hidden_test_cases"]
                     q.save(update_fields=["content", "boilerplate_code", "hidden_test_cases"])
                 return True
@@ -256,7 +259,14 @@ class Command(BaseCommand):
         if not isinstance(ai_data["content"], str) or len(ai_data["content"].strip()) < 20:
             return "content is empty or too short"
 
-        if not isinstance(ai_data["starter_code"], str) or not ai_data["starter_code"].strip():
+        # starter_code may be a plain string (legacy: python only) or an
+        # object keyed by language. Either way python must be present.
+        starter = ai_data["starter_code"]
+        if isinstance(starter, dict):
+            python_starter = starter.get("python", "")
+            if not isinstance(python_starter, str) or not python_starter.strip():
+                return "starter_code object missing a python entry"
+        elif not isinstance(starter, str) or not starter.strip():
             return "starter_code is empty"
 
         test_cases = ai_data["hidden_test_cases"]

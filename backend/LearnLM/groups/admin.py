@@ -2,7 +2,7 @@ from django.contrib import admin
 
 # Register your models here.
 from .models import (
-    StudyGroup, StudyMaterial, Topic, Question, 
+    StudyGroup, StudyMaterial, Topic, Question,
     CodingPortal, CodeSubmission, UserCodingProfile
 )
 

@@ -358,8 +358,43 @@ public class Main {
 {user_code}
 """
             executable_code = generic_java_wrapper.replace("{user_code}", raw_code)
+        elif lang_key in ("js", "javascript"):
+            # 🚀 DYNAMIC GENERIC WRAPPER FOR JAVASCRIPT (mirrors the Python one:
+            # whole stdin JSON-parsed if possible, else passed as one raw string)
+            generic_js_wrapper = """{user_code}
+
+const __stdin = require('fs').readFileSync(0, 'utf8').trim();
+let __parsed;
+try { __parsed = JSON.parse(__stdin); } catch (e) { __parsed = __stdin; }
+
+try {
+    const __sol = new Solution();
+    const __methods = Object.getOwnPropertyNames(Solution.prototype)
+        .filter(m => m !== 'constructor' && typeof __sol[m] === 'function');
+    const __target = __methods.length ? __sol[__methods[0]].bind(__sol) : __sol.solve.bind(__sol);
+
+    let __res;
+    if (Array.isArray(__parsed)) {
+        __res = __target(...__parsed);
+    } else {
+        __res = __target(__parsed);
+    }
+
+    if (Array.isArray(__res) || (__res !== null && typeof __res === 'object')) {
+        console.log(JSON.stringify(__res).replace(/ /g, ''));
+    } else if (typeof __res === 'boolean') {
+        console.log(String(__res));
+    } else {
+        console.log(String(__res));
+    }
+} catch (e) {
+    console.log(`Runtime Error: ${e.message}`);
+}
+"""
+            executable_code = generic_js_wrapper.replace("{user_code}", raw_code)
         else:
-            # Fallback to direct execution
+            # Fallback to direct execution (C++ needs a per-question
+            # hidden_wrapper_code entry — there is no generic C++ harness)
             executable_code = raw_code
         # ---------------------------------------------------------
 

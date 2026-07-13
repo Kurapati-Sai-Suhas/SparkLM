@@ -143,6 +143,22 @@ def test_judge0_unavailable_returns_503(api_client, user, question, monkeypatch)
 
 
 @pytest.mark.django_db
+def test_javascript_submission_smoke(api_client, user, question, monkeypatch):
+    # JS goes through the new generic Node wrapper; with Judge0 mocked this
+    # verifies the plumbing (language mapping + wrapper injection).
+    monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_mock(stdout="1"))
+    api_client.force_authenticate(user=user)
+
+    code = """class Solution {
+    solve(input) { return input; }
+}"""
+    response = submit(api_client, question, code=code, language="javascript")
+
+    assert response.status_code == 200
+    assert response.data["status"] == "accepted"
+
+
+@pytest.mark.django_db
 def test_java_submission_smoke(api_client, user, question, monkeypatch):
     # Java goes through import-stripping + the reflection wrapper; with
     # Judge0 mocked this is a plumbing smoke test, not an execution test.

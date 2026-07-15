@@ -1,123 +1,131 @@
-# Software Requirements Specification (SRS)
-**Project Name:** LearnLM (Intelligent Virtual Study Group Platform)  
-**Version:** 1.0  
-**Role:** Lead AI & Backend Architecture  
+# SparkLM — Adaptive AI Learning Platform
+
+[![CI](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions/workflows/ci.yml/badge.svg)](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions)
+
+SparkLM is a full-stack learning platform whose core is an **adaptive competitive-programming Coding Hub**: instead of serving a static problem list, it models each student's skill (Elo), memory (spaced-repetition half-life), and curriculum position (prerequisite DAG), then routes them to the next problem that maximizes learning — and explains *why* it chose it.
+
+Built with Django REST Framework + Channels (ASGI), React + TypeScript, and PostgreSQL.
 
 ---
 
-## 1. Introduction
+## Why it's different
 
-### 1.1 Purpose
-The purpose of this document is to define the software requirements for LearnLM, an intelligent, cloud-hosted collaborative learning platform. This document outlines the system architecture, AI/ML integrations, API constraints, and cloud infrastructure required to build the platform.
+Platforms like LeetCode treat every user identically. SparkLM makes three bets:
 
-### 1.2 Intended Audience
-This document is intended for frontend developers, backend engineers, AI/ML engineers, and technical recruiters reviewing the project architecture. 
+1. **Routing should be earned by data.** A probabilistic *Traffic Cop* inspects the mean and variance of your last 20 submissions. Erratic or struggling? You get Elo-matched flat practice to rebuild confidence. Consistent? You advance through a prerequisite curriculum graph. Every decision is logged with its predicted success probability and closed out with the real outcome — and a retraining pipeline learns which engine actually works for which students.
+2. **Grades should reflect engineering quality, not just correctness.** The Elo engine reads Judge0's execution telemetry: an O(n) solution under 60 ms earns a 1.5× rating multiplier; a memory-hungry brute force gets penalized. Re-solving an old problem earns exactly zero (anti-farming), while still refreshing your spaced-repetition schedule.
+3. **Recommendations should explain themselves.** Every served problem ships with an explainability payload — a four-axis radar (time, space, logic, recency), the dominant factor (real SHAP attributions over a trained graph network when enabled), and a concrete coaching line: *"Your weakest area is Hash Table (55%) — practice hash-map lookups that replace nested loops."*
 
-### 1.3 Project Scope
-LearnLM moves beyond standard file-sharing platforms by integrating deep learning and adaptive algorithms. It features collaborative workspaces, a "Visual Semantic Search" engine for retrieving un-tagged diagram notes using Deep Learning, and an "Adaptive Coding Portal" that uses a Hybrid AI Engine to personalize learning paths based on the prerequisite structure of the subject.
+## Feature highlights
 
----
+| Area | What's inside |
+|---|---|
+| **Adaptive routing** | Hybrid Traffic Cop (heuristic + trained outcome model), 19-node curriculum DAG with DB-enforced acyclicity, Elo-nearest problem selection, placeholder-content quarantine |
+| **Skill modeling** | Elo with efficiency multipliers and anti-farming clamps, per-topic mastery (accuracy ≥ 80% over ≥ 3 reviews), inactivity decay with double-charge protection |
+| **Memory modeling** | SM-2 style half-life regression `P(t) = 2^(−t/h)`, graph-decay cross-pollination (failing a foundation penalizes dependent topics) |
+| **Explainability** | SHAP over a trained PyTorch-Geometric GCN (feature-flagged), torch-free heuristic fallback with identical schema, weak-topic coach recommendations |
+| **Grading pipeline** | Judge0 sandbox, per-language harnesses (Python/Java/JavaScript generic + per-question wrappers), normalized output comparison, honest status mapping (TLE/compile/runtime) |
+| **AI coach** | Escalating hints on consecutive failures: Socratic nudge (3) → pseudocode (5) → worked example (7+), via n8n/LLM webhook with resilient fallbacks |
+| **Content pipeline** | 2,900+ problem bank maintained by quota-aware, idempotent LLM batch commands (generation, validation gates, multi-language starter code, backfill, restore) |
+| **Collaboration** | JWT-authenticated WebSocket group chat, CRDT (Yjs) collaborative editor, study groups, quizzes, flashcards, document RAG, visual search |
+| **Ops discipline** | 33-test offline suite (all third parties mocked), CI with a Postgres service container, scoped API throttling, environment-driven config, tested backup/restore |
 
-## 2. Overall Description
+## Architecture
 
-### 2.1 Product Perspective
-LearnLM is a distributed web application. It consists of a React/TypeScript frontend (Single Page Application) and a Python/Django backend. The backend serves as a REST API and a "Traffic Cop" that routes requests to various Machine Learning models, external code-execution sandboxes, and cloud storage systems.
+```mermaid
+flowchart LR
+    SPA[React + TS SPA] -->|REST /api| DRF[Django REST / Daphne ASGI]
+    SPA -->|WebSocket /ws| CH[Channels: chat + CRDT]
+    DRF --> PG[(PostgreSQL + pgvector)]
+    DRF --> RD[(Redis: cache, throttles, channels)]
+    DRF -->|sandboxed exec| J0[Judge0 API]
+    DRF -->|content generation| LLM[Groq / Gemini]
+    DRF -->|coach hints| N8N[n8n webhook]
+    subgraph Engines
+      TC[Traffic Cop] --> DAG[Curriculum DAG]
+      TC --> ELO[Elo Engine]
+      HLR[Half-Life Regression]
+      XAI[SHAP / GCN Explainer]
+    end
+    DRF --- Engines
+```
 
-### 2.2 Operating Environment
-* **Frontend:** Modern Web Browsers (Chrome, Firefox, Safari).
-* **Backend:** Python 3.x, Django REST Framework.
-* **Database:** Azure Cosmos DB (MongoDB API).
-* **Cloud Host:** Microsoft Azure (App Service, Static Web Apps, Blob Storage).
+## Quickstart (local development)
 
-### 2.3 Design and Implementation Constraints
-* **Sandboxed Execution:** User-submitted code must NEVER run on the main Django server. It must be isolated via an external API (Judge0/Piston).
-* **AI Latency:** Deep learning inferences (feature extraction, graph traversals) introduce latency. The frontend must implement robust loading states.
-* **CORS:** Strict Cross-Origin Resource Sharing rules must be configured to allow communication between the React frontend and Django backend.
+**Prerequisites:** Python 3.12, Node 20, Docker Desktop.
 
----
+```bash
+# 1. Database
+docker compose up -d          # Postgres (pgvector) on :5432
 
-## 3. System Features & Functional Requirements
+# 2. Backend
+cd backend
+python -m venv .venv && .venv/Scripts/activate    # Windows (source .venv/bin/activate on Unix)
+pip install -r requirements.txt
+cd LearnLM
+# create .env with your API keys (see table below)
+python manage.py migrate
+python manage.py seed_dsa_dag # build the curriculum graph
+python manage.py createsuperuser
+python manage.py runserver    # or: daphne LearnLM.asgi:application
 
-### 3.1 Module A: Collaborative Workspaces & User Management
-* **REQ-1.1:** The system shall allow users to register, log in, and maintain a secure session using JWT (JSON Web Tokens).
-* **REQ-1.2:** Users shall be able to create isolated "Study Groups."
-* **REQ-1.3:** The system shall support Role-Based Access Control (RBAC) within groups (e.g., Admin, Member).
-* **REQ-1.4:** Users shall be able to upload study materials (PDFs, Images, Code snippets) to their specific group workspace.
+# 3. Frontend (new terminal)
+cd studysphere-ai-11
+npm install
+npm run dev                   # http://localhost:5173
+```
 
-### 3.2 Module B: Visual Semantic Search (Diagram Matcher)
-* **REQ-2.1 (Feature Extraction):** Upon image upload, the Django backend shall pass the image through a headless pre-trained Convolutional Neural Network (MobileNetV2) to extract a 1D feature vector representing the image's visual structure.
-* **REQ-2.2 (Vector Storage):** The system shall store this massive feature vector array in the NoSQL database alongside the document's metadata.
-* **REQ-2.3 (Cosine Similarity Engine):** Users shall be able to upload a cropped image (e.g., a diagram) as a search query. The system will extract its vector and use Cosine Similarity math to find the closest matching vectors in the database, returning the original source documents.
+### Environment variables
 
-### 3.3 Module C: Adaptive Coding Portal
-* **REQ-3.1 (In-Browser IDE):** The frontend shall integrate an editor (like Monaco Editor) supporting syntax highlighting and auto-indentation for Java and Python.
-* **REQ-3.2 (Isolated Execution):** When code is submitted, the backend shall route the raw code and hidden test cases to a Judge0/Piston API sandbox and await the Pass/Fail result and execution time.
-* **REQ-3.3 (Data Logging):** The system shall log every submission attempt, including execution time, memory usage, and success rate, to build a historical user profile.
+| Variable | Required | Purpose |
+|---|---|---|
+| `SECRET_KEY` | prod | Django/JWT signing (startup refuses the dev fallback in production) |
+| `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS` | prod | `false` + real hosts in production |
+| `POSTGRES_DB/USER/PASSWORD/HOST/PORT` | — | Defaults match the Docker compose file |
+| `REDIS_URL` | prod | Shared cache, throttle store, and channel layer (multi-instance) |
+| `JUDGE0_API_KEY`, `JUDGE0_API_HOST` | yes | Code execution (RapidAPI) |
+| `GROQ_API_KEY`, `GEMINI_API_KEY` | yes | Content generation and AI study tools |
+| `N8N_WEBHOOK_URL` | optional | LLM coach hints (fallback hints without it) |
+| `ENABLE_SHAP_XAI` | optional | Real SHAP attributions (needs the heavy ML extras) |
+| `VITE_API_URL`, `VITE_WS_URL` | frontend | Backend origins at build time |
 
-### 3.4 Module D: The Hybrid AI Recommendation Router
-* **REQ-4.1 (Topic Tagging):** All subjects in the database shall be tagged with a `structure_type` (either `hierarchical` or `flat`).
-* **REQ-4.2 (The Traffic Cop):** When a user requests the "next question," the backend router shall check the subject's structure tag to determine the recommendation engine.
-* **REQ-4.3 (Hierarchical Engine - GNN):** If the topic is structured (e.g., Data Structures & Algorithms), the router shall query a Graph Neural Network (or Graph Database representation) to recommend questions based on prerequisite knowledge, providing explainable feedback.
-* **REQ-4.4 (Flat Engine - Elo/IRT):** If the topic is unstructured (e.g., Tech Trivia), the router shall utilize an Item Response Theory or Elo Rating algorithm to dynamically adjust the difficulty based strictly on the user's current score.
+## Content pipeline
 
----
+The problem bank is maintained by idempotent management commands — all dry-run-friendly, all resume automatically after the daily LLM quota:
 
-## 4. External Interface Requirements
+| Command | Purpose |
+|---|---|
+| `seed_dsa_dag` | (Re)build the curriculum DAG over existing topics — never cascades into question data |
+| `reseed_questions --topic "Tree" --delay 2` | Generate full content + test cases + 4-language starter code for placeholder questions |
+| `backfill_boilerplate` | Add missing language stubs to already-seeded questions (~5× cheaper than regeneration) |
+| `restore_questions` | Re-import missing rows for named topics from the canonical CSV |
+| `cleanup_question_bank --apply` | Remove junk topics with their questions (dry-run by default) |
+| `calculate_decay` | Checkpointed inactivity Elo decay sweep |
+| `retrain_ai` | Retrain the routing classifier on real recommendation outcomes (≥100 required) |
 
-### 4.1 User Interfaces
-* Clean, responsive UI built with React.
-* Dashboards displaying user rating progression (Elo scores) and topic mastery.
+## Testing
 
-### 4.2 Software Interfaces
-* **Judge0 / Piston API:** For secure code compilation and testing.
-* **Azure SDKs:** `azure-storage-blob` for image uploads, and `pymongo` to connect to Cosmos DB.
+```bash
+cd backend/LearnLM
+python -m pytest groups        # 33 tests, fully offline (Judge0 + LLMs mocked)
+```
 
----
+The suite covers routing telemetry and thresholds, mastery rules, grading statuses, the anti-farming guard, coach escalation, XAI schema guarantees, cache invalidation (including queryset deletes), and every content-ops command. CI runs it against a real Postgres service container on every push.
 
-## 5. Non-Functional Requirements
+## Deployment
 
-### 5.1 Performance
-* Standard REST API calls should resolve in < 200ms.
-* AI Inference calls (Visual Search, Code Compilation) should resolve in < 3000ms.
+Everything is configuration, not code: set the environment variables above and deploy. Reference zero-cost stack: **Neon** (Postgres) + **Upstash** (Redis) + **Render** (Daphne web service) + **Vercel** (SPA). Note: the optional ML extras (torch, shap, transformers) add ~2 GB — deploy with `ENABLE_SHAP_XAI=false` on small instances; the heuristic explainer keeps the identical response schema.
 
-### 5.2 Security
-* User passwords must be hashed (Argon2 or bcrypt) before database insertion.
-* All API endpoints handling user data must require a valid Bearer Token.
-* Direct file uploads must be sanitized to prevent malicious script injection before being sent to Azure Blob Storage.
+A full Software Requirements Specification (25 pages: requirements, algorithms, data model, future scope, architecture roadmap) lives in [`docs/SparkLM_SRS.docx`](docs/SparkLM_SRS.docx).
 
-### 5.3 Scalability
-* The AI models must be configured to run efficiently on standard CPU cloud instances (PaaS) without requiring dedicated GPU infrastructure, ensuring cost-effective scaling via Azure App Service.
+## Roadmap
 
----
+- **Review Queue** — a daily "due for review" list computed from each topic's memory half-life (the spaced-repetition payoff)
+- Elo-matched 1v1 duels; post-solve LLM code review feeding the IRT latents
+- Router prediction-accuracy dashboard on the existing recommendation/outcome logs
+- Async grading queue (Celery) with per-test-case progress over WebSockets
+- Migration off the deprecated `google-generativeai` SDK; generated-question verification harness
 
-## 6. System & Cloud Architecture (Microsoft Azure)
+## Author
 
-### 6.1 Data Flow Diagram
-The following diagram illustrates the interaction between the frontend, the Django routing layer, the isolated sandboxes, and the Azure cloud infrastructure:
-
-```text
-[ USER (React Frontend) ]
-        |
-        | (JSON / REST API over HTTPS)
-        v
-[ AZURE APP SERVICE (Hosting) ]
-[      DJANGO REST API        ]
-        |
-        +-- (Uploads Diagram) ----> [ MobileNetV2 (Feature Extractor) ] 
-        |                                       |
-        |                                       v
-        +-- (Submits Code) -------> [ Judge0 / Piston API Sandbox ]
-        |                                       |
-        |                                       v
-        +-- (Requests Next Q) ----> [ HYBRID AI ROUTER (Traffic Cop) ]
-                                                |
-                                    +-----------+-----------+
-                                    |                       |
-                               [ GNN Engine ]         [ Elo Engine ]
-                               (Hierarchical)            (Flat)
-                                    |                       |
-=============================================================================
-                                THE CLOUD (AZURE)
-        
-  [ AZURE BLOB STORAGE ]                    [ AZURE COSMOS DB ]
-  (Saves Raw Images/PDFs)                   (Saves Vectors, Profiles, Graph)
+**Kurapati Sai Suhas** — [GitHub](https://github.com/Kurapati-Sai-Suhas) · [LinkedIn](https://www.linkedin.com/in/sai-suhas-kurapati-52b1482bb/)

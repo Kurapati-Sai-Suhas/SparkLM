@@ -34,18 +34,6 @@ interface BadgeItem {
   color: "primary" | "amber" | "indigo";
 }
 
-const LEADERBOARD: LeaderUser[] = [
-  { rank: 1, name: "Aarav Mehta",  handle: "@aarav",  elo: 2487 },
-  { rank: 2, name: "Priya Sharma", handle: "@priya",  elo: 2412 },
-  { rank: 3, name: "Daniel Park",  handle: "@dpark",  elo: 2356 },
-];
-
-const BADGES: BadgeItem[] = [
-  { id: "b1", name: "100 Bugs Squashed", description: "Resolved 100 errors",   icon: Bug,     color: "primary" },
-  { id: "b2", name: "Graph Master",      description: "Solved every DAG node",  icon: Network, color: "indigo"  },
-  { id: "b3", name: "Lightning Coder",   description: "10 problems in 1 hour",  icon: Zap,     color: "amber"   },
-];
-
 const RANK_META: Record<
   1 | 2 | 3,
   { ring: string; text: string; bg: string; glow: string; label: string }
@@ -106,8 +94,8 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 
 export default function GamificationDashboard() {
   const [streak, setStreak] = useState(0);
-  const [leaderboard, setLeaderboard] = useState<LeaderUser[]>(LEADERBOARD);
-  const [badges, setBadges] = useState<any[]>(BADGES);
+  const [leaderboard, setLeaderboard] = useState<LeaderUser[]>([]);
+  const [badges, setBadges] = useState<any[]>([]);
 
   useEffect(() => {
     fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/coding-portals/gamification/`, {
@@ -178,8 +166,13 @@ export default function GamificationDashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-3 space-y-2">
-          {LEADERBOARD.map((u) => {
-            const m = RANK_META[u.rank];
+          {leaderboard.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-3">
+              No ranked coders yet — solve problems to claim the top spot.
+            </p>
+          )}
+          {leaderboard.map((u) => {
+            const m = RANK_META[(u.rank as 1 | 2 | 3)] || RANK_META[3];
             return (
               <div
                 key={u.rank}
@@ -241,11 +234,16 @@ export default function GamificationDashboard() {
               variant="outline"
               className="text-[10px] font-mono border-border/60 text-muted-foreground"
             >
-              {BADGES.length} new
+              {badges.length} new
             </Badge>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-3 space-y-2">
+          {badges.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-3">
+              No badges earned yet — keep solving to unlock achievements.
+            </p>
+          )}
           {badges.map((b) => {
             const c = BADGE_COLOR[b.color as keyof typeof BADGE_COLOR] || BADGE_COLOR.primary;
             const Icon = ICONS[b.icon] || Award;

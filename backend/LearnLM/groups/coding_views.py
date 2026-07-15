@@ -135,12 +135,6 @@ class GamificationDashboardView(APIView):
                 "icon": ub.badge.icon_name
             })
             
-        # Fallback if no badges (for UI showcase)
-        if not badges:
-            badges = [
-                {"id": "b1", "name": "First Steps", "description": "Joined LearnLM", "color": "primary", "icon": "Award"}
-            ]
-
         return Response({
             "streak": streak,
             "leaderboard": leaderboard,

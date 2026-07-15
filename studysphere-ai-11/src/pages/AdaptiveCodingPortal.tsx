@@ -502,7 +502,7 @@ export default function AdaptiveCodingPortal() {
                   />
                 </div>
 
-                {/* AGENTIC COACH — ChatGPT/Claude-style floating chat bubble */}
+                {/* AGENTIC COACH — floating chat bubble */}
                 {results.agentic_hint && (
                   <div className="mt-5 relative animate-in slide-in-from-bottom-2 fade-in duration-500">
                     <div className="flex items-start gap-3">

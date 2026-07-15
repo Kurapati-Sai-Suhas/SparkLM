@@ -1,0 +1,307 @@
+[33mcommit 00c331af0f88f01b4388dc619982d8c490446b84[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: backfill_boilerplate — add missing language stubs to seeded questions
+    
+    Stub-only LLM calls (~5x cheaper than full regeneration) that mirror each
+    question''s existing Python starter into java/cpp/javascript. Skips
+    questions with full coverage, so re-running resumes automatically; stops
+    cleanly on the daily token quota. Dry-run by default preview via --dry-run.
+    
+    Also: connection.close() before slow AI calls (here and in
+    reseed_questions) is now guarded with in_atomic_block so the commands
+    behave under transactional test runners.
+    
+    Verified live: dry-run generated a correct twoSum(nums, target) JS stub
+    mirroring Two Sum''s Python signature. Tests: 33/33.
+
+[33mcommit d832c433cce71cd12714d8f7464c77978eae8f4e[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: generic JavaScript execution wrapper (mirrors Python generic harness)
+
+[33mcommit ad5113bd9a3182d2eb0016221abf6331e0df91a5[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: multi-language starter code, actionable XAI recommendations, JS submissions
+    
+    - generate_full_question now requests starter_code for python/java/cpp/
+      javascript; reseed_questions validates and saves whichever languages
+      come back (legacy string form still accepted). Existing questions keep
+      their current boilerplate until reseeded.
+    - Fixed JS submissions: the serializer accepts language javascript but
+      LANGUAGE_IDS only mapped js, so every JS submission errored with
+      Unsupported language before reaching Judge0.
+    - XAI payload gains an actionable layer: weak_topics (the student''s
+      lowest-accuracy reviewed topics) and a recommendation string that names
+      the weakest topic and a concrete technique to drill (PRACTICE_TIPS per
+      curriculum topic + a dominant-factor tip). Works identically on the
+      SHAP and heuristic paths; rendered as a Coach Recommendation card in
+      AdaptiveCodingPortal.
+    
+    Tests: 31/31 passing; frontend build verified.
+
+[33mcommit 685d8ac5ef9ba61ac4b7c4b562b119a374647037[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    fix: prompt LLM to serialize trees/linked lists in stdin (empty-stdin tree cases were failing validation)
+
+[33mcommit 4f95c7e52704fa926d1a3dca687b608a6f1c8fd0[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: admin search and filters for Questions and CodeSubmissions
+
+[33mcommit 0336b08c49942fc7a9579988554e52a4509095a0[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: stop reseed cleanly on daily LLM quota; never serve placeholder questions
+    
+    Reseed ergonomics (from live run observations - Groq free tier caps at
+    100k tokens/day, roughly 90 questions):
+    - generate_full_question raises DailyQuotaExhausted on the provider's
+      per-day rate-limit error (per-minute limits still retry normally);
+      reseed_questions catches it and stops the run cleanly instead of
+      grinding 3x-retry backoffs against a quota that resets in hours.
+      Untouched questions keep the placeholder marker, so the next run
+      resumes automatically - as observed working across two live runs.
+    
+    Recommendation safety:
+    - Question.PLACEHOLDER_MARKER is now the single source of truth (was
+      duplicated across reseed_questions and restore_questions).
+    - NextProblemView excludes placeholder questions from all three
+      selection paths (hierarchical, flat, fallback). Until now an unseeded
+      question could be served to a student as boilerplate 'In this
+      problem, you are tasked with solving the...' text with no test cases.
+      With placeholders unservable, partial reseeding is safe and finishing
+      all ~1,500 stops being a launch blocker.
+    
+    Tests: 31/31 passing (new: placeholder never served even at closer Elo
+    distance; completion response when only placeholders remain).
+
+[33mcommit 92551da9a095914e7d382f179e9bb4572838dd88[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    chore: untrack reseed_failures.json runtime artifact
+
+[33mcommit ee2112794746937380058a1fc7ee77fde472c1d9[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: deploy-readiness — working SHAP XAI, portable config, complete requirements
+    
+    SHAP explainer (ENABLE_SHAP_XAI path) actually works now:
+    - Old wiring built a fresh UNTRAINED GCN per request and handed it to
+      shap.DeepExplainer, which crashed instantly (the GCN forward takes
+      (x, edge_index); SHAP calls model(x)) — and would have explained
+      random weights even without the crash.
+    - New engine: built once per process (thread-safe for Daphne's sync
+      thread pool), over the TRAINED weights in models_data/gcn_dsa.pth,
+      with an adapter fixing the forward signature and a lock around SHAP
+      computation. DeepExplainer is probed for silent all-zero attributions
+      (torch-geometric layers trigger this) and falls back to
+      GradientExplainer; the background spans the feature range because the
+      trained model has dead-ReLU regions near the origin where gradients
+      are legitimately zero.
+    - SHAP output normalized to the SAME schema the frontend reads for the
+      heuristic path (shap_values/dominant_factor/success_probability), and
+      ANY failure falls back to the heuristic — /code/next/ can never 500
+      over explainability. Verified live: distinct, non-degenerate
+      attributions per user profile; success prob 21.7% (weak) vs 81.2%
+      (strong) from the trained GCN.
+    - tensor_builder is now torch-free (returns a plain feature list); the
+      SHAP boundary converts. The default heuristic path no longer needs
+      PyTorch loaded at all.
+    
+    Deploy blockers fixed:
+    - requirements.txt listed 9 packages; the app imports ~25. A fresh
+      environment could not boot. Now complete and pinned from the working
+      venv, with the heavy ML extras (torch/shap/transformers) marked.
+    - Frontend had 14 hardcoded localhost:8000 / 127.0.0.1:8000 URLs (11
+      HTTP + 3 WebSocket) across 12 files; all now use VITE_API_URL /
+      VITE_WS_URL with local fallbacks (.env.example added).
+    - Judge0 host header was hardcoded to judge0-ce while settings defaulted
+      to judge0-extra-ce; both host and base URL now come from
+      JUDGE0_API_HOST (matches the existing .env).
+    - STATIC_ROOT added (collectstatic); production refuses to boot on the
+      well-known dev SECRET_KEY; channel layer upgrades to Redis when
+      REDIS_URL is set and channels-redis is installed (in-memory only works
+      for a single Daphne process).
+    
+    Tests: 30/30 passing (new: SHAP payload schema guarantee under
+    ENABLE_SHAP_XAI). Frontend production build verified.
+
+[33mcommit 2655ff6dcc399c9d01c018a9aa2219a0038c72a1[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: align curriculum DAG with question bank; restore missing pieces
+    
+    Taxonomy alignment:
+    - seed_dsa_dag rewritten: curriculum nodes now reference the EXISTING
+      question-bank topics (Array, Tree, Hash Table, ...) instead of creating
+      a parallel set of empty topics (Arrays, Trees, Hashing, ...) that the
+      router recommended but could never serve. 19 nodes, 19 edges, every
+      node has questions.
+    - CRITICAL: removed the portal-delete on every seeder run. Topic.portal
+      and Question.topic both cascade, so once real topics joined the portal
+      a re-run deleted every question under the shared-name topics. This is
+      exactly what happened in practice: one old-seeder run wiped the ~109
+      questions under Two Pointers / Stack / Binary Search / Greedy /
+      Backtracking / Bit Manipulation. The portal is now get_or_create'd.
+    - Legacy empty duplicate topics are deleted only when they hold zero
+      questions (cascade guard).
+    
+    Recovery + tooling:
+    - restore_questions: re-imports missing rows for the wiped topics from
+      the original LeetCode CSV (handles the Python-list-repr Topic_tags
+      format), skips existing titles, restores as reseedable placeholders.
+      Dry-run by default. All 109 lost questions recovered.
+    - cleanup_question_bank: dry-run-by-default removal of blank-named
+      topics (85 orphaned placeholders from the CSV's empty-tag rows) and
+      optionally non-DSA categories (Database/Shell/Concurrency).
+    - generate_full_question restored in ai_services: reseed_questions
+      imported it but it never existed in any commit (same fix-pass loss as
+      route_recommendation). Groq JSON generation returning content /
+      starter_code / hidden_test_cases, None on failure, never filler data.
+      Verified live via reseed_questions --dry-run.
+    
+    Tests: 29/29 passing.
+
+[33mcommit 23733ddccb82e759f2ab24d9662e30701722d6cd[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: Phase 3 — production hardening: config, throttling, Elo integrity, outcome-based routing
+    
+    Settings (env-driven, dev defaults unchanged):
+    - DEBUG / ALLOWED_HOSTS / Postgres credentials from environment; secure
+      cookie + proxy-SSL flags applied automatically when DEBUG is off.
+    - CACHES: Redis via REDIS_URL when set (shared across workers, required
+      for cross-worker DAG cache invalidation), LocMemCache fallback for dev.
+    - CORS allow-all restricted to DEBUG; production uses the whitelist.
+    - Throttle rates: global user rate raised 20 -> 120/min (the SPA fires
+      several calls per page load; 20/min 429s normal browsing), and new
+      scoped rates for expensive endpoints.
+    
+    Endpoint protection:
+    - ScopedRateThrottle on /code/run/ and /code/submit/ (judge0: 10/min —
+      each request fans out to N paid Judge0 calls) and /code/next/
+      (recommend: 30/min — can trigger LLM test-case generation).
+    
+    Elo integrity:
+    - Re-solving an already-accepted problem no longer changes rating
+      (repeats still update mastery/HLR — spaced repetition is legitimate,
+      rating farming is not).
+    - Removed the guaranteed +2 floor on accepted solutions; gains clamp to
+      [0, 50] so the expected-score curve decides what trivial wins are worth.
+    
+    Outcome-based routing flywheel:
+    - retrain_ai now trains on [avg_acc, var_acc, avg_elo, engine_flag] ->
+      actual_result_correct instead of predicting its own past engine choice
+      (a self-fulfilling loop with no ground truth). RandomForest rather
+      than logistic regression because engine suitability is an interaction
+      with student ability, which a linear model cannot express.
+    - RoutingClassifier scores both engines with the outcome model and
+      routes to the higher predicted success; legacy 3/771-feature .pkl
+      models still load and behave as before.
+    - gnn_engine: mastery_dict keyed by topic NAME to match graph nodes;
+      keying by Topic objects made every lookup miss, so the GCN always saw
+      cold-start features.
+    
+    Tests (29 total, all passing against Postgres):
+    - Repeat-solve Elo guard; outcome classifier learns the ability-engine
+      interaction end-to-end through predict_route; training refuses
+      degenerate all-one-class data; build_outcome_dataset feature/label
+      audit.
+
+[33mcommit 437b4e0db39c2d3bad5e066c0689f52be5266a92[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: Phase 2 — hardening: cache invalidation, honest grading, offline tests
+    
+    DAG cache invalidation:
+    - invalidate_dag_cache now clears every cached graph via a key registry
+      (works on LocMemCache, not just redis delete_pattern) and is wired to
+      TopicPrerequisite post_save/post_delete signals — signals also cover
+      the queryset deletes used by seed_dsa_dag. Curriculum edits previously
+      served a stale DAG for up to 30 minutes per worker.
+    
+    Honest grading:
+    - Removed the hardcoded Two Sum expected-output patches; bad test data
+      should be fixed in the DB (reseed_questions), not silently rewritten
+      at grading time.
+    - Fixed final-status detection: results[] never stored status_id, so
+      time_limit / compile_error / runtime_error always collapsed to
+      wrong_answer (also skewing MIRT/quality signals downstream).
+    - generate_test_cases now validates the LLM response shape and returns
+      None on failure instead of [{stdin: 1, expected_output: 1}];
+      NextProblemView no longer persists failed generations (the old
+      fallback corrupted Question.hidden_test_cases permanently, grading any
+      code that printed 1 as accepted).
+    - Submit-path debug prints (user code output per test case) replaced
+      with logger.debug.
+    
+    Offline test suite:
+    - test_coding_views.py rewritten with Judge0 mocked at the module
+      boundary: no network, no API key needed. The old suite hit the live
+      Judge0 API and asserted a response key (agentic_coach) the view never
+      returned. Covers: accepted/wrong/TLE/503 flows, Elo + mastery updates,
+      coach trigger at 3 fails, escalation to the 5-fail pseudocode tier,
+      webhook-timeout resilience, NextProblemView response schema,
+      failed-generation non-persistence, and onboarding calibration.
+    - tests.py gains DAG cache invalidation regression tests (instance and
+      queryset deletes).
+    - 25 tests collected; run with: python -m pytest groups (needs Postgres).
+    
+    Verified: compileall clean; manage.py check passes (0 issues).
+
+[33mcommit 3827965421c0a15cd9f1b1df9bc0402d2d57baef[m
+Author: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+Commit: Kurapati-Sai-Suhas <kurapatisai1683@gmail.com>
+
+    feat: Phase 1 — make the hybrid router actually adaptive
+    
+    Routing telemetry (SRS FR-RTR-01):
+    - New compute_routing_telemetry(user, window=20) in hybrid_router:
+      mean + variance of correctness over the last 20 submissions
+      (binary accepted/not — per-test-case fractions are not persisted).
+      Cold start returns consistent-looking defaults so new users route to
+      the hierarchical DAG and start at a foundation topic.
+    - NextProblemView and route_recommendation now feed real telemetry to
+      RoutingClassifier.predict_route. Previously both passed hardcoded
+      avg_acc=0.6 / var_acc=0.2, which meant every user always routed
+      hierarchical and the Traffic Cop was effectively a constant.
+    - Routing decisions are logged with their inputs for observability.
+    
+    Mastery definition (SRS FR-HRCH-01):
+    - One shared rule: accuracy >= MASTERY_ACCURACY_THRESHOLD (0.8) via
+      get_mastered_topic_names(user). Previously three consumers used three
+      rules; NextProblemView used per-topic elo_rating >= 1300, which is
+      never updated anywhere, so the mastered set was always empty and the
+      DAG recommended the root topic forever.
+    
+    Agentic coach + SM-2 quality:
+    - Coach failure count now scans consecutive failures over the last 15
+      submissions for the question; the old [1:3] slice capped the count at
+      3, so the 5-fail (pseudocode) and 7-fail (worked example) escalation
+      tiers could never fire.
+    - SM-2 quality now uses consecutive failures immediately preceding a
+      successful attempt instead of the lifetime fail count, which
+      permanently capped quality at 3 after two historic fails.
+    
+    Tests:
+    - RoutingTelemetryTests: cold start -> hierarchical, erratic history
+      (var 0.25) -> flat, consistent history -> hierarchical, and the
+      20-submission window boundary.
+    - MasteryDefinitionTests: 0.8 threshold incl. boundary value.
+      (DB-backed; run with manage.py test once Postgres is up.)
+    
+    Verified: compileall clean; manage.py check passes (0 issues).

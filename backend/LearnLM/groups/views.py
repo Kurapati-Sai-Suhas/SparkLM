@@ -473,6 +473,17 @@ class MasteryMapView(APIView):
             mastery_map = HierarchicalEngine.get_mastery_map(subject, mastered)
         except ValidationError:
             mastery_map = {}
+
+        # Enrich with the user's real per-topic accuracy so the Learning
+        # Path shows genuine progress numbers.
+        from .models import UserTopicMastery
+        accuracy = dict(
+            UserTopicMastery.objects.filter(user=request.user)
+            .values_list('topic__name', 'accuracy')
+        )
+        for name, node in mastery_map.items():
+            node['accuracy_pct'] = round(accuracy.get(name, 0.0) * 100, 1)
+
         return Response(mastery_map)
 
     def post(self, request):

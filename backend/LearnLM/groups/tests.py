@@ -129,9 +129,9 @@ class RoutingTelemetryTests(TestCase):
 
 
 class MasteryDefinitionTests(TestCase):
-    """SRS FR-HRCH-01: mastery = accuracy >= 0.8, one shared definition."""
+    """SRS FR-HRCH-01: mastery = accuracy >= 0.8 over >= 3 reviews, one shared definition."""
 
-    def test_mastered_topics_use_accuracy_threshold(self):
+    def test_mastered_topics_use_accuracy_and_review_thresholds(self):
         from .models import CodingPortal, UserTopicMastery
         from .hybrid_router import get_mastered_topic_names
 
@@ -142,10 +142,13 @@ class MasteryDefinitionTests(TestCase):
         t_done = Topic.objects.create(name="MasteredTopic", structure_type="hierarchical", portal=portal)
         t_wip  = Topic.objects.create(name="LearningTopic", structure_type="hierarchical", portal=portal)
         t_edge = Topic.objects.create(name="EdgeTopic", structure_type="hierarchical", portal=portal)
+        t_luck = Topic.objects.create(name="LuckyTopic", structure_type="hierarchical", portal=portal)
 
-        UserTopicMastery.objects.create(user=user, topic=t_done, accuracy=0.85)
-        UserTopicMastery.objects.create(user=user, topic=t_wip, accuracy=0.50)
-        UserTopicMastery.objects.create(user=user, topic=t_edge, accuracy=0.80)  # boundary: counts
+        UserTopicMastery.objects.create(user=user, topic=t_done, accuracy=0.85, reviews=5)
+        UserTopicMastery.objects.create(user=user, topic=t_wip, accuracy=0.50, reviews=10)
+        UserTopicMastery.objects.create(user=user, topic=t_edge, accuracy=0.80, reviews=3)  # both boundaries: counts
+        # One lucky solve — perfect accuracy but only 1 review: must NOT count.
+        UserTopicMastery.objects.create(user=user, topic=t_luck, accuracy=1.0, reviews=1)
 
         mastered = set(get_mastered_topic_names(user))
         self.assertEqual(mastered, {"MasteredTopic", "EdgeTopic"})

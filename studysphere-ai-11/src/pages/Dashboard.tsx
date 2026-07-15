@@ -24,7 +24,8 @@ import {
 import api, { userAPI } from "@/services/api";
 import GamificationDashboard from "@/components/GamificationDashboard";
 
-// Dummy shape data for the Study Hours sparkline (the BIG number stays = stats.study_hours)
+// Decorative sparkline shape only — the headline number is real (stats.study_hours);
+// a per-day study-hours time series is not tracked yet.
 const STUDY_TREND = [
   { v: 2 }, { v: 4 }, { v: 3 }, { v: 6 },
   { v: 5 }, { v: 8 }, { v: 7 }, { v: 10 },

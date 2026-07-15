@@ -29,10 +29,13 @@ import os
 # SHARED PEDAGOGICAL DEFINITIONS
 # ─────────────────────────────────────────────────────────────
 
-# SRS FR-HRCH-01: a topic counts as mastered at >= 80% accuracy. Defined
-# once here so every consumer (NextProblemView, HybridRouterView,
-# MasteryMapView) agrees — they previously used three different rules.
+# SRS FR-HRCH-01: a topic counts as mastered at >= 80% accuracy over at
+# least MASTERY_MIN_REVIEWS attempts. Defined once here so every consumer
+# (NextProblemView, HybridRouterView, MasteryMapView) agrees. The review
+# floor prevents a single lucky solve (accuracy 1.0 after 1 attempt) from
+# unlocking downstream curriculum topics.
 MASTERY_ACCURACY_THRESHOLD = 0.8
+MASTERY_MIN_REVIEWS = 3
 
 
 def get_mastered_topic_names(user) -> list:
@@ -40,7 +43,9 @@ def get_mastered_topic_names(user) -> list:
     from groups.models import UserTopicMastery
     return list(
         UserTopicMastery.objects.filter(
-            user=user, accuracy__gte=MASTERY_ACCURACY_THRESHOLD
+            user=user,
+            accuracy__gte=MASTERY_ACCURACY_THRESHOLD,
+            reviews__gte=MASTERY_MIN_REVIEWS,
         ).values_list('topic__name', flat=True)
     )
 
@@ -266,7 +271,15 @@ class HierarchicalEngine:
         """
         graph    = cls._get_graph(subject)
         mastered = set(mastered_topics)
-        result   = {}
+
+        # Topological depth (0 = root) so the frontend can lay out real
+        # DAG columns instead of guessing.
+        depth = {}
+        for node in nx.topological_sort(graph):
+            preds = list(graph.predecessors(node))
+            depth[node] = 0 if not preds else max(depth[p] for p in preds) + 1
+
+        result = {}
         for node in graph.nodes:
             prereqs  = list(graph.predecessors(node))
             unlocked = all(p in mastered for p in prereqs) if prereqs else True
@@ -275,6 +288,7 @@ class HierarchicalEngine:
                 "unlocked":      unlocked,
                 "prerequisites": prereqs,
                 "unlocks":       list(graph.successors(node)),
+                "depth":         depth.get(node, 0),
             }
         return result
 

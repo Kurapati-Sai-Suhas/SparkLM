@@ -36,16 +36,7 @@ interface TopicNode {
   column: number; // 0..N — defines DAG depth
 }
 
-const CURRICULUM: TopicNode[] = [
-  { id: "arr",    name: "Arrays",         mastery: 92, status: "mastered",   column: 0 },
-  { id: "str",    name: "Strings",        mastery: 87, status: "mastered",   column: 0 },
-  { id: "ptr",    name: "Pointers",       mastery: 54, status: "learning",   column: 1 },
-  { id: "hash",   name: "Hash Tables",    mastery: 71, status: "learning",   column: 1 },
-  { id: "ll",     name: "Linked Lists",   mastery: 32, status: "struggling", column: 2 },
-  { id: "stk",    name: "Stacks & Queues",mastery: 28, status: "struggling", column: 2 },
-  { id: "tree",   name: "Trees",          mastery: 0,  status: "locked",     column: 3 },
-  { id: "graph",  name: "Graphs",         mastery: 0,  status: "locked",     column: 3 },
-];
+// Curriculum comes exclusively from GET /api/ai/mastery-map/ — no mock data.
 
 const STATUS_META: Record<
   NodeStatus,
@@ -97,14 +88,12 @@ const STATUS_META: Record<
   },
 };
 
-const RECOMMENDED_NODE_ID = "ptr";
-
 export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?: (topic: string) => void }) {
   const [searchParams] = useSearchParams();
   const subject = searchParams.get('topic') || 'Array';
-  
-  const [curriculum, setCurriculum] = useState<TopicNode[]>(CURRICULUM);
-  const [activeId, setActiveId] = useState<string>(RECOMMENDED_NODE_ID);
+
+  const [curriculum, setCurriculum] = useState<TopicNode[]>([]);
+  const [activeId, setActiveId] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -116,24 +105,21 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
         });
         if (res.ok) {
           const data = await res.json();
-          // Transform backend data to frontend TopicNode[] format
           if (data && Object.keys(data).length > 0) {
+             // Real per-topic accuracy and DAG depth come from the backend.
              const nodes: TopicNode[] = Object.keys(data).map((key, index) => {
                const nodeData = data[key];
+               const mastery = Math.round(nodeData.accuracy_pct ?? 0);
                let status: NodeStatus = 'locked';
                if (nodeData.mastered) status = 'mastered';
-               else if (nodeData.unlocked) status = 'learning';
-               
-               // Mastery score could come from backend if added, otherwise mock for now
-               const mastery = nodeData.mastered ? Math.floor(Math.random() * 20) + 80 : 
-                               nodeData.unlocked ? Math.floor(Math.random() * 60) : 0;
-                               
+               else if (nodeData.unlocked) status = mastery > 0 && mastery < 40 ? 'struggling' : 'learning';
+
                return {
                  id: key,
-                 name: key.replace('_', ' '),
+                 name: key,
                  mastery,
                  status,
-                 column: index % 4 // Rough DAG depth mock
+                 column: nodeData.depth ?? index % 4,
                };
              });
              setCurriculum(nodes);
@@ -151,6 +137,16 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
 
   const columns = Array.from(new Set(curriculum.map((n) => n.column))).sort();
   const activeNode = curriculum.find((n) => n.id === activeId) || curriculum[0];
+
+  if (!loading && curriculum.length === 0) {
+    return (
+      <div className="relative min-h-screen bg-background text-foreground p-6 md:p-8 flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">
+          Curriculum graph unavailable — seed the DSA curriculum (manage.py seed_dsa_dag) and refresh.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -195,7 +191,7 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
                               const meta = STATUS_META[node.status];
                               const Icon = meta.icon;
                               const isActive = node.id === activeId;
-                              const isRecommended = node.id === RECOMMENDED_NODE_ID;
+                              const isRecommended = node.id === activeId;
 
                               return (
                                 <Tooltip key={node.id}>

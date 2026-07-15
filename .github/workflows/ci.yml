@@ -8,35 +8,55 @@ on:
 
 jobs:
   backend-tests:
-    name: Backend Pytest
+    name: Backend Tests (pytest + Postgres)
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11"]
+    services:
+      postgres:
+        image: ankane/pgvector:latest
+        env:
+          POSTGRES_DB: learnlm_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: yourpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
+
+    - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
-        
+        python-version: "3.12"
+        cache: pip
+        cache-dependency-path: backend/requirements.txt
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r backend/requirements.txt
-        
-    - name: Lint with flake8 (Optional but recommended)
+
+    - name: Lint with flake8 (syntax errors and undefined names)
       run: |
         pip install flake8
-        # stop the build if there are Python syntax errors or undefined names
         flake8 backend/LearnLM --count --select=E9,F63,F7,F82 --show-source --statistics
-        
+
     - name: Check syntax via compileall
       run: |
-        python -m compileall backend/LearnLM
+        python -m compileall -q backend/LearnLM
+
+    - name: Run test suite
+      working-directory: backend/LearnLM
+      env:
+        POSTGRES_HOST: 127.0.0.1
+        SECRET_KEY: ci-only-secret-key
+      run: |
+        python -m pytest groups -q
 
   frontend-build:
     name: Frontend Vite Build
@@ -44,18 +64,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Use Node.js 20.x
       uses: actions/setup-node@v4
       with:
         node-version: '20.x'
         cache: 'npm'
         cache-dependency-path: studysphere-ai-11/package-lock.json
-        
+
     - name: Install dependencies
       working-directory: studysphere-ai-11
       run: npm ci --legacy-peer-deps
-      
+
     - name: Build frontend
       working-directory: studysphere-ai-11
       run: npm run build

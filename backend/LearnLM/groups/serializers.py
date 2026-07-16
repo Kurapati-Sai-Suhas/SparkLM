@@ -98,14 +98,12 @@ from .models import Question
 ALLOWED_LANGUAGES = {'python', 'java', 'cpp', 'javascript'}
 
 class CodeSubmitSerializer(serializers.Serializer):
+    # NOTE: no test_cases field. Grading always reads hidden test cases from
+    # the Question row; a client-supplied list was dead input and pure
+    # attack surface. With the field removed, DRF silently drops the key.
     problem_id = serializers.IntegerField()
     code = serializers.CharField()
     language = serializers.CharField()
-    test_cases = serializers.ListField(
-        child=serializers.DictField(), 
-        required=False,
-        default=list
-    )
 
     def validate_problem_id(self, value):
         if not Question.objects.filter(id=value).exists():

@@ -196,6 +196,9 @@ REST_FRAMEWORK = {
         # /code/next/ can trigger an LLM test-case generation.
         'judge0': '10/minute',
         'recommend': '30/minute',
+        # Token obtain/refresh: keyed by IP for anonymous callers, this is
+        # the credential-stuffing brake (frozen architecture §7).
+        'auth': '10/minute',
     }
 }
 

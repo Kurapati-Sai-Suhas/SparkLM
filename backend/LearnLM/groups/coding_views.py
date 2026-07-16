@@ -805,8 +805,12 @@ class NextProblemView(APIView):
             "difficulty": diff_text,
             "description": question.content, 
             "explanation": xai_explanation,
-            "boilerplate_code": question.boilerplate_code, 
-            "hiddenTestCases": question.hidden_test_cases,
+            "boilerplate_code": question.boilerplate_code,
+            # First case only, for the Run button — its content is already
+            # public in the problem statement's Examples block. Full hidden
+            # test cases never leave the server (grading reads them from the
+            # DB, so the client has no legitimate use for them).
+            "sample_case": question.hidden_test_cases[0] if question.hidden_test_cases else None,
             "advanced_xai": advanced_data
         })
     

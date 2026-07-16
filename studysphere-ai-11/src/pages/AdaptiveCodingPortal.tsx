@@ -89,7 +89,6 @@ export default function AdaptiveCodingPortal() {
           code: code,
           language: language,
           problem_id: problem.id,
-          test_cases: problem.hiddenTestCases || [],
         }),
       });
       const data = await response.json();

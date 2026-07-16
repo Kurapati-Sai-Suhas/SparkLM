@@ -1,7 +1,8 @@
 # groups/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from common.auth_views import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 
 from .views import (
     # Auth & User
@@ -44,8 +45,8 @@ urlpatterns = [
     path('', include(router.urls)),
 
     # ── Auth ────────────────────────────────────────────────
-    path('token/',         TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(),    name='token_refresh'),
+    path('token/',         ThrottledTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('token/refresh/', ThrottledTokenRefreshView.as_view(),    name='token_refresh'),
     path('register/',      CreateUserView.as_view(),      name='register'),
 
     # ── User & Dashboard ────────────────────────────────────

@@ -269,6 +269,10 @@ def test_next_problem_returns_frontend_schema(api_client, user, question, monkey
     data = response.data
     assert data["id"] == str(question.pk)
     assert data["difficulty"] in ("Easy", "Medium", "Hard")
+    # Grading data never leaves the server: only the first (public) case is
+    # exposed, for the Run button.
+    assert "hiddenTestCases" not in data
+    assert data["sample_case"] == question.hidden_test_cases[0]
     xai = data["advanced_xai"]["xai"]
     assert set(v["subject"] for v in xai["shap_values"]) == {
         "Time Complexity", "Space Complexity", "Logic Accuracy", "Topic Recency",
@@ -343,6 +347,28 @@ def test_shap_xai_payload_matches_frontend_schema(user, monkeypatch):
     # Actionable layer: always present, whichever engine produced the payload
     assert isinstance(payload["weak_topics"], list)
     assert payload["recommendation"]
+
+
+# ─────────────────────────────────────────────────────────────
+# MLOps telemetry authorization
+# ─────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_telemetry_forbidden_for_students(api_client, user):
+    # Rows contain other users' usernames and outcomes — staff only.
+    api_client.force_authenticate(user=user)
+    response = api_client.get(reverse("mlops-telemetry"))
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_telemetry_allowed_for_staff(api_client, user):
+    user.is_staff = True
+    user.save(update_fields=["is_staff"])
+    api_client.force_authenticate(user=user)
+    response = api_client.get(reverse("mlops-telemetry"))
+    assert response.status_code == 200
+    assert "stats" in response.data
 
 
 # ─────────────────────────────────────────────────────────────

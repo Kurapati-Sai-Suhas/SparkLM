@@ -1,0 +1,41 @@
+"""
+Auth-scope throttle regression tests (frozen architecture §7).
+
+The token endpoint is the credential-stuffing surface: it must allow the
+configured 'auth' rate (10/minute per anonymous IP) and reject the request
+after it — regardless of whether the attempted credentials are valid.
+"""
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.urls import reverse
+from rest_framework.test import APIClient
+
+
+@pytest.mark.django_db
+def test_token_endpoint_throttles_after_limit():
+    # Throttle counters live in the default cache; isolate from other tests.
+    cache.clear()
+    try:
+        get_user_model().objects.create_user(
+            username="authuser", password="right-password-1", email="auth@test.com"
+        )
+        client = APIClient()
+        url = reverse("token_obtain_pair")
+
+        # First 10 attempts pass the throttle (and fail authentication).
+        for _ in range(10):
+            response = client.post(
+                url, {"username": "authuser", "password": "wrong"}, format="json"
+            )
+            assert response.status_code == 401
+
+        # The 11th within the window is throttled — even with CORRECT
+        # credentials, proving the brake sits in front of authentication.
+        response = client.post(
+            url, {"username": "authuser", "password": "right-password-1"}, format="json"
+        )
+        assert response.status_code == 429
+    finally:
+        cache.clear()  # never leak throttle state into other tests

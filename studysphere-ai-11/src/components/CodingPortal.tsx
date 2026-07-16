@@ -52,7 +52,7 @@ const CodingPortal = () => {
             const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/run/`, {
                 code: code,
                 language: language,
-                stdin: currentProblem.examples[0]?.input || "" // Uses Example 1 input safely
+                stdin: currentProblem.sample_case?.stdin || "" // Sample case from the API (first, public example)
             }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -81,8 +81,7 @@ const CodingPortal = () => {
             const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/submit/`, {
                 code: code,
                 language: language,
-                problem_id: currentProblem.id,
-                test_cases: currentProblem.hiddenTestCases
+                problem_id: currentProblem.id
             }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });

@@ -20,7 +20,7 @@ from .models import CodingPortal
 
 # Import AI Engines & Services
 from .hybrid_router import (
-    HierarchicalEngine, IRTEngine,
+    HierarchicalEngine,
     compute_routing_telemetry, get_mastered_topic_names,
 )
 from .services import GradingService, GradingUnavailable, ProgressionService
@@ -216,19 +216,17 @@ class CodeSubmitView(APIView):
                 status=503,
             )
 
-        submission, already_solved = ProgressionService.record_submission(
-            user=request.user, question=question, language=language, grade=grade,
-        )
-        agentic_hint = ProgressionService.coach_hint(
-            user=request.user, problem_id=problem_id, question=question, grade=grade,
-        )
-        elo_result, profile = ProgressionService.apply_learning_updates(
+        submission, elo_result, profile = ProgressionService.apply_submission(
             user=request.user,
             question=question,
+            language=language,
             difficulty=question.base_difficulty,
             grade=grade,
-            already_solved=already_solved,
-            submission=submission,
+        )
+        # Coach webhook strictly after commit — network calls are forbidden
+        # inside the learner-state transaction (§2.2).
+        agentic_hint = ProgressionService.coach_hint(
+            user=request.user, problem_id=problem_id, question=question, grade=grade,
         )
 
         return Response({
@@ -593,47 +591,13 @@ class CodingOnboardingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        known_topics = request.data.get('known_topics', []) 
-        
-        for topic_name in known_topics:
-            try:
-                question = Question.objects.filter(topic__name__iexact=topic_name).first()
-                if question:
-                    already_accepted = CodeSubmission.objects.filter(
-                        user=request.user, question=question, status='accepted'
-                    ).exists()
-                    if not already_accepted:
-                        CodeSubmission.objects.create(
-                            user=request.user,
-                            question=question,
-                            language='python',
-                            code='# Skipped via Onboarding',
-                            status='accepted',
-                            execution_time_ms=10,
-                            memory_used_kb=1024,
-                        )
-            except Exception:
-                logger.exception("Error onboarding topic %s", topic_name)
-
-        # 🚀 ADVANCED ML: 3-Parameter IRT Cold Start Calibration
-        profile, _ = UserCodingProfile.objects.get_or_create(user=request.user)
-        # Assuming a diagnostic test of 10 average questions
-        num_known = len(known_topics)
-        theta_guess = (num_known / 10.0) * 4.0 - 2.0 # Maps 0-10 scale to -2.0 to 2.0 theta range
-        theta_guess = max(-4.0, min(4.0, theta_guess))
-
-        # Sanity-check the calibration against the 3PL IRT curve
-        expected = IRTEngine.expected_score(theta=theta_guess, a=1.0, b=0.0, c=0.2)
-        logger.info("Onboarding IRT calibration: theta=%.2f expected_score=%.2f", theta_guess, expected)
-
-        profile.irt_latent_logic = theta_guess
-        profile.irt_latent_syntax = theta_guess
-        profile.irt_latent_optimization = theta_guess
-
-        # Also boost Elo to skip "Cold Start" problem
-        profile.elo_rating = 1200 + (num_known * 50)
-        profile.save()
-
+        known_topics = request.data.get('known_topics', [])
+        # Learner-state mutation lives in the service under the profile
+        # lock (§2.2) — onboarding's unconditional elo write would
+        # otherwise race with a concurrent submission's Elo update.
+        theta_guess = ProgressionService.apply_onboarding(
+            user=request.user, known_topics=known_topics
+        )
         return Response({"message": f"Onboarding complete! IRT Theta calibrated to {theta_guess:.2f}."})
     
 

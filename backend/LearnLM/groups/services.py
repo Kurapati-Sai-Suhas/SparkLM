@@ -14,12 +14,17 @@ The split gives each phase of a submission a named home:
   update (Elo with the repeat-solve guard, SM-2/HLR memory, mastery
   accuracy, GDCP graph decay).
 
-Execution order is the behavioral contract inherited from the view and
-must not change here: grade -> record (atomic) -> coach -> learning
-updates. The coach failure count deliberately includes the just-persisted
-row; the SM-2 quality scan deliberately excludes it. Consolidating the
-learning updates into a single locked transaction is Milestone 4's job
-(frozen architecture §2.2), not this module's.
+Execution order is the behavioral contract: grade -> apply_submission
+(one atomic, row-locked transaction per §2.2) -> coach. The coach
+failure count deliberately includes the just-persisted row; the SM-2
+quality scan deliberately excludes it. Network calls never happen while
+locks are held: grading precedes the transaction (its result is passed
+in) and the coach webhook runs after commit.
+
+Locking model (frozen architecture §2.2): select_for_update on the
+profile row first — the per-user serialization point — then on every
+mastery row the submission will touch, in ascending topic-id order. The
+fixed order is what precludes deadlocks.
 """
 
 import logging
@@ -31,9 +36,10 @@ from django.db import transaction
 from .engines.agentic_coach import trigger_agentic_coach
 from .engines.elo_engine import EloEngine
 from .engines.hlr_engine import HLREngine
-from .hybrid_router import GDCPEngine, HierarchicalEngine
+from .hybrid_router import GDCPEngine, HierarchicalEngine, IRTEngine
 from .models import (
-    CodeSubmission, RecommendationLog, Topic, UserCodingProfile, UserTopicMastery,
+    CodeSubmission, Question, RecommendationLog, Topic,
+    UserCodingProfile, UserTopicMastery,
 )
 from .utils import normalize_output
 
@@ -349,20 +355,40 @@ class ProgressionService:
     """Persistence and learning-model updates for a graded submission."""
 
     @staticmethod
-    def record_submission(user, question, language, grade):
+    def apply_submission(user, question, language, difficulty, grade):
         """
-        Persist the submission row and close the recommendation flywheel
-        log, atomically. Returns (submission, already_solved).
+        All learner-state mutation for one graded submission in a single
+        transaction (§2.2): profile row locked first, then every mastery
+        row that will be touched, ascending topic id. With the profile
+        locked, the farming-guard check is race-free — two concurrent
+        first solves serialize here and exactly one earns rating.
+
+        Returns (submission, elo_result, profile).
         """
-        # Elo farming guard: check for a prior accepted solve BEFORE the
-        # new submission row is created.
-        already_solved = CodeSubmission.objects.filter(
-            user=user, question=question, status='accepted'
-        ).exists()
+        all_passed = grade.all_passed
+
+        # Pre-lock phase, reads only: GDCP penalties are a pure walk over
+        # the (cached) curriculum graph and never read learner state, so
+        # they are resolved before any row is locked.
+        gdcp_penalties = []
+        if not all_passed:
+            gdcp_penalties = ProgressionService._resolve_gdcp_penalties(user, question)
 
         exec_time, mem_used = first_case_stats(grade.results)
 
         with transaction.atomic():
+            # Lock 1: the profile row — the per-user serialization point.
+            profile, _ = (
+                UserCodingProfile.objects.select_for_update().get_or_create(user=user)
+            )
+
+            # Elo farming guard, now under the lock: a concurrent first
+            # solve has either committed (visible here) or is blocked on
+            # the profile lock behind us.
+            already_solved = CodeSubmission.objects.filter(
+                user=user, question=question, status='accepted'
+            ).exists()
+
             submission = CodeSubmission.objects.create(
                 user=user,
                 question=question,
@@ -379,12 +405,202 @@ class ProgressionService:
                 problem_id=str(question.id),
                 actual_result_correct__isnull=True
             ).order_by('-created_at').first()
-
             if recent_log:
-                recent_log.actual_result_correct = grade.all_passed
+                recent_log.actual_result_correct = all_passed
                 recent_log.save()
 
-        return submission, already_solved
+            profile.total_submissions += 1
+            if all_passed:
+                profile.successful_submissions += 1
+
+            if all_passed and already_solved:
+                # Re-solving an already-accepted problem is legitimate
+                # spaced repetition (mastery/HLR still update below), but
+                # it must not farm rating points.
+                elo_result = {
+                    "old_rating": round(profile.elo_rating, 2),
+                    "new_rating": round(profile.elo_rating, 2),
+                    "rating_change": 0.0,
+                    "insight": "✅ Solved again! Repeat solves keep your memory fresh but don't change your rating.",
+                }
+            else:
+                elo_result = EloEngine.calculate_new_rating(
+                    user_rating=profile.elo_rating,
+                    question_difficulty=difficulty,
+                    is_correct=all_passed,
+                    execution_time_ms=exec_time,
+                    memory_used_kb=mem_used
+                )
+
+            profile.elo_rating = elo_result["new_rating"]
+            profile.save()
+
+            # Lock 2..n: every mastery row this submission touches — the
+            # question's own topic plus any GDCP descendants — in
+            # ascending topic-id order (§2.2's deadlock preclusion).
+            touched_topics = {question.topic.pk: question.topic}
+            for desc_topic, _penalty in gdcp_penalties:
+                touched_topics.setdefault(desc_topic.pk, desc_topic)
+
+            masteries = {}
+            for topic_pk in sorted(touched_topics):
+                masteries[topic_pk], _ = (
+                    UserTopicMastery.objects.select_for_update().get_or_create(
+                        user=user, topic=touched_topics[topic_pk]
+                    )
+                )
+
+            ProgressionService._apply_sm2_update(
+                user, question, grade, submission, masteries[question.topic.pk]
+            )
+
+            # GDCP application is best-effort enrichment, as it was before
+            # the single-transaction change: a failure rolls back only this
+            # savepoint, never the submission itself.
+            if gdcp_penalties:
+                try:
+                    with transaction.atomic():
+                        for desc_topic, penalty in gdcp_penalties:
+                            desc_mastery = masteries[desc_topic.pk]
+                            desc_mastery.accuracy = max(0.0, desc_mastery.accuracy - penalty)
+                            desc_mastery.save(update_fields=['accuracy'])
+                except Exception:
+                    logger.exception(
+                        "GDCP decay failed user=%s topic=%s", user.id, question.topic.name
+                    )
+
+        return submission, elo_result, profile
+
+    @staticmethod
+    def _resolve_gdcp_penalties(user, question):
+        """
+        Graph-Decay Cross-Pollination: failing a topic penalizes its
+        downstream dependencies. Resolves the penalties to concrete Topic
+        rows using reads only (safe pre-lock). Mirrors the legacy
+        resilience — any failure logs and decays nothing.
+        """
+        try:
+            portal_name = "DSA Masterclass"
+            if question.topic.portal:
+                portal_name = question.topic.portal.name
+
+            graph = HierarchicalEngine._get_graph(portal_name)
+            penalties = GDCPEngine.propagate_decay(graph, question.topic.name, base_decay=0.1)
+            resolved = []
+            for desc_node, penalty in penalties.items():
+                desc_topic = Topic.objects.filter(name=desc_node).first()
+                if desc_topic:
+                    resolved.append((desc_topic, penalty))
+            return resolved
+        except Exception:
+            logger.exception(
+                "GDCP decay failed user=%s topic=%s", user.id, question.topic.name
+            )
+            return []
+
+    @staticmethod
+    def _apply_sm2_update(user, question, grade, submission, mastery):
+        """
+        SM-2 spaced repetition on the (locked) mastery row: quality comes
+        from the failures immediately preceding this attempt (consecutive,
+        newest first). Lifetime counting would permanently cap quality at
+        3 after two historic fails, no matter how cleanly later reviews go.
+        """
+        quality = 0
+        if grade.all_passed:
+            prior_statuses = CodeSubmission.objects.filter(
+                user=user, question=question
+            ).exclude(pk=submission.pk).order_by('-submitted_at').values_list('status', flat=True)[:10]
+
+            recent_fails = 0
+            for sub_status in prior_statuses:
+                if sub_status != 'accepted':
+                    recent_fails += 1
+                else:
+                    break
+
+            if recent_fails == 0:
+                quality = 5
+            elif recent_fails == 1:
+                quality = 4
+            else:
+                quality = 3
+
+        new_halflife = HLREngine.update_halflife(quality, mastery.hlr_halflife)
+        mastery.hlr_halflife = max(0.1, min(100.0, new_halflife))  # bound halflife
+
+        # Bound accuracy strictly between 0 and 1.
+        new_acc = (mastery.accuracy * mastery.reviews + (1.0 if grade.all_passed else 0.0)) / (mastery.reviews + 1)
+        mastery.accuracy = max(0.0, min(1.0, new_acc))
+        mastery.reviews += 1
+        mastery.save()
+
+        # A real submission ends any inactivity window: move last_practiced
+        # forward and reset the decay checkpoint (FIX-05 support).
+        EloEngine.record_real_submission(mastery)
+
+    @staticmethod
+    def apply_onboarding(user, known_topics):
+        """
+        Cold-start calibration (§2.2 applies here too: the unconditional
+        elo write below would otherwise race with a concurrent submission's
+        Elo update and clobber it). Synthetic accepted submissions mark
+        known topics so the recommenders skip them. Returns the calibrated
+        theta.
+        """
+        with transaction.atomic():
+            profile, _ = (
+                UserCodingProfile.objects.select_for_update().get_or_create(user=user)
+            )
+
+            for topic_name in known_topics:
+                try:
+                    # Per-topic savepoint keeps one bad topic from failing
+                    # the whole onboarding, as in the legacy loop.
+                    with transaction.atomic():
+                        question = Question.objects.filter(
+                            topic__name__iexact=topic_name
+                        ).first()
+                        if question:
+                            already_accepted = CodeSubmission.objects.filter(
+                                user=user, question=question, status='accepted'
+                            ).exists()
+                            if not already_accepted:
+                                CodeSubmission.objects.create(
+                                    user=user,
+                                    question=question,
+                                    language='python',
+                                    code='# Skipped via Onboarding',
+                                    status='accepted',
+                                    execution_time_ms=10,
+                                    memory_used_kb=1024,
+                                )
+                except Exception:
+                    logger.exception("Error onboarding topic %s", topic_name)
+
+            # 3-Parameter IRT cold-start calibration, assuming a diagnostic
+            # test of 10 average questions: maps 0-10 known topics onto the
+            # -2.0..2.0 theta range.
+            num_known = len(known_topics)
+            theta_guess = (num_known / 10.0) * 4.0 - 2.0
+            theta_guess = max(-4.0, min(4.0, theta_guess))
+
+            # Sanity-check the calibration against the 3PL IRT curve.
+            expected = IRTEngine.expected_score(theta=theta_guess, a=1.0, b=0.0, c=0.2)
+            logger.info(
+                "Onboarding IRT calibration: theta=%.2f expected_score=%.2f",
+                theta_guess, expected,
+            )
+
+            profile.irt_latent_logic = theta_guess
+            profile.irt_latent_syntax = theta_guess
+            profile.irt_latent_optimization = theta_guess
+
+            # Also boost Elo to skip the cold-start problem.
+            profile.elo_rating = 1200 + (num_known * 50)
+            profile.save()
+
+        return theta_guess
 
     @staticmethod
     def coach_hint(user, problem_id, question, grade):
@@ -421,103 +637,3 @@ class ProgressionService:
             error_logs=str(grade.results),
             failed_attempts=failed_count
         )
-
-    @staticmethod
-    def apply_learning_updates(user, question, difficulty, grade, already_solved, submission):
-        """
-        Profile stats, Elo (with the repeat-solve guard), SM-2/HLR memory,
-        mastery accuracy, and GDCP graph decay. Returns (elo_result, profile).
-        """
-        all_passed = grade.all_passed
-
-        profile, _ = UserCodingProfile.objects.get_or_create(user=user)
-        profile.total_submissions += 1
-        if all_passed:
-            profile.successful_submissions += 1
-
-        exec_time, mem_used = first_case_stats(grade.results)
-
-        if all_passed and already_solved:
-            # Re-solving an already-accepted problem is legitimate spaced
-            # repetition (mastery/HLR still update below), but it must not
-            # farm rating points.
-            elo_result = {
-                "old_rating": round(profile.elo_rating, 2),
-                "new_rating": round(profile.elo_rating, 2),
-                "rating_change": 0.0,
-                "insight": "✅ Solved again! Repeat solves keep your memory fresh but don't change your rating.",
-            }
-        else:
-            elo_result = EloEngine.calculate_new_rating(
-                user_rating=profile.elo_rating,
-                question_difficulty=difficulty,
-                is_correct=all_passed,
-                execution_time_ms=exec_time,
-                memory_used_kb=mem_used
-            )
-
-        profile.elo_rating = elo_result["new_rating"]
-        profile.save()
-
-        # SM-2 spaced repetition: quality comes from the failures
-        # immediately preceding this attempt (consecutive, newest first).
-        # Lifetime counting would permanently cap quality at 3 after two
-        # historic fails, no matter how cleanly later reviews go.
-        mastery, _ = UserTopicMastery.objects.get_or_create(
-            user=user,
-            topic=question.topic
-        )
-
-        quality = 0
-        if all_passed:
-            prior_statuses = CodeSubmission.objects.filter(
-                user=user, question=question
-            ).exclude(pk=submission.pk).order_by('-submitted_at').values_list('status', flat=True)[:10]
-
-            recent_fails = 0
-            for sub_status in prior_statuses:
-                if sub_status != 'accepted':
-                    recent_fails += 1
-                else:
-                    break
-
-            if recent_fails == 0:
-                quality = 5
-            elif recent_fails == 1:
-                quality = 4
-            else:
-                quality = 3
-
-        new_halflife = HLREngine.update_halflife(quality, mastery.hlr_halflife)
-        mastery.hlr_halflife = max(0.1, min(100.0, new_halflife))  # bound halflife
-
-        # Bound accuracy strictly between 0 and 1.
-        new_acc = (mastery.accuracy * mastery.reviews + (1.0 if all_passed else 0.0)) / (mastery.reviews + 1)
-        mastery.accuracy = max(0.0, min(1.0, new_acc))
-        mastery.reviews += 1
-        mastery.save()
-
-        # A real submission ends any inactivity window: move last_practiced
-        # forward and reset the decay checkpoint (FIX-05 support).
-        EloEngine.record_real_submission(mastery)
-
-        # GDCP: Graph-Decay Cross-Pollination — failing a topic penalizes
-        # its downstream dependencies in the curriculum DAG.
-        if not all_passed:
-            try:
-                portal_name = "DSA Masterclass"
-                if question.topic.portal:
-                    portal_name = question.topic.portal.name
-
-                graph = HierarchicalEngine._get_graph(portal_name)
-                penalties = GDCPEngine.propagate_decay(graph, question.topic.name, base_decay=0.1)
-                for desc_node, penalty in penalties.items():
-                    desc_topic = Topic.objects.filter(name=desc_node).first()
-                    if desc_topic:
-                        desc_mastery, _ = UserTopicMastery.objects.get_or_create(user=user, topic=desc_topic)
-                        desc_mastery.accuracy = max(0.0, desc_mastery.accuracy - penalty)
-                        desc_mastery.save(update_fields=['accuracy'])
-            except Exception:
-                logger.exception("GDCP decay failed user=%s topic=%s", user.id, question.topic.name)
-
-        return elo_result, profile

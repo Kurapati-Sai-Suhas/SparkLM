@@ -28,7 +28,7 @@ Platforms like LeetCode treat every user identically. SparkLM makes three bets:
 | **AI coach** | Escalating hints on consecutive failures: Socratic nudge (3) → pseudocode (5) → worked example (7+), via n8n/LLM webhook with resilient fallbacks |
 | **Content pipeline** | 2,900+ problem bank maintained by quota-aware, idempotent LLM batch commands (generation, validation gates, multi-language starter code, backfill, restore) |
 | **Collaboration** | JWT-authenticated WebSocket group chat, CRDT (Yjs) collaborative editor, study groups, quizzes, flashcards, document RAG, visual search |
-| **Ops discipline** | 47-test offline suite (all third parties mocked), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, environment-driven config, tested backup/restore |
+| **Ops discipline** | 49-test offline suite (all third parties mocked, incl. a threaded race test), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), environment-driven config, tested backup/restore |
 
 ## Architecture
 
@@ -108,7 +108,7 @@ The problem bank is maintained by idempotent management commands — all dry-run
 
 ```bash
 cd backend/LearnLM
-python -m pytest groups common # 47 tests, fully offline (Judge0 + LLMs mocked)
+python -m pytest groups common # 49 tests, fully offline (Judge0 + LLMs mocked)
 ```
 
 The suite covers routing telemetry and thresholds, mastery rules, grading statuses, the anti-farming guard, coach escalation, XAI schema guarantees, cache invalidation (including queryset deletes), every content-ops command, and the physical schema itself (partition routing, index catalog, partition maintenance). CI runs it against a real Postgres service container on every push. After pulling schema changes, refresh your local test database once with `--create-db` (the default `--reuse-db` keeps the old schema).

@@ -26,6 +26,8 @@ joblib==1.5.3
 groq==1.5.0
 google-generativeai==0.8.6   # EOL — migrate to google-genai (tracked backlog)
 langchain==1.2.17
+langchain-text-splitters==1.1.2  # NOT a dependency of langchain 1.x —
+                                 # imported directly (groups/views.py)
 
 # ── Document / media processing ──────────────────────────────
 PyPDF2==3.0.1                # deprecated — migrate to pypdf (tracked backlog)

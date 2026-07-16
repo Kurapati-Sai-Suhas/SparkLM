@@ -13,6 +13,7 @@ from io import StringIO
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import connection
 from django.utils import timezone
 
@@ -104,6 +105,14 @@ def test_ensure_partitions_creates_horizon_and_is_idempotent():
     out = StringIO()
     call_command("ensure_submission_partitions", months_ahead=6, stdout=out)
     assert "Created 0 partition(s), moved 0 row(s)" in out.getvalue()
+
+
+def test_months_ahead_is_bounded():
+    # Guard against typo-driven DDL runaway (e.g. "--months-ahead 2027").
+    with pytest.raises(CommandError):
+        call_command("ensure_submission_partitions", months_ahead=121)
+    with pytest.raises(CommandError):
+        call_command("ensure_submission_partitions", months_ahead=-1)
 
 
 def test_dry_run_changes_nothing():

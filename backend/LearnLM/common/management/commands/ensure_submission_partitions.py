@@ -6,13 +6,13 @@ safety net).
 Migration groups.0032 creates partitions through three months past its own
 run date; this command maintains the horizon from then on. It is idempotent
 and safe to run on any schedule (monthly is enough; after long downtime it
-also heals). For each missing month in [current .. current + N]:
-
-* If the DEFAULT partition holds no rows for that month, the partition is
-  created directly.
-* If strays landed in DEFAULT (possible only when the horizon lapsed), the
-  month's rows are moved into a standalone table which is then attached —
-  one transaction per month, so a failure never loses or duplicates rows.
+also heals). Each missing month in [current .. current + N] is built
+standalone, any rows stranded in the DEFAULT partition are moved into it
+with a single atomic DELETE..RETURNING statement, and the table is then
+attached — one transaction per month. ATTACH itself re-verifies that no
+DEFAULT row still falls inside the new range, so even a row committed
+mid-flight can only cause a clean rollback (rerun the command), never a
+lost or duplicated row.
 
 All identifiers are built from validated integers (never from input
 strings); date bounds in DML go through bind parameters.
@@ -25,6 +25,10 @@ from django.db import connection, transaction
 
 PARENT = "groups_codesubmission"
 DEFAULT_PARTITION = "groups_codesubmission_default"
+
+# Guard against a fat-fingered --months-ahead ("2027" instead of "27")
+# creating thousands of tables in one run.
+MAX_MONTHS_AHEAD = 120
 
 
 def _month_add(year, month, delta):
@@ -68,8 +72,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         months_ahead = options["months_ahead"]
-        if months_ahead < 0:
-            raise CommandError("--months-ahead must be >= 0")
+        if not 0 <= months_ahead <= MAX_MONTHS_AHEAD:
+            raise CommandError(
+                f"--months-ahead must be between 0 and {MAX_MONTHS_AHEAD}"
+            )
         dry_run = options["dry_run"]
 
         existing = self._existing_partitions()
@@ -89,20 +95,21 @@ class Command(BaseCommand):
                 year, month = _month_add(year, month, 1)
                 continue
             low, high = _month_bounds(year, month)
-            strays = self._count_default_rows(low, high)
             if dry_run:
+                strays = self._count_default_rows(low, high)
                 self.stdout.write(
                     f"[dry-run] would create {name}"
                     + (f" and move {strays} row(s) from DEFAULT" if strays else "")
                 )
+                moved += strays
             else:
-                self._create_partition(name, low, high, strays)
+                moved_rows = self._create_partition(name, low, high)
                 self.stdout.write(
                     f"created {name}"
-                    + (f" (moved {strays} row(s) from DEFAULT)" if strays else "")
+                    + (f" (moved {moved_rows} row(s) from DEFAULT)" if moved_rows else "")
                 )
+                moved += moved_rows
             created += 1
-            moved += strays
             year, month = _month_add(year, month, 1)
 
         prefix = "[dry-run] " if dry_run else ""
@@ -152,32 +159,34 @@ class Command(BaseCommand):
             return cursor.fetchone()[0]
 
     @staticmethod
-    def _create_partition(name, low, high, strays):
+    def _create_partition(name, low, high):
+        """
+        Build the month standalone, move any stranded DEFAULT rows into it,
+        then attach. Returns the number of rows moved.
+
+        The move MUST be one DELETE..RETURNING statement: a separate
+        copy-then-delete pair runs on two READ COMMITTED snapshots, and a
+        row committed into DEFAULT between them would be deleted without
+        ever being copied. ATTACH validates that no DEFAULT row still falls
+        in the new range (and builds the parent's partitioned indexes,
+        constraints, and FKs on the new member), so concurrent traffic can
+        only produce a clean rollback, never data loss.
+        """
         with transaction.atomic(), connection.cursor() as cursor:
-            if strays == 0:
-                cursor.execute(
-                    f"CREATE TABLE {name} PARTITION OF {PARENT} "
-                    f"FOR VALUES FROM ('{low}') TO ('{high}')"
-                )
-                return
-            # DEFAULT holds rows for this month, so a direct PARTITION OF
-            # would be rejected. Build the month standalone, move the rows,
-            # then attach (attach validates bounds and builds the parent's
-            # partitioned indexes/constraints on the new member).
             cursor.execute(
                 f"CREATE TABLE {name} (LIKE {PARENT} INCLUDING DEFAULTS)"
             )
             cursor.execute(
-                f"INSERT INTO {name} SELECT * FROM {DEFAULT_PARTITION} "
-                "WHERE submitted_at >= %s AND submitted_at < %s",
+                f"WITH moved AS ("
+                f" DELETE FROM {DEFAULT_PARTITION}"
+                "  WHERE submitted_at >= %s AND submitted_at < %s"
+                "  RETURNING *"
+                f") INSERT INTO {name} SELECT * FROM moved",
                 [low, high],
             )
-            cursor.execute(
-                f"DELETE FROM {DEFAULT_PARTITION} "
-                "WHERE submitted_at >= %s AND submitted_at < %s",
-                [low, high],
-            )
+            moved = cursor.rowcount
             cursor.execute(
                 f"ALTER TABLE {PARENT} ATTACH PARTITION {name} "
                 f"FOR VALUES FROM ('{low}') TO ('{high}')"
             )
+        return moved

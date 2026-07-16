@@ -8,12 +8,15 @@ transaction test mode would hide every race these tests exist to catch.
 """
 
 import threading
+from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.db import connection
+from django.core.management import call_command
+from django.db import connection, transaction
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from groups import coding_views
@@ -124,6 +127,49 @@ def test_concurrent_double_submit_awards_elo_exactly_once(question, monkeypatch)
 
     mastery = UserTopicMastery.objects.get(user=user, topic=question.topic)
     assert mastery.reviews == 2, "a mastery update was lost"
+
+
+def test_decay_sweep_sees_a_mid_sweep_return(question):
+    """
+    M4-review regression: the decay sweep must re-fetch each mastery row under
+    select_for_update. A user who returns while the sweep runs commits a
+    fresh last_practiced; the locked re-fetch guarantees the sweep sees it
+    and charges nothing — the unlocked version decayed a stale snapshot.
+    """
+    user = get_user_model().objects.create_user(
+        username="returner", password="pw-not-relevant", email="ret@test.com"
+    )
+    stale = timezone.now() - timedelta(days=30)
+    mastery = UserTopicMastery.objects.create(
+        user=user, topic=question.topic, elo_rating=1300.0,
+        last_practiced=stale, last_decay_applied_at=stale,
+    )
+
+    errors = []
+
+    def run_sweep():
+        try:
+            call_command("calculate_decay")
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    # Hold the row lock the way a mid-flight submission does, start the
+    # sweep (it must block on this row), then commit a "return" with a
+    # fresh last_practiced before releasing.
+    with transaction.atomic():
+        locked = UserTopicMastery.objects.select_for_update().get(pk=mastery.pk)
+        sweep = threading.Thread(target=run_sweep)
+        sweep.start()
+        locked.last_practiced = timezone.now()
+        locked.last_decay_applied_at = timezone.now()
+        locked.save(update_fields=["last_practiced", "last_decay_applied_at"])
+    sweep.join(timeout=30)
+
+    assert not errors, errors
+    mastery.refresh_from_db()
+    assert mastery.elo_rating == 1300.0, "sweep charged decay from a stale row"
 
 
 def test_onboarding_calibrates_profile_and_is_idempotent(question):

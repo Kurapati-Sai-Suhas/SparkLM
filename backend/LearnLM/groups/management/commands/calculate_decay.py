@@ -17,6 +17,7 @@ the sweep never double-charges the same inactive window.
 import logging
 
 from django.core.management.base import BaseCommand
+from django.db import transaction
 from groups.models import UserTopicMastery
 from groups.engines.elo_engine import EloEngine
 
@@ -32,9 +33,22 @@ class Command(BaseCommand):
         decayed_count = 0
         scanned = 0
 
-        for mastery in UserTopicMastery.objects.select_related('user', 'topic').iterator():
+        # §2.2: mastery rows are mutated only under select_for_update. The
+        # id scan is lock-free; each row is re-fetched WITH the lock inside
+        # its own short transaction, so a user who returns and submits
+        # mid-sweep is seen with their fresh last_practiced (no wrongful
+        # decay from a stale in-memory row), and a submission blocked on
+        # this lock waits milliseconds, not the whole sweep. One row per
+        # transaction also means no multi-row lock ordering to reason about.
+        for mastery_id in UserTopicMastery.objects.values_list('pk', flat=True).iterator():
             scanned += 1
-            result = EloEngine.apply_time_decay(mastery)
+            with transaction.atomic():
+                mastery = (
+                    UserTopicMastery.objects.select_for_update()
+                    .select_related('user', 'topic')
+                    .get(pk=mastery_id)
+                )
+                result = EloEngine.apply_time_decay(mastery)
             if result.get("decayed"):
                 decayed_count += 1
                 logger.info(

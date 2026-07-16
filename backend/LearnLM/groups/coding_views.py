@@ -316,12 +316,13 @@ class NextProblemView(APIView):
 
         # 🚥 ML-BASED TRAFFIC COP
         router = RoutingClassifier()
-        # FR-RTR-01: mean + variance of correctness over the last 20 submissions.
-        avg_acc, var_acc, sample_size = compute_routing_telemetry(request.user)
-        route_decision = router.predict_route(avg_acc, var_acc, target_elo / 2000.0)
+        # FR-RTR-01 v2: mean + runs-test streakiness over the last 20
+        # submissions (frozen architecture §6.2).
+        avg_acc, runs_z, sample_size = compute_routing_telemetry(request.user)
+        route_decision = router.predict_route(avg_acc, runs_z, target_elo / 2000.0)
         logger.info(
-            "[Traffic Cop] user=%s route=%s (avg_acc=%.2f var_acc=%.3f n=%d elo=%.0f)",
-            request.user.id, route_decision, avg_acc, var_acc, sample_size, target_elo,
+            "[Traffic Cop] user=%s route=%s (avg_acc=%.2f runs_z=%.2f n=%d elo=%.0f)",
+            request.user.id, route_decision, avg_acc, runs_z, sample_size, target_elo,
         )
 
         # ROUTE 1: HIERARCHICAL (DAG PREREQUISITE TRAVERSAL)

@@ -329,7 +329,7 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
                     </span>{" "}
                     Routed via{" "}
                     <span className="text-primary font-mono">Elo</span> due to
-                    recent high performance variance.
+                    erratic recent results (streakiness check).
                   </p>
 
                   <div className="rounded-lg border border-border/60 bg-background/40 backdrop-blur p-3.5">

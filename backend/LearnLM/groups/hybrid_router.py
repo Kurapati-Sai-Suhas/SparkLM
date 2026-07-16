@@ -3,9 +3,12 @@ groups/hybrid_router.py
 
 Fixes applied:
 - FIX-03 (CRITICAL / GAP-01): Routing logic was inverted vs the SRS.
-  High variance / low accuracy (struggling) now correctly routes to
-  'flat' (Elo confidence-rebuilding) instead of 'hierarchical'.
-  Variance threshold corrected 0.15 -> 0.20 to match the SRS.
+  Struggling users now correctly route to 'flat' (Elo
+  confidence-rebuilding) instead of 'hierarchical'.
+- M5 (frozen architecture §6.2): the variance statistic — degenerate for
+  binary outcomes (p(1-p), determined by the mean) — is replaced by the
+  Wald–Wolfowitz runs-test z. Math lives in learning.router; only the
+  versioned v2 classifier artifact is ever loaded.
 - FIX-04 (HIGH / BUG-03): HierarchicalEngine._get_graph() is now cached
   via Django's cache framework instead of rebuilding the NetworkX DAG
   from the DB on every single request.
@@ -19,7 +22,6 @@ import hashlib
 import math
 import networkx as nx
 import joblib
-import numpy as np
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -52,17 +54,23 @@ def get_mastered_topic_names(user) -> list:
 
 def compute_routing_telemetry(user, window: int = 20):
     """
-    SRS FR-RTR-01: mean and variance of correctness over the user's last
-    `window` submissions. Correctness is binary per submission (accepted
-    or not) — per-test-case pass fractions aren't persisted on
-    CodeSubmission, so binary outcomes are the available signal.
+    FR-RTR-01 (v2, frozen architecture §6.2): mean accuracy and
+    Wald–Wolfowitz runs-test streakiness z over the user's last `window`
+    submissions. Correctness is binary per submission (accepted or not) —
+    per-test-case pass fractions aren't persisted on CodeSubmission, so
+    binary outcomes are the available signal. The math lives in
+    learning.router; this function owns only the DB fetch.
 
-    Returns (avg_acc, var_acc, sample_size). Cold start (no submissions)
-    returns consistent-looking defaults so a brand-new user routes to the
+    The window is fetched OLDEST-FIRST once sliced, because the runs test
+    reads sequence order (variance didn't care; the z-statistic does).
+
+    Returns (avg_acc, runs_z, sample_size). Cold start (no submissions)
+    returns pattern-neutral defaults so a brand-new user routes to the
     hierarchical DAG and starts at a foundation topic, rather than being
     treated as "struggling" and dropped into flat practice.
     """
     from groups.models import CodeSubmission
+    from learning.router import outcome_stats
 
     statuses = list(
         CodeSubmission.objects.filter(user=user)
@@ -70,12 +78,11 @@ def compute_routing_telemetry(user, window: int = 20):
         .values_list('status', flat=True)[:window]
     )
     if not statuses:
-        return 0.7, 0.1, 0
+        return 0.7, 0.0, 0
 
-    outcomes = [1.0 if s == 'accepted' else 0.0 for s in statuses]
-    avg_acc = float(np.mean(outcomes))
-    var_acc = float(np.var(outcomes))
-    return avg_acc, var_acc, len(outcomes)
+    # Slice is newest-first; restore chronological order for the runs test.
+    outcomes = [1.0 if s == 'accepted' else 0.0 for s in reversed(statuses)]
+    return outcome_stats(outcomes)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -86,56 +93,54 @@ _classifier_loaded = False
 
 
 class RoutingClassifier:
-    # FIX-03: threshold corrected from 0.15 to 0.20 to match the SRS
-    VARIANCE_THRESHOLD = 0.20
-    ACCURACY_THRESHOLD = 0.60
+    """
+    v2 Traffic Cop (§5 model registry + §6.2 statistic). Loads ONLY the
+    versioned artifact matching the FEATURES_V2 contract
+    [avg_acc, runs_z, avg_elo, engine_flag]. The unversioned v1 pkl
+    (routing_classifier.pkl) was trained on the degenerate variance
+    feature and must never load — a v1 model scoring v2 inputs would be
+    silently wrong, which is the exact failure the registry rule exists
+    to prevent. Absent an artifact, the learning.router heuristic routes.
+    """
+
+    ARTIFACT_NAME = "routing_classifier_v2.pkl"
+
+    @classmethod
+    def artifact_path(cls):
+        # Anchored to BASE_DIR so loader and retrain_ai agree on one
+        # registry location. (The v1 loader resolved a directory two
+        # levels up that never existed, so the v1 pkl never actually
+        # loaded — versioned names + a shared anchor close that hole.)
+        from django.conf import settings
+        return os.path.join(settings.BASE_DIR, "models_data", cls.ARTIFACT_NAME)
 
     def __init__(self):
         global _classifier_model, _classifier_loaded
         if not _classifier_loaded:
             try:
-                _classifier_model = joblib.load(
-                    os.path.join(os.path.dirname(__file__), "..", "..", "models_data", "routing_classifier.pkl")
-                )
+                _classifier_model = joblib.load(self.artifact_path())
             except Exception:
                 _classifier_model = None
             _classifier_loaded = True
         self.clf = _classifier_model
 
-    def predict_route(self, avg_acc, var_acc, avg_elo, subject=None):
-        if self.clf:
-            n_features = getattr(self.clf, 'n_features_in_', 3)
+    def predict_route(self, avg_acc, runs_z, avg_elo):
+        from learning.router import decide_route, feature_rows
 
-            # Outcome model (Phase 3 retrain_ai): trained on
-            # [avg_acc, var_acc, avg_elo, engine_flag] -> success.
-            # Score both engines and route to the higher predicted success.
-            if n_features == 4 and hasattr(self.clf, 'predict_proba'):
-                flat_p = self.clf.predict_proba([[avg_acc, var_acc, avg_elo, 0.0]])[0][1]
-                hier_p = self.clf.predict_proba([[avg_acc, var_acc, avg_elo, 1.0]])[0][1]
-                return "hierarchical" if hier_p >= flat_p else "flat"
+        # Outcome model: trained on FEATURES_V2 -> success. Score both
+        # engines and route to the higher predicted success. Anything not
+        # matching the v2 contract is refused (never scored wrongly).
+        if (
+            self.clf is not None
+            and getattr(self.clf, 'n_features_in_', 0) == 4
+            and hasattr(self.clf, 'predict_proba')
+        ):
+            flat_row, hier_row = feature_rows(avg_acc, runs_z, avg_elo)
+            flat_p = self.clf.predict_proba([flat_row])[0][1]
+            hier_p = self.clf.predict_proba([hier_row])[0][1]
+            return "hierarchical" if hier_p >= flat_p else "flat"
 
-            # Legacy models predicted the engine label directly (3 plain
-            # features, or 771 with a subject embedding appended).
-            features = [avg_acc, var_acc, avg_elo]
-            if n_features > 4:
-                if subject:
-                    from .ai_services import get_gemini_embedding
-                    emb = get_gemini_embedding(subject)
-                    features.extend(emb)
-                else:
-                    features.extend([0.0] * 768)
-
-            route = self.clf.predict([features])[0]
-            return "hierarchical" if route == 1 else "flat"
-
-        # FIX-03: CORRECTED FALLBACK HEURISTIC
-        # Struggling (high variance OR low accuracy) -> Flat Elo
-        # (skill-matched confidence rebuilding, per SRS)
-        # Consistent and performing -> Hierarchical DAG
-        # (ready to advance to next prerequisite-gated topic)
-        if var_acc > self.VARIANCE_THRESHOLD or avg_acc < self.ACCURACY_THRESHOLD:
-            return "flat"           # was 'hierarchical' — inverted bug (GAP-01)
-        return "hierarchical"       # was 'flat' — inverted bug (GAP-01)
+        return decide_route(avg_acc, runs_z)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -345,18 +350,16 @@ def route_recommendation(subject: str, user_data: dict) -> dict:
 
     router = RoutingClassifier()
 
-    # FR-RTR-01: real aggregates over the user's recent submissions.
+    # FR-RTR-01 v2: mean + runs-test streakiness over recent submissions.
     user = user_data.get("user")
     if user is not None and getattr(user, "is_authenticated", False):
-        avg_acc, var_acc, _ = compute_routing_telemetry(user)
+        avg_acc, runs_z, _ = compute_routing_telemetry(user)
     else:
-        avg_acc, var_acc = 0.7, 0.1  # no user context — cold-start defaults
+        avg_acc, runs_z = 0.7, 0.0  # no user context — pattern-neutral cold start
 
     elo_rating = float(user_data.get("elo_rating", 1200.0))
 
-    route_decision = router.predict_route(
-        avg_acc, var_acc, elo_rating / 2000.0, subject=subject
-    )
+    route_decision = router.predict_route(avg_acc, runs_z, elo_rating / 2000.0)
 
     if route_decision == "hierarchical":
         mastered = user_data.get("mastered_topics") or []

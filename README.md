@@ -115,7 +115,7 @@ The suite covers routing telemetry and thresholds, mastery rules, grading status
 
 ## Deployment
 
-Everything is configuration, not code: set the environment variables above and deploy. Reference zero-cost stack: **Neon** (Postgres) + **Upstash** (Redis) + **Render** (Daphne web service) + **Vercel** (SPA). Note: the optional ML extras (torch, shap, transformers) add ~2 GB — deploy with `ENABLE_SHAP_XAI=false` on small instances; the heuristic explainer keeps the identical response schema.
+Everything is configuration, not code: set the environment variables above and deploy. Reference zero-cost stack: **Neon** (Postgres) + **Upstash** (Redis) + **Render** (Daphne web service) + **Vercel** (SPA). Note: ML artifacts (e.g. the routing classifier) are loaded once per process — after running `retrain_ai`, restart the web service to pick up the new model (deliberate: models never hot-swap past the evaluation gate). Note: the optional ML extras (torch, shap, transformers) add ~2 GB — deploy with `ENABLE_SHAP_XAI=false` on small instances; the heuristic explainer keeps the identical response schema.
 
 A full Software Requirements Specification (25 pages: requirements, algorithms, data model, future scope, architecture roadmap) lives in [`docs/SparkLM_SRS.docx`](docs/SparkLM_SRS.docx).
 

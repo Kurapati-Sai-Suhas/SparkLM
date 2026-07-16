@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "groups.apps.GroupsConfig",
+    "common.apps.CommonConfig",
     "rest_framework",
     "rest_framework_simplejwt",
     "corsheaders",

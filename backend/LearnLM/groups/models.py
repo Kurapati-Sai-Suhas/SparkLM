@@ -278,7 +278,17 @@ class Question(models.Model):
     boilerplate_code = models.JSONField(default=dict)
     hidden_test_cases = models.JSONField(default=list)
     hidden_wrapper_code = models.JSONField(default=dict, blank=True)
-    
+
+    class Meta:
+        indexes = [
+            # §4.4 index catalog: Elo-nearest selection filters by topic and
+            # ranks by |base_difficulty − user_elo| within it.
+            models.Index(
+                fields=["topic", "base_difficulty"],
+                name="question_topic_diff_idx",
+            ),
+        ]
+
     def __str__(self):
         return self.title
 
@@ -324,6 +334,26 @@ class CodeSubmission(models.Model):
 
     class Meta:
         ordering = ["-submitted_at"]
+        # §4.4 index catalog. The physical indexes are created by migration
+        # 0032 on the range-partitioned parent table (partitioned by month
+        # of submitted_at, §4.3); they are declared here so the model state
+        # and the database schema agree. The DB-level primary key is
+        # (id, submitted_at) — Postgres requires the partition key inside
+        # the PK — while id uniqueness is guaranteed by its sequence.
+        indexes = [
+            models.Index(
+                fields=["user", "-submitted_at"],
+                name="subm_user_ts_idx",
+            ),
+            models.Index(
+                fields=["user", "question", "-submitted_at"],
+                name="subm_user_q_ts_idx",
+            ),
+            models.Index(
+                fields=["user", "status"],
+                name="subm_user_status_idx",
+            ),
+        ]
 
 
 # ── AI Analytics ──────────────────────────────────────────────
@@ -382,6 +412,16 @@ class RecommendationLog(models.Model):
     problem_id = models.CharField(max_length=100, null=True, blank=True) # The specific problem recommended
     actual_result_correct = models.BooleanField(null=True, blank=True) # Populated after they submit
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            # §4.4 index catalog: the flywheel closes an outcome by finding
+            # the latest open recommendation for (user, problem).
+            models.Index(
+                fields=["user", "problem_id", "-created_at"],
+                name="reclog_user_prob_ts_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.user.username} -> {self.recommended_topic} ({self.engine_used})"

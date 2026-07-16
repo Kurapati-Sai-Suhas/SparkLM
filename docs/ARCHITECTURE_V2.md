@@ -229,7 +229,9 @@ communication is designed; they do not enter the product UI in v2.
   - `POST /api/v1/predictions` → predict-then-submit vote `{submission_ref, will_pass}`.
   - `GET /api/v1/mastery-map?subject=` → nodes with `mastered/unlocked/depth/accuracy_pct/effective_mastery`.
 - Throttle scopes frozen: `judge0 10/min`, `recommend 30/min`, `user 120/min`, `anon 30/min`,
-  plus `auth 10/min` on token endpoints (new).
+  `auth 10/min` on token obtain, `auth-refresh 30/min` on token refresh (amended — see §16).
+  Anonymous throttle identity honors `NUM_PROXIES` (default 1) so client-supplied
+  X-Forwarded-For values cannot mint fresh buckets.
 - camelCase in JSON is deprecated; snake_case for all new fields (`hiddenTestCases` is the
   cautionary fossil).
 
@@ -361,3 +363,5 @@ SLOs: API p99 < 300ms, grading p95 < 15s (async), judge queue depth alarmed.
 | Date | Section | Change | Rationale |
 |---|---|---|---|
 | 2026-07 | — | Initial freeze | — |
+| 2026-07 (M1 review) | §7 | Token refresh split onto its own `auth-refresh` scope (30/min); login keeps `auth` (10/min) | Refresh presents an existing token, not guessable credentials; a shared bucket let routine refresh traffic behind NATed IPs starve sign-ins |
+| 2026-07 (M1 review) | §7, §13 | `NUM_PROXIES` (default 1, env `DRF_NUM_PROXIES`) added to DRF config | Without it, DRF keys anonymous throttles on the raw client-supplied X-Forwarded-For header — spoofable rotation bypassed every IP-keyed throttle behind the target proxy topology |

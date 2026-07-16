@@ -185,6 +185,13 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle'
     ],
+    # Trust exactly N reverse proxies when identifying anonymous clients.
+    # Left unset, DRF trusts the raw client-supplied X-Forwarded-For header,
+    # so an attacker behind our proxy could rotate spoofed IPs and bypass
+    # every IP-keyed throttle (including the auth brute-force brake). With
+    # N=1, only the proxy-appended (unspoofable) last hop identifies the
+    # client. Set DRF_NUM_PROXIES to match the deployment's proxy depth.
+    'NUM_PROXIES': int(os.getenv('DRF_NUM_PROXIES', '1')),
     'DEFAULT_THROTTLE_RATES': {
         # Global defaults. The SPA fires several API calls per page load
         # (dashboard, portals, profile, notifications), so 20/min per user

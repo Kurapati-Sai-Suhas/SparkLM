@@ -1,0 +1,523 @@
+"""
+groups.services — grading and progression services extracted from
+CodeSubmitView (frozen architecture §2.4.6: pure move, tests unchanged).
+
+The split gives each phase of a submission a named home:
+
+* GradingService — builds the executable (per-question DB wrapper or a
+  generic language harness), fans the hidden test cases out to Judge0
+  through an injected runner, and reduces the verdicts to a final status.
+  The runner is injected by the caller, so the existing test seam
+  (monkeypatching coding_views._run_on_judge0) keeps working unchanged.
+* ProgressionService — persists the submission, closes the recommendation
+  flywheel log, triggers the agentic coach, and applies every learning
+  update (Elo with the repeat-solve guard, SM-2/HLR memory, mastery
+  accuracy, GDCP graph decay).
+
+Execution order is the behavioral contract inherited from the view and
+must not change here: grade -> record (atomic) -> coach -> learning
+updates. The coach failure count deliberately includes the just-persisted
+row; the SM-2 quality scan deliberately excludes it. Consolidating the
+learning updates into a single locked transaction is Milestone 4's job
+(frozen architecture §2.2), not this module's.
+"""
+
+import logging
+import re
+from dataclasses import dataclass, field
+
+from django.db import transaction
+
+from .engines.agentic_coach import trigger_agentic_coach
+from .engines.elo_engine import EloEngine
+from .engines.hlr_engine import HLREngine
+from .hybrid_router import GDCPEngine, HierarchicalEngine
+from .models import (
+    CodeSubmission, RecommendationLog, Topic, UserCodingProfile, UserTopicMastery,
+)
+from .utils import normalize_output
+
+logger = logging.getLogger(__name__)
+
+
+# ── Generic language harnesses (LeetCode style) ──────────────────────
+# Used when a question has no per-question hidden_wrapper_code entry for
+# the language. C++ has no generic harness — it always needs a
+# per-question wrapper.
+
+GENERIC_PYTHON_WRAPPER = """{user_code}
+
+import sys
+import json
+
+if __name__ == '__main__':
+    stdin_str = sys.stdin.read().strip()
+    try:
+        parsed_input = json.loads(stdin_str)
+    except:
+        parsed_input = stdin_str
+
+    sol = Solution()
+    try:
+        # Auto-detect the method name dynamically
+        methods = [m for m in dir(sol) if not m.startswith('_') and callable(getattr(sol, m))]
+        target_method = getattr(sol, methods[0]) if methods else sol.solve
+
+        if isinstance(parsed_input, list):
+            res = target_method(*parsed_input) if type(parsed_input) is list else target_method(parsed_input)
+        elif isinstance(parsed_input, dict):
+            res = target_method(**parsed_input)
+        else:
+            res = target_method(parsed_input)
+
+        if isinstance(res, (list, dict)):
+            print(json.dumps(res).replace(" ", ""))
+        elif isinstance(res, bool):
+            print(str(res).lower())
+        else:
+            print(str(res))
+    except Exception as e:
+        print(f"Runtime Error: {e}")
+"""
+
+GENERIC_JAVA_WRAPPER = """import java.util.*;
+import java.lang.reflect.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        StringBuilder sb = new StringBuilder();
+        while (scanner.hasNextLine()) {
+            sb.append(scanner.nextLine()).append("\\n");
+        }
+        String input = sb.toString().trim();
+
+        try {
+            Solution sol = new Solution();
+            Method[] methods = Solution.class.getDeclaredMethods();
+            Method targetMethod = null;
+            for (Method m : methods) {
+                if (Modifier.isPublic(m.getModifiers()) && !m.getDeclaringClass().equals(Object.class)) {
+                    targetMethod = m;
+                    break;
+                }
+            }
+
+            if (targetMethod == null) {
+                System.out.println("Error: No public method found in Solution class.");
+                return;
+            }
+
+            Class<?>[] paramTypes = targetMethod.getParameterTypes();
+            Object[] argsToPass = new Object[paramTypes.length];
+
+            String[] inputs = input.split("\\\\n");
+            for (int i = 0; i < paramTypes.length && i < inputs.length; i++) {
+                Class<?> pType = paramTypes[i];
+                String val = inputs[i].trim();
+                if (pType == int.class || pType == Integer.class) {
+                    argsToPass[i] = Integer.parseInt(val);
+                } else if (pType == int[].class) {
+                    String clean = val.replace("[", "").replace("]", "").trim();
+                    if (clean.isEmpty()) {
+                        argsToPass[i] = new int[0];
+                    } else {
+                        String[] parts = clean.split("[, ]+");
+                        int[] arr = new int[parts.length];
+                        for(int j=0; j<parts.length; j++) arr[j] = Integer.parseInt(parts[j].trim());
+                        argsToPass[i] = arr;
+                    }
+                } else if (pType == double.class || pType == Double.class) {
+                    argsToPass[i] = Double.parseDouble(val);
+                } else if (pType == boolean.class || pType == Boolean.class) {
+                    argsToPass[i] = Boolean.parseBoolean(val);
+                } else {
+                    argsToPass[i] = val;
+                }
+            }
+            Object result;
+            if (targetMethod.isVarArgs()) {
+                result = targetMethod.invoke(sol, new Object[]{argsToPass});
+            } else {
+                result = targetMethod.invoke(sol, argsToPass);
+            }
+            if (result != null) {
+                if (result instanceof int[]) {
+                    int[] res = (int[])result;
+                    for(int j=0; j<res.length; j++) System.out.print(res[j] + (j == res.length-1 ? "" : " "));
+                    System.out.println();
+                } else if (result instanceof double[]) {
+                    double[] res = (double[])result;
+                    for(int j=0; j<res.length; j++) System.out.print(res[j] + (j == res.length-1 ? "" : " "));
+                    System.out.println();
+                } else if (result instanceof Object[]) {
+                    Object[] res = (Object[])result;
+                    for(int j=0; j<res.length; j++) System.out.print(res[j] + (j == res.length-1 ? "" : " "));
+                    System.out.println();
+                } else {
+                    System.out.println(result.toString().trim());
+                }
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+{user_code}
+"""
+
+GENERIC_JS_WRAPPER = """{user_code}
+
+const __stdin = require('fs').readFileSync(0, 'utf8').trim();
+let __parsed;
+try { __parsed = JSON.parse(__stdin); } catch (e) { __parsed = __stdin; }
+
+try {
+    const __sol = new Solution();
+    const __methods = Object.getOwnPropertyNames(Solution.prototype)
+        .filter(m => m !== 'constructor' && typeof __sol[m] === 'function');
+    const __target = __methods.length ? __sol[__methods[0]].bind(__sol) : __sol.solve.bind(__sol);
+
+    let __res;
+    if (Array.isArray(__parsed)) {
+        __res = __target(...__parsed);
+    } else {
+        __res = __target(__parsed);
+    }
+
+    if (Array.isArray(__res) || (__res !== null && typeof __res === 'object')) {
+        console.log(JSON.stringify(__res).replace(/ /g, ''));
+    } else if (typeof __res === 'boolean') {
+        console.log(String(__res));
+    } else {
+        console.log(String(__res));
+    }
+} catch (e) {
+    console.log(`Runtime Error: ${e.message}`);
+}
+"""
+
+
+class GradingUnavailable(Exception):
+    """Judge0 could not grade the submission (timeout or transport failure)."""
+
+    def __init__(self, details):
+        super().__init__(details)
+        self.details = details
+
+
+@dataclass
+class GradeResult:
+    """Outcome of grading one submission against its hidden test cases."""
+
+    # User code as it must be persisted: Java arrives import-stripped
+    # because the strip happens before wrapping AND before storage — a
+    # detail the extraction must not silently change.
+    stored_code: str
+    final_status: str
+    passed: int
+    total: int
+    results: list = field(default_factory=list)
+
+    @property
+    def all_passed(self):
+        return self.passed == self.total
+
+
+def first_case_stats(results):
+    """Execution stats reported by the first test case (ms, KB) or None."""
+    exec_time = int(float(results[0]['time'] or 0) * 1000) if results and results[0].get('time') else None
+    mem_used = results[0]['memory'] if results else None
+    return exec_time, mem_used
+
+
+class GradingService:
+    """
+    Wraps user code for execution and grades it against a question's
+    hidden test cases. Stateless apart from the injected runner.
+    """
+
+    def __init__(self, runner):
+        # Callable(source_code, language, stdin) -> Judge0 verdict dict.
+        self._runner = runner
+
+    def grade(self, question, language, raw_code):
+        executable_code, stored_code = self._build_executable(question, language, raw_code)
+
+        passed = 0
+        results = []
+        test_cases = question.hidden_test_cases
+
+        for i, tc in enumerate(test_cases):
+            # Convert literal \n in AI-generated test cases to actual newlines.
+            verdict = self._runner(executable_code, language, tc.get('stdin', '').replace('\\n', '\n'))
+            if "error" in verdict:
+                raise GradingUnavailable(verdict["error"])
+
+            expected = tc.get('expected_output', '').strip()
+
+            raw_actual = verdict.get('stdout')
+            if raw_actual is None:
+                raw_actual = ''
+            actual = raw_actual.strip()
+
+            # Normalize line endings / trailing whitespace before comparing.
+            expected_norm = normalize_output(expected)
+            actual_norm = normalize_output(actual)
+            logger.debug(
+                "Judge0 case %d q=%s stdin=%r expected=%r actual=%r stderr=%r compile=%r",
+                i + 1, question.pk, tc.get('stdin', ''), expected_norm, actual_norm,
+                verdict.get('stderr'), verdict.get('compile_output'),
+            )
+
+            ok = (actual_norm == expected_norm) and verdict.get('status_id') == 3
+            if ok:
+                passed += 1
+
+            results.append({
+                "test_case":       i + 1,
+                "passed":          ok,
+                "status":          verdict.get('status'),
+                # status_id is required by the final-status detection scan —
+                # without it every non-pass collapses to wrong_answer and
+                # TLE/compile/runtime errors are never reported correctly.
+                "status_id":       verdict.get('status_id'),
+                "your_output":     actual,
+                "expected_output": expected,
+                "time":            verdict.get('time'),
+                "memory":          verdict.get('memory'),
+            })
+
+        total = len(test_cases)
+
+        # Accurately report Judge0 status instead of defaulting to wrong_answer.
+        final_status = "accepted" if passed == total else "wrong_answer"
+        for v in results:
+            status_id = v.get("status_id")
+            if status_id == 5:
+                final_status = "time_limit"
+                break
+            elif status_id == 6:
+                final_status = "compile_error"
+                break
+            elif status_id in [7, 8, 9, 10, 11, 12]:
+                final_status = "runtime_error"
+                break
+
+        return GradeResult(
+            stored_code=stored_code,
+            final_status=final_status,
+            passed=passed,
+            total=total,
+            results=results,
+        )
+
+    @staticmethod
+    def _build_executable(question, language, raw_code):
+        """
+        Returns (executable_code, stored_code). Only the database wrapper is
+        trusted for per-question harnessing; otherwise a generic harness is
+        selected by language.
+        """
+        lang_key = language.lower()
+
+        # Pre-process Java code to strip imports, as they cause compile
+        # errors inside wrappers. The stripped source is what gets wrapped
+        # AND what gets persisted, so it is returned as stored_code.
+        if lang_key == "java":
+            raw_code = re.sub(r'^\s*import\s+.*?;', '', raw_code, flags=re.MULTILINE)
+
+        if question.hidden_wrapper_code and lang_key in question.hidden_wrapper_code:
+            executable_code = question.hidden_wrapper_code[lang_key].replace("{user_code}", raw_code)
+        elif lang_key == "python":
+            executable_code = GENERIC_PYTHON_WRAPPER.replace("{user_code}", raw_code)
+        elif lang_key == "java":
+            executable_code = GENERIC_JAVA_WRAPPER.replace("{user_code}", raw_code)
+        elif lang_key in ("js", "javascript"):
+            executable_code = GENERIC_JS_WRAPPER.replace("{user_code}", raw_code)
+        else:
+            # Direct execution fallback (C++ needs a per-question
+            # hidden_wrapper_code entry — there is no generic C++ harness).
+            executable_code = raw_code
+
+        return executable_code, raw_code
+
+
+class ProgressionService:
+    """Persistence and learning-model updates for a graded submission."""
+
+    @staticmethod
+    def record_submission(user, question, language, grade):
+        """
+        Persist the submission row and close the recommendation flywheel
+        log, atomically. Returns (submission, already_solved).
+        """
+        # Elo farming guard: check for a prior accepted solve BEFORE the
+        # new submission row is created.
+        already_solved = CodeSubmission.objects.filter(
+            user=user, question=question, status='accepted'
+        ).exists()
+
+        exec_time, mem_used = first_case_stats(grade.results)
+
+        with transaction.atomic():
+            submission = CodeSubmission.objects.create(
+                user=user,
+                question=question,
+                language=language,
+                code=grade.stored_code,
+                status=grade.final_status,
+                execution_time_ms=exec_time,
+                memory_used_kb=mem_used,
+            )
+
+            # Close the data-flywheel loop for the routing classifier.
+            recent_log = RecommendationLog.objects.filter(
+                user=user,
+                problem_id=str(question.id),
+                actual_result_correct__isnull=True
+            ).order_by('-created_at').first()
+
+            if recent_log:
+                recent_log.actual_result_correct = grade.all_passed
+                recent_log.save()
+
+        return submission, already_solved
+
+    @staticmethod
+    def coach_hint(user, problem_id, question, grade):
+        """
+        Agentic coach trigger: escalating hint after 3+ consecutive
+        failures on this question, None otherwise.
+        """
+        if grade.all_passed:
+            return None
+
+        # Count consecutive failures on this question, newest first,
+        # stopping at the last accepted submission. The current failed
+        # submission is already persisted, so it's included in the scan.
+        # Scanning 15 back keeps the 5-fail (pseudocode) and 7-fail
+        # (worked example) escalation tiers reachable.
+        recent_statuses = CodeSubmission.objects.filter(
+            user=user, question=question
+        ).order_by('-submitted_at').values_list('status', flat=True)[:15]
+
+        failed_count = 0
+        for sub_status in recent_statuses:
+            if sub_status != 'accepted':
+                failed_count += 1
+            else:
+                break
+
+        if failed_count < 3:
+            return None
+
+        return trigger_agentic_coach(
+            user=user,
+            problem_id=problem_id,
+            code_snippet=grade.stored_code,
+            error_logs=str(grade.results),
+            failed_attempts=failed_count
+        )
+
+    @staticmethod
+    def apply_learning_updates(user, question, difficulty, grade, already_solved, submission):
+        """
+        Profile stats, Elo (with the repeat-solve guard), SM-2/HLR memory,
+        mastery accuracy, and GDCP graph decay. Returns (elo_result, profile).
+        """
+        all_passed = grade.all_passed
+
+        profile, _ = UserCodingProfile.objects.get_or_create(user=user)
+        profile.total_submissions += 1
+        if all_passed:
+            profile.successful_submissions += 1
+
+        exec_time, mem_used = first_case_stats(grade.results)
+
+        if all_passed and already_solved:
+            # Re-solving an already-accepted problem is legitimate spaced
+            # repetition (mastery/HLR still update below), but it must not
+            # farm rating points.
+            elo_result = {
+                "old_rating": round(profile.elo_rating, 2),
+                "new_rating": round(profile.elo_rating, 2),
+                "rating_change": 0.0,
+                "insight": "✅ Solved again! Repeat solves keep your memory fresh but don't change your rating.",
+            }
+        else:
+            elo_result = EloEngine.calculate_new_rating(
+                user_rating=profile.elo_rating,
+                question_difficulty=difficulty,
+                is_correct=all_passed,
+                execution_time_ms=exec_time,
+                memory_used_kb=mem_used
+            )
+
+        profile.elo_rating = elo_result["new_rating"]
+        profile.save()
+
+        # SM-2 spaced repetition: quality comes from the failures
+        # immediately preceding this attempt (consecutive, newest first).
+        # Lifetime counting would permanently cap quality at 3 after two
+        # historic fails, no matter how cleanly later reviews go.
+        mastery, _ = UserTopicMastery.objects.get_or_create(
+            user=user,
+            topic=question.topic
+        )
+
+        quality = 0
+        if all_passed:
+            prior_statuses = CodeSubmission.objects.filter(
+                user=user, question=question
+            ).exclude(pk=submission.pk).order_by('-submitted_at').values_list('status', flat=True)[:10]
+
+            recent_fails = 0
+            for sub_status in prior_statuses:
+                if sub_status != 'accepted':
+                    recent_fails += 1
+                else:
+                    break
+
+            if recent_fails == 0:
+                quality = 5
+            elif recent_fails == 1:
+                quality = 4
+            else:
+                quality = 3
+
+        new_halflife = HLREngine.update_halflife(quality, mastery.hlr_halflife)
+        mastery.hlr_halflife = max(0.1, min(100.0, new_halflife))  # bound halflife
+
+        # Bound accuracy strictly between 0 and 1.
+        new_acc = (mastery.accuracy * mastery.reviews + (1.0 if all_passed else 0.0)) / (mastery.reviews + 1)
+        mastery.accuracy = max(0.0, min(1.0, new_acc))
+        mastery.reviews += 1
+        mastery.save()
+
+        # A real submission ends any inactivity window: move last_practiced
+        # forward and reset the decay checkpoint (FIX-05 support).
+        EloEngine.record_real_submission(mastery)
+
+        # GDCP: Graph-Decay Cross-Pollination — failing a topic penalizes
+        # its downstream dependencies in the curriculum DAG.
+        if not all_passed:
+            try:
+                portal_name = "DSA Masterclass"
+                if question.topic.portal:
+                    portal_name = question.topic.portal.name
+
+                graph = HierarchicalEngine._get_graph(portal_name)
+                penalties = GDCPEngine.propagate_decay(graph, question.topic.name, base_decay=0.1)
+                for desc_node, penalty in penalties.items():
+                    desc_topic = Topic.objects.filter(name=desc_node).first()
+                    if desc_topic:
+                        desc_mastery, _ = UserTopicMastery.objects.get_or_create(user=user, topic=desc_topic)
+                        desc_mastery.accuracy = max(0.0, desc_mastery.accuracy - penalty)
+                        desc_mastery.save(update_fields=['accuracy'])
+            except Exception:
+                logger.exception("GDCP decay failed user=%s topic=%s", user.id, question.topic.name)
+
+        return elo_result, profile

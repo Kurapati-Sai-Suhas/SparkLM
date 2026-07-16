@@ -806,11 +806,11 @@ class NextProblemView(APIView):
             "description": question.content, 
             "explanation": xai_explanation,
             "boilerplate_code": question.boilerplate_code,
-            # First case only, for the Run button — its content is already
-            # public in the problem statement's Examples block. Full hidden
-            # test cases never leave the server (grading reads them from the
-            # DB, so the client has no legitimate use for them).
-            "sample_case": question.hidden_test_cases[0] if question.hidden_test_cases else None,
+            # Sample INPUT only, for the Run button. The stdin of case 1 is
+            # already public in the Examples block, but its expected_output
+            # must never ship: for single-case questions it IS the answer
+            # key. Grading data never leaves the server.
+            "sample_case": self._sample_case(question),
             "advanced_xai": advanced_data
         })
     
@@ -923,6 +923,15 @@ class NextProblemView(APIView):
         payload['weak_topics'] = weak_topics
         payload['recommendation'] = recommendation
         return payload
+
+    @staticmethod
+    def _sample_case(question):
+        """First case's stdin only — defensive against malformed JSON rows
+        (hidden_test_cases has no schema enforcement at the DB layer)."""
+        cases = question.hidden_test_cases
+        if isinstance(cases, list) and cases and isinstance(cases[0], dict):
+            return {"stdin": cases[0].get("stdin", "")}
+        return None
 
     def _compute_shap_xai(self, features, hlr_state):
         """

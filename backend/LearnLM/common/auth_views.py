@@ -21,5 +21,8 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
 
 
 class ThrottledTokenRefreshView(TokenRefreshView):
+    # Separate bucket from login: refresh presents an existing token, so it
+    # is not a credential-guessing surface, and behind shared-IP NATs the
+    # hourly refresh traffic of many users must never starve sign-ins.
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'auth'
+    throttle_scope = 'auth-refresh'

@@ -269,10 +269,12 @@ def test_next_problem_returns_frontend_schema(api_client, user, question, monkey
     data = response.data
     assert data["id"] == str(question.pk)
     assert data["difficulty"] in ("Easy", "Medium", "Hard")
-    # Grading data never leaves the server: only the first (public) case is
-    # exposed, for the Run button.
+    # Grading data never leaves the server: only the first case's INPUT is
+    # exposed, for the Run button. Expected output would be the answer key
+    # on single-case questions.
     assert "hiddenTestCases" not in data
-    assert data["sample_case"] == question.hidden_test_cases[0]
+    assert data["sample_case"] == {"stdin": question.hidden_test_cases[0]["stdin"]}
+    assert "expected_output" not in data["sample_case"]
     xai = data["advanced_xai"]["xai"]
     assert set(v["subject"] for v in xai["shap_values"]) == {
         "Time Complexity", "Space Complexity", "Logic Accuracy", "Topic Recency",

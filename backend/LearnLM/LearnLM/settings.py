@@ -196,9 +196,13 @@ REST_FRAMEWORK = {
         # /code/next/ can trigger an LLM test-case generation.
         'judge0': '10/minute',
         'recommend': '30/minute',
-        # Token obtain/refresh: keyed by IP for anonymous callers, this is
-        # the credential-stuffing brake (frozen architecture §7).
+        # Token endpoints, keyed by IP for anonymous callers. Separate
+        # buckets: 'auth' (login) is the credential-stuffing brake; refresh
+        # presents an existing token (not guessable credentials) and gets a
+        # looser bucket so refresh traffic behind a shared NAT can never
+        # starve logins (frozen architecture §7).
         'auth': '10/minute',
+        'auth-refresh': '30/minute',
     }
 }
 

@@ -37,5 +37,13 @@ def test_token_endpoint_throttles_after_limit():
             url, {"username": "authuser", "password": "right-password-1"}, format="json"
         )
         assert response.status_code == 429
+
+        # Refresh uses an INDEPENDENT bucket: with the login bucket
+        # exhausted, refresh must still be reachable (401 for a garbage
+        # token — but never 429 from login traffic).
+        refresh = client.post(
+            reverse("token_refresh"), {"refresh": "not-a-token"}, format="json"
+        )
+        assert refresh.status_code == 401
     finally:
         cache.clear()  # never leak throttle state into other tests

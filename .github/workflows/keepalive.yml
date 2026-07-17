@@ -1,0 +1,23 @@
+# Free-tier warm-keeper: Render idles the web service after ~15 min and
+# Neon suspends its compute after ~5 min — the first visitor then pays a
+# 30-60s wake-up that reads as "the site is broken". This ping keeps both
+# warm (healthz round-trips the database). GitHub cron granularity is
+# 5 minutes with jitter, which is enough to keep Render awake and keeps
+# Neon's wake-ups down to warm-cache blips.
+# Render free tier = 750 instance-hours/month; one always-on service fits.
+name: Keep production warm
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping API health (wakes Render + Neon)
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 https://sparklm-api.onrender.com/healthz || true)
+          echo "healthz -> $code"
+          test "$code" = "200"

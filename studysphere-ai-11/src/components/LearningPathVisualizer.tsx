@@ -90,7 +90,11 @@ const STATUS_META: Record<
 
 export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?: (topic: string) => void }) {
   const [searchParams] = useSearchParams();
-  const subject = searchParams.get('topic') || 'Array';
+  // Default must name the PORTAL (DSA curriculum), not a topic: a
+  // non-portal subject makes the backend fall back to an all-topics
+  // graph, which pollutes the DAG with stray CSV topics (Design,
+  // Enumeration, ...) and bloats the payload.
+  const subject = searchParams.get('topic') || 'DSA';
 
   const [curriculum, setCurriculum] = useState<TopicNode[]>([]);
   const [activeId, setActiveId] = useState<string>("");

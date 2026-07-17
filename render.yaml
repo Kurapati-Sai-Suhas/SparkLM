@@ -8,6 +8,9 @@ services:
     name: sparklm-api
     runtime: python
     plan: free
+    # Same coast as the Neon database (US East Ohio): the original Oregon
+    # placement paid ~55ms per DB query cross-country, on every request.
+    region: virginia
     rootDir: backend
     # Web tier is deliberately torch-free (§5): core requirements only.
     buildCommand: >-

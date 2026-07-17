@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
   CheckCircle2,
-  Loader2,
+  BookOpen,
   AlertTriangle,
   Lock,
   Cpu,
@@ -65,7 +65,10 @@ const STATUS_META: Record<
     text: "text-amber-300",
     bg: "bg-amber-500/10",
     glow: "hover:shadow-[0_0_20px_rgba(245,158,11,0.35)]",
-    icon: Loader2,
+    // Deliberately NOT a spinner: a fresh account has every root topic in
+    // "learning" at 0%, and a wall of spinning loaders reads as the page
+    // being stuck loading forever.
+    icon: BookOpen,
     progress: "[&>div]:bg-amber-400",
   },
   struggling: {
@@ -236,13 +239,7 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
                                         <div
                                           className={`h-7 w-7 rounded-md flex items-center justify-center ${meta.bg} ${meta.text}`}
                                         >
-                                          <Icon
-                                            className={`h-3.5 w-3.5 ${
-                                              node.status === "learning"
-                                                ? "animate-spin"
-                                                : ""
-                                            }`}
-                                          />
+                                          <Icon className="h-3.5 w-3.5" />
                                         </div>
                                         <Badge
                                           variant="outline"
@@ -392,11 +389,25 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
                     </div>
                   </div>
 
-                  <button 
-                    onClick={() => onStartTopic && onStartTopic(activeNode.name)}
-                    className="w-full h-10 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_15px_rgba(59,130,246,0.4)] hover:shadow-[0_0_25px_rgba(59,130,246,0.6)] transition-all text-sm font-medium inline-flex items-center justify-center gap-2">
-                    Start {activeNode.name}
-                    <ArrowRight className="h-4 w-4" />
+                  <button
+                    onClick={() =>
+                      activeNode.status !== "locked" &&
+                      onStartTopic &&
+                      onStartTopic(activeNode.name)
+                    }
+                    disabled={activeNode.status === "locked"}
+                    className="w-full h-10 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_15px_rgba(59,130,246,0.4)] hover:shadow-[0_0_25px_rgba(59,130,246,0.6)] transition-all text-sm font-medium inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:bg-primary">
+                    {activeNode.status === "locked" ? (
+                      <>
+                        <Lock className="h-4 w-4" />
+                        Complete prerequisites to unlock
+                      </>
+                    ) : (
+                      <>
+                        Start {activeNode.name}
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
                   </button>
                 </CardContent>
               </Card>

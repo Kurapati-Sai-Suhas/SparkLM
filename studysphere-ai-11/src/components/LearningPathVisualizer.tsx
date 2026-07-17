@@ -138,6 +138,19 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
   const columns = Array.from(new Set(curriculum.map((n) => n.column))).sort();
   const activeNode = curriculum.find((n) => n.id === activeId) || curriculum[0];
 
+  // First render always arrives here with an empty curriculum (the fetch
+  // hasn't resolved yet). Without this guard, the router panel below reads
+  // activeNode.name on undefined and blank-screens the whole route.
+  if (loading) {
+    return (
+      <div className="relative min-h-screen bg-background text-foreground p-6 md:p-8 flex items-center justify-center">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading your mastery graph…
+        </p>
+      </div>
+    );
+  }
+
   if (!loading && curriculum.length === 0) {
     return (
       <div className="relative min-h-screen bg-background text-foreground p-6 md:p-8 flex items-center justify-center">

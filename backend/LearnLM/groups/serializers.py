@@ -15,10 +15,24 @@ class UserDisplaySerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'university', 'role']
 
 class UserSerializer(serializers.ModelSerializer):
+    # M7 registration hardening: previously email was optional and
+    # unchecked, so accounts registered with blank, malformed, or
+    # duplicate addresses. EmailField enforces the format; uniqueness is
+    # checked case-insensitively below.
+    email = serializers.EmailField(required=True)
+
     class Meta:
         model = User
         fields = ['id', 'username', 'password', 'email', 'university', 'bio', 'role']
         extra_kwargs = {'password': {'write_only': True}}
+
+    def validate_email(self, value):
+        qs = User.objects.filter(email__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value.lower()
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)

@@ -330,6 +330,23 @@ class NextProblemView(APIView):
         # 🚀 ADVANCED ML: Sequence-Based LSTM (Deep Knowledge Tracing)
         # (Disabled for production - experimental code removed to reduce cold starts and memory usage)
 
+        # M7 server-side curriculum gate (staged: enforced only when
+        # CURRICULUM_GATE_ENFORCE is on — flipping request behavior right
+        # before the demo window is deliberately avoided; the frontend
+        # already guards Start on locked topics).
+        from django.conf import settings as dj_settings
+        if topic and getattr(dj_settings, 'CURRICULUM_GATE_ENFORCE', False):
+            from .models import TopicPrerequisite
+            prereqs = set(TopicPrerequisite.objects.filter(topic=topic)
+                          .values_list('prerequisite__name', flat=True))
+            missing = prereqs - set(get_mastered_topic_names(request.user))
+            if missing:
+                return Response({
+                    "error": "topic_locked",
+                    "message": f"Complete the prerequisites first: {', '.join(sorted(missing))}.",
+                    "missing_prerequisites": sorted(missing),
+                }, status=403)
+
         # 🚥 ML-BASED TRAFFIC COP
         router = RoutingClassifier()
         # FR-RTR-01 v2: mean + runs-test streakiness over the last 20

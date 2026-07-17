@@ -102,6 +102,24 @@ Operational notes:
 8. `python manage.py check --deploy` locally with prod-like env for the
    security checklist (HSTS warnings are acceptable on Render's TLS).
 
+## Observability (M8)
+
+- **Sentry:** create a free project at sentry.io (platform: Django), copy its
+  DSN into the Render env var `SENTRY_DSN`, save (auto-restarts). Every
+  unhandled production exception then arrives with a stack trace. Without a
+  DSN the integration is a complete no-op.
+- **Access log:** every API request logs one line (`method path -> status (ms)`)
+  to the Render log tail; `/healthz` probes are excluded to keep it readable.
+
+## Backups (M8)
+
+Primary: **Neon point-in-time restore** (console → Backup & Restore) — the
+free tier keeps a restore window; use it for disaster recovery.
+Belt-and-suspenders: `scripts/backup_prod.sh` takes an explicit local
+`pg_dump` snapshot (run it before demos or risky data operations; keep the
+output out of git). Pre-demo runbook: snapshot + open the live URL 10
+minutes early.
+
 ## Rollback
 
 Render → the service's **Deploys** tab → "Rollback" to the previous image.

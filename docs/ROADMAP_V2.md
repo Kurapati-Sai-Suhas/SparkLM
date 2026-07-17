@@ -23,9 +23,9 @@ principal-engineer review with required fixes → observed-green CI before closu
 
 | # | Milestone | Was | Scope anchor |
 |---|-----------|-----|--------------|
-| **M6** | **Deploy to production** — Neon + Upstash + Render (Daphne; migrate + collectstatic on deploy) + Vercel; production env vars; smoke pass on live URL | M6 | §15 Phase B topology |
-| **M7** | **Effective mastery + Review Queue** — effective mastery = skill × predicted retention(t); daily due-for-review surface (initial skill = the frozen accuracy ≥ 0.8 ∧ reviews ≥ 3 rule until the belief layer lands) | M11 | §6.2 |
-| M8 | Observability + backups | M7 | §12 |
+| **M6** | **Deploy to production** — LIVE at sparklm-api.onrender.com + spark-lm-3y3e.vercel.app (2026-07-17; smoke fixes: boot-time URLconf warmup, caseless-question quarantine, DAG UI repairs, keep-alive pinger). Remaining user actions: ALLOWED_HOSTS for WebSockets, optional region move | M6 | §15 Phase B topology |
+| **M7** | **Effective mastery + Review Queue** — SHIPPED 2026-07-17: learning/memory.py retention math, /api/review/queue/, Due-for-Review card, real router-panel telemetry, registration email validation. Curriculum re-locking staged behind CURRICULUM_GATE_ENFORCE (off until after the interview) | M11 | §6.2 |
+| M8 | Observability + backups — SHIPPED 2026-07-17 with M7: Sentry (DSN-gated), per-request access log, backup runbook + Neon PITR docs | M7 | §12 |
 | M9 | Auth v2 (httpOnly refresh) | M8 | §13.2 |
 | M10 | Two-sided Elo + item calibration | M9 | §6.2 |
 | M11 | Belief layer (GDCP retirement; observed accuracy becomes immutable) | M10 | §4.2, §6.2 |

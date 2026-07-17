@@ -102,6 +102,25 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
   const [curriculum, setCurriculum] = useState<TopicNode[]>([]);
   const [activeId, setActiveId] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [routerInfo, setRouterInfo] = useState<{
+    route: string;
+    runs_z: number;
+    avg_acc: number;
+    sample_size: number;
+  } | null>(null);
+
+  useEffect(() => {
+    // Real router telemetry for the "Why You're Here" panel — this panel
+    // previously showed static placeholder text, which misrepresented the
+    // actual routing decision.
+    const token = localStorage.getItem('authToken') || localStorage.getItem('access');
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/review/queue/`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data?.router) setRouterInfo(data.router); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const fetchMasteryMap = async () => {
@@ -341,9 +360,23 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
                     <span className="text-foreground font-medium">
                       Hybrid ML Router Decision:
                     </span>{" "}
-                    Routed via{" "}
-                    <span className="text-primary font-mono">Elo</span> due to
-                    erratic recent results (streakiness check).
+                    {routerInfo ? (
+                      <>
+                        Routed via{" "}
+                        <span className="text-primary font-mono">
+                          {routerInfo.route === "flat" ? "Elo practice" : "Curriculum DAG"}
+                        </span>{" "}
+                        — recent results look{" "}
+                        {routerInfo.runs_z > 1.96
+                          ? "erratic (oscillating pass/fail)"
+                          : routerInfo.runs_z < -1.96
+                          ? "streaky (breakthrough pattern)"
+                          : "steady"}{" "}
+                        over your last {routerInfo.sample_size} submissions.
+                      </>
+                    ) : (
+                      <>Computing your route from recent submissions…</>
+                    )}
                   </p>
 
                   <div className="rounded-lg border border-border/60 bg-background/40 backdrop-blur p-3.5">
@@ -376,15 +409,22 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
                         Router
                       </div>
                       <div className="text-sm font-mono text-primary">
-                        Elo v2
+                        {routerInfo
+                          ? routerInfo.route === "flat"
+                            ? "Elo"
+                            : "DAG"
+                          : "—"}
                       </div>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-background/40 backdrop-blur p-3">
                       <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-1">
-                        Variance
+                        Streakiness
                       </div>
                       <div className="text-sm font-mono text-amber-300 flex items-center gap-1">
-                        <TrendingUp className="h-3 w-3" /> High
+                        <TrendingUp className="h-3 w-3" />
+                        {routerInfo
+                          ? `z=${routerInfo.runs_z.toFixed(2)}`
+                          : "—"}
                       </div>
                     </div>
                   </div>

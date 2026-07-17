@@ -65,3 +65,7 @@ services:
         sync: false
       - key: ENABLE_SHAP_XAI
         value: "false"
+      - key: CURRICULUM_GATE_ENFORCE
+        value: "false"
+      - key: SENTRY_DSN
+        sync: false

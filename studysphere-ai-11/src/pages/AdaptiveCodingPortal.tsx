@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import 'katex/dist/katex.min.css';
 import XaiComponentCharts from '../components/XaiComponentCharts';
 import LearningPathVisualizer from '../components/LearningPathVisualizer';
+import ReviewQueueCard from '../components/ReviewQueueCard';
 import LanguageSelector from '../components/LanguageSelector';
 
 export default function AdaptiveCodingPortal() {
@@ -216,6 +217,9 @@ export default function AdaptiveCodingPortal() {
         </div>
 
         <div className="px-6 py-6 space-y-6">
+          {/* DUE FOR REVIEW (M7 — HLR spaced repetition surface) */}
+          <ReviewQueueCard onStartTopic={handleStartTopic} />
+
           {/* XAI INSIGHT PANEL */}
           <Card
             data-testid="xai-insight-panel"

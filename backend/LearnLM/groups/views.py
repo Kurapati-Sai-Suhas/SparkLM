@@ -474,15 +474,26 @@ class MasteryMapView(APIView):
         except ValidationError:
             mastery_map = {}
 
-        # Enrich with the user's real per-topic accuracy so the Learning
-        # Path shows genuine progress numbers.
+        # Enrich with the user's real per-topic accuracy plus the M7
+        # effective-mastery signals (skill x predicted retention, §6.2).
+        from django.utils import timezone as dj_tz
+        from learning.memory import effective_mastery, is_due, retention
         from .models import UserTopicMastery
-        accuracy = dict(
-            UserTopicMastery.objects.filter(user=request.user)
-            .values_list('topic__name', 'accuracy')
-        )
+
+        now = dj_tz.now()
+        state = {
+            name: (acc, hl, last, reviews)
+            for name, acc, hl, last, reviews in UserTopicMastery.objects.filter(
+                user=request.user
+            ).values_list('topic__name', 'accuracy', 'hlr_halflife', 'last_practiced', 'reviews')
+        }
         for name, node in mastery_map.items():
-            node['accuracy_pct'] = round(accuracy.get(name, 0.0) * 100, 1)
+            acc, hl, last, reviews = state.get(name, (0.0, 1.0, None, 0))
+            days = max((now - last).total_seconds() / 86400.0, 0.0) if last else 0.0
+            r = retention(hl, days) if reviews else 1.0
+            node['accuracy_pct'] = round(acc * 100, 1)
+            node['effective_mastery_pct'] = round(effective_mastery(acc, r) * 100, 1)
+            node['due'] = is_due(reviews, r)
 
         return Response(mastery_map)
 

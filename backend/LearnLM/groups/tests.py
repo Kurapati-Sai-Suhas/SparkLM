@@ -167,6 +167,34 @@ class RoutingTelemetryTests(TestCase):
         self.assertEqual(runs_z, 0.0)
 
 
+class RetentionMathTests(TestCase):
+    """learning.memory — frozen §6.2 forgetting-curve math (M7)."""
+
+    def test_retention_curve_shape(self):
+        from learning.memory import retention
+        self.assertEqual(retention(2.0, 0.0), 1.0)          # just practiced
+        self.assertAlmostEqual(retention(2.0, 2.0), 0.5)    # halves at halflife
+        self.assertAlmostEqual(retention(2.0, 4.0), 0.25)   # keeps halving
+        self.assertGreater(retention(10.0, 5.0), retention(2.0, 5.0))  # longer h retains more
+
+    def test_retention_is_defensive(self):
+        from learning.memory import retention
+        self.assertEqual(retention(0.0, 5.0), retention(0.1, 5.0))  # floored halflife
+        self.assertEqual(retention(2.0, -3.0), 1.0)                  # clock skew clamps
+
+    def test_effective_mastery_is_the_clamped_product(self):
+        from learning.memory import effective_mastery
+        self.assertAlmostEqual(effective_mastery(0.8, 0.5), 0.4)
+        self.assertEqual(effective_mastery(1.5, 2.0), 1.0)   # clamped
+        self.assertEqual(effective_mastery(-1.0, 0.5), 0.0)
+
+    def test_due_requires_practice_and_decay(self):
+        from learning.memory import is_due
+        self.assertTrue(is_due(3, 0.3))    # practiced + forgotten -> due
+        self.assertFalse(is_due(3, 0.9))   # practiced + fresh -> not due
+        self.assertFalse(is_due(0, 0.1))   # never practiced -> nothing to forget
+
+
 class MasteryDefinitionTests(TestCase):
     """SRS FR-HRCH-01: mastery = accuracy >= 0.8 over >= 3 reviews, one shared definition."""
 

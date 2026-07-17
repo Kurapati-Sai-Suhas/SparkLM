@@ -68,6 +68,8 @@ MIDDLEWARE = [
     # WhiteNoise serves collected static files (admin CSS/JS) directly
     # from Daphne — there is no separate web server in the Render topology.
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    # One access-log line per API request (M8) — Daphne has no access log.
+    "common.logging_middleware.AccessLogMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -288,6 +290,24 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "dummy@example.com")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 
+# M7 staged rollout: when true, NextProblemView rejects explicitly
+# requested topics whose prerequisites are unmastered (server-side
+# curriculum gate). Off by default until after the demo window — the
+# frontend guard already prevents starting locked topics.
+CURRICULUM_GATE_ENFORCE = os.getenv("CURRICULUM_GATE_ENFORCE", "false").lower() == "true"
+
+# --- SENTRY (M8 observability) ---
+# No-op unless SENTRY_DSN is provided (set it in the Render dashboard).
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=os.getenv("SENTRY_ENV", "development" if DEBUG else "production"),
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "0.1")),
+        send_default_pii=False,
+    )
+
 # --- OBSERVABILITY LOGGING ---
 import logging
 LOGGING = {
@@ -319,6 +339,11 @@ LOGGING = {
         'groups': {
             'handlers': ['console'],
             'level': 'DEBUG',
+            'propagate': False,
+        },
+        'access': {
+            'handlers': ['console'],
+            'level': 'INFO',
             'propagate': False,
         }
     }

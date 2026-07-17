@@ -3,6 +3,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from common.auth_views import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
+from common.review_views import ReviewQueueView
 
 from .views import (
     # Auth & User
@@ -66,6 +67,7 @@ urlpatterns = [
     # ── Module D: Hybrid Router ──────────────────────────────
     path('ai/recommend/',   HybridRouterView.as_view(), name='hybrid-router'),
     path('ai/mastery-map/', MasteryMapView.as_view(),   name='mastery-map'),
+    path('review/queue/',   ReviewQueueView.as_view(),  name='review-queue'),
 
     # ── Module C: Coding Portal (V2) ─────────────────────────
     # 👇 NEW: Fetch Global Portals

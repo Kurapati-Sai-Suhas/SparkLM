@@ -18,6 +18,13 @@ jobs:
     steps:
       - name: Ping API health (wakes Render + Neon)
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 https://sparklm-api.onrender.com/healthz || true)
-          echo "healthz -> $code"
-          test "$code" = "200"
+          # Three attempts 20s apart: a single failed ping is usually just a
+          # Render redeploy in progress, and a red run for that is noise.
+          # Only a sustained outage should fail the job.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 https://sparklm-api.onrender.com/healthz || true)
+            echo "attempt $attempt: healthz -> $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 20
+          done
+          exit 1

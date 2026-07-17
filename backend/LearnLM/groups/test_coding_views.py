@@ -312,6 +312,39 @@ def test_placeholder_questions_are_never_served(api_client, user, question, monk
 
 
 @pytest.mark.django_db
+def test_caseless_questions_are_never_served(api_client, user, question, monkeypatch):
+    """
+    M6-smoke regression: ~1,100 CSV-imported rows carry real descriptions
+    (no placeholder marker) but ZERO judge test cases — reseed skips them
+    because they look seeded, and serving one guarantees an empty sample
+    case and a failed submit. They must be quarantined like placeholders.
+    """
+    from groups.hybrid_router import RoutingClassifier
+    monkeypatch.setattr(RoutingClassifier, "predict_route", lambda self, *a, **k: "flat")
+
+    # Sits at a closer Elo distance than the armed question — must still
+    # never be recommended.
+    Question.objects.create(
+        title="Caseless CSV Import",
+        topic=question.topic,
+        content="A real-looking imported description. Example: input 1, output 1.",
+        base_difficulty=1200.0,
+        hidden_test_cases=[],
+    )
+    api_client.force_authenticate(user=user)
+
+    response = api_client.get(reverse("code-next-problem"), {"topic": "Array"})
+    assert response.status_code == 200
+    assert response.data["id"] == str(question.pk)  # the armed question wins
+
+    # With only caseless rows left, report completion — never a dud problem.
+    question.delete()
+    response = api_client.get(reverse("code-next-problem"), {"topic": "Array"})
+    assert response.status_code == 200
+    assert response.data.get("status") == "completed"
+
+
+@pytest.mark.django_db
 def test_failed_generation_is_never_persisted(api_client, user, question, monkeypatch):
     from groups.hybrid_router import RoutingClassifier
     monkeypatch.setattr(RoutingClassifier, "predict_route", lambda self, *a, **k: "flat")

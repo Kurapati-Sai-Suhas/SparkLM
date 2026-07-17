@@ -50,6 +50,22 @@ JUDGE0_HOST = os.environ.get('JUDGE0_API_HOST', 'judge0-ce.p.rapidapi.com')
 JUDGE0_BASE = os.environ.get('JUDGE0_URL', f'https://{JUDGE0_HOST}')
 JUDGE0_KEY  = os.environ.get('JUDGE0_API_KEY')
 
+
+def _servable_questions():
+    """
+    Base queryset of questions eligible to be served by the recommender.
+
+    Two quarantines, same idea: content that cannot deliver the full solve
+    loop never reaches a user. Placeholder rows lack real descriptions;
+    beyond those, ~1,100 CSV-imported rows carry a genuine description but
+    ZERO judge test cases (they look seeded, so reseed skips them) — serving
+    one yields an empty sample case and a guaranteed submit failure. Both
+    stay invisible until the content pipeline arms them.
+    """
+    return Question.objects.exclude(
+        content__icontains=Question.PLACEHOLDER_MARKER
+    ).exclude(hidden_test_cases=[]).exclude(hidden_test_cases__isnull=True)
+
 def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
     language_id = LANGUAGE_IDS.get(language.lower())
     if not language_id:
@@ -341,9 +357,9 @@ class NextProblemView(APIView):
             target_topic_name = optimal_node.get("recommended_topic") or topic.name
             xai_explanation = optimal_node.get("reason", "")
 
-            question = Question.objects.filter(topic__name=target_topic_name).exclude(id__in=solved_ids).exclude(
-                content__icontains=Question.PLACEHOLDER_MARKER  # unseeded placeholders are not servable
-            ).annotate(
+            question = _servable_questions().filter(
+                topic__name=target_topic_name
+            ).exclude(id__in=solved_ids).annotate(
                 elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
             ).order_by('elo_diff').first()
 
@@ -353,16 +369,14 @@ class NextProblemView(APIView):
             xai_explanation = f"📈 Matched to your current skill level (Elo: {round(target_elo)})."
 
             if topic:
-                question = Question.objects.filter(topic__name=topic.name).exclude(id__in=solved_ids).exclude(
-                    content__icontains=Question.PLACEHOLDER_MARKER
-                ).annotate(
+                question = _servable_questions().filter(
+                    topic__name=topic.name
+                ).exclude(id__in=solved_ids).annotate(
                     elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
                 ).order_by('elo_diff').first()
 
         if not question:
-            unsolved_qs = Question.objects.exclude(id__in=solved_ids).exclude(
-                content__icontains=Question.PLACEHOLDER_MARKER
-            )
+            unsolved_qs = _servable_questions().exclude(id__in=solved_ids)
             if not unsolved_qs.exists():
                 return Response({
                     'status': 'completed',

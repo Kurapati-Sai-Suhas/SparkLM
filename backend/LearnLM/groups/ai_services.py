@@ -7,8 +7,11 @@ from django.conf import settings
 from PIL import Image as PILImage
 import google.generativeai as genai
 from groq import Groq
-from transformers import CLIPProcessor, CLIPModel
-import torch
+
+# transformers/torch are deliberately NOT imported at module level: the
+# web tier ships without the ML extras (frozen architecture §5 — "torch
+# lives in workers/offline only"; they add ~2GB). VectorSearchService
+# imports them lazily on first use and degrades cleanly when absent.
 
 logger = logging.getLogger(__name__)
 
@@ -209,10 +212,20 @@ class VectorSearchService:
     @classmethod
     def get_model(cls):
         if cls._model is None:
-            print("🧠 Downloading & Loading HuggingFace CLIP Model (this takes a minute on first run)...")
+            try:
+                from transformers import CLIPModel, CLIPProcessor
+            except ImportError as exc:
+                # Slim deploys (requirements.txt without requirements-ml.txt)
+                # don't carry the ML extras. Callers already wrap visual
+                # search in try/except, so this reads as a clean skip.
+                raise RuntimeError(
+                    "Visual search requires the ML extras: "
+                    "pip install -r requirements-ml.txt"
+                ) from exc
+            logger.info("Loading HuggingFace CLIP model (downloads on first run)...")
             cls._model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
             cls._processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-            print("✅ CLIP Model loaded successfully!")
+            logger.info("CLIP model loaded.")
         return cls._model, cls._processor
 
     @classmethod
@@ -222,6 +235,7 @@ class VectorSearchService:
         returns a 512-dim float list (the feature vector).
         """
         model, processor = cls.get_model()
+        import torch  # present whenever get_model() succeeded (ML extras)
 
         # Handle both file objects and file paths safely
         if hasattr(image_file, 'read'):

@@ -46,3 +46,4 @@ Thumbs.db
 *.sw?
 # Runtime artifacts from reseed_questions
 reseed_failures.json
+staticfiles/

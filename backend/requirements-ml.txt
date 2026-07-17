@@ -1,0 +1,12 @@
+# SparkLM heavy ML extras (GNN + SHAP XAI + visual search) — ~2GB.
+# The web tier deploys WITHOUT this file (frozen architecture §5: torch
+# lives in workers/offline only; serving falls back to the heuristic
+# explainer with the identical response schema, and visual search
+# degrades cleanly). Install alongside the core file for local dev, CI,
+# and offline/worker environments:
+#     pip install -r requirements.txt -r requirements-ml.txt
+torch==2.12.0
+torch-geometric==2.8.0
+onnxruntime==1.27.0
+shap==0.52.0
+transformers==5.9.0

@@ -65,6 +65,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise serves collected static files (admin CSS/JS) directly
+    # from Daphne — there is no separate web server in the Render topology.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -159,15 +162,36 @@ USE_TZ = True
 STATIC_URL = "static/"
 # Required for `collectstatic` on deploy (admin CSS/JS etc.).
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+# Hashed + compressed static files served by WhiteNoise behind Daphne.
+# Manifest storage only outside DEBUG: it requires a collectstatic run,
+# which development and the test suite don't perform.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+if not DEBUG:
+    STORAGES["staticfiles"] = {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    }
+# In DEBUG, serve straight from the app's static dirs per request instead
+# of pre-scanning a STATIC_ROOT that may not have been collected yet.
+WHITENOISE_AUTOREFRESH = DEBUG
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Local dev origins by default; production supplies its SPA origin(s) via
+# env, e.g. CORS_ALLOWED_ORIGINS=https://sparklm.vercel.app
+_default_cors = "http://localhost:3000,http://localhost:5173,http://localhost:8080,http://172.19.0.1:8080"
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173", 
-    "http://localhost:8080", 
-    "http://172.19.0.1:8080",
+    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", _default_cors).split(",") if o.strip()
+]
+
+# Django 4+ validates the Origin header on POSTs to the admin: the API
+# host itself must be trusted when admin is used over HTTPS on Render,
+# e.g. CSRF_TRUSTED_ORIGINS=https://sparklm-api.onrender.com
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
 ]
 
 # Allow-all only in development; production uses the explicit whitelist above.

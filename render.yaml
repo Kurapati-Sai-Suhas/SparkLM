@@ -1,0 +1,64 @@
+# SparkLM — Render blueprint (frozen architecture §15 Phase B topology).
+# Backend web service only: the SPA deploys on Vercel, Postgres on Neon,
+# Redis on Upstash. Secrets are sync:false — set them in the dashboard,
+# never in git. See docs/DEPLOYMENT.md for the full runbook.
+
+services:
+  - type: web
+    name: sparklm-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    # Web tier is deliberately torch-free (§5): core requirements only.
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      cd LearnLM &&
+      python manage.py collectstatic --noinput
+    # Single instance: running migrate in the start chain is safe and
+    # keeps the free plan (no preDeploy hook needed).
+    startCommand: >-
+      cd LearnLM &&
+      python manage.py migrate --noinput &&
+      python manage.py ensure_submission_partitions &&
+      daphne -b 0.0.0.0 -p $PORT LearnLM.asgi:application
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: sparklm-api.onrender.com
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://sparklm-api.onrender.com
+      - key: DRF_NUM_PROXIES
+        value: "1"
+      - key: SECRET_KEY
+        generateValue: true
+      # Paste these in the Render dashboard (sync: false = never in git):
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        value: "5432"
+      - key: REDIS_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: JUDGE0_API_KEY
+        sync: false
+      - key: JUDGE0_API_HOST
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: N8N_WEBHOOK_URL
+        sync: false
+      - key: ENABLE_SHAP_XAI
+        value: "false"

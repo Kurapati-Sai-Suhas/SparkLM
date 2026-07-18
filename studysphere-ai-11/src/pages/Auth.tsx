@@ -1,31 +1,62 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
+import { GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 import logo from "@/assets/logo.jpeg";
 import { authAPI } from "@/services/api";
-import { Sparkles, ArrowRight, User, Lock, Mail } from "lucide-react";
+import { Sparkles, ArrowRight, User, Lock, Mail, Check, X } from "lucide-react";
+
+// Mirrors groups.validators.PasswordComplexityValidator on the backend —
+// giving live feedback here does not replace that check, it just avoids
+// making the user wait for a round-trip to learn their password is weak.
+const PASSWORD_RULES: { label: string; test: (pw: string) => boolean }[] = [
+  { label: "At least 8 characters", test: (pw) => pw.length >= 8 },
+  { label: "One uppercase letter", test: (pw) => /[A-Z]/.test(pw) },
+  { label: "One number", test: (pw) => /[0-9]/.test(pw) },
+  { label: "One symbol", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
+];
+
+/** Flattens DRF's {field: [messages]} error shape into one string per field. */
+function fieldErrorsFrom(error: any): Record<string, string> {
+  const data = error?.response?.data;
+  if (!data || typeof data !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [field, value] of Object.entries(data)) {
+    out[field] = Array.isArray(value) ? value.join(" ") : String(value);
+  }
+  return out;
+}
 
 export default function Auth() {
   const navigate = useNavigate();
-  
-  const [loginUsername, setLoginUsername] = useState(""); 
+
+  const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  
+  const [loginError, setLoginError] = useState("");
+
   const [signupName, setSignupName] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
+  const [signupErrors, setSignupErrors] = useState<Record<string, string>>({});
+  const [googleError, setGoogleError] = useState("");
+
+  const passwordChecks = useMemo(
+    () => PASSWORD_RULES.map((rule) => ({ ...rule, met: rule.test(signupPassword) })),
+    [signupPassword]
+  );
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError("");
 
-    if (!loginUsername || loginUsername === "") {
-        alert("Please enter your username.");
-        return;
+    if (!loginUsername) {
+      setLoginError("Please enter your username.");
+      return;
     }
 
     try {
@@ -35,23 +66,46 @@ export default function Auth() {
       }
     } catch (error) {
       console.error("LOGIN FAILED. Error details:", error);
-      alert("Login Failed! Please check your credentials.");
+      setLoginError("Login failed — check your username and password.");
     }
   };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSignupErrors({});
+
     if (signupPassword !== signupConfirmPassword) {
-      alert("Passwords do not match!");
+      setSignupErrors({ confirm: "Passwords do not match." });
       return;
     }
-    
+
     try {
       await authAPI.signup(signupName, signupEmail, signupPassword);
-      alert("Account created successfully! Please log in.");
+      // Log straight in rather than bouncing to the Sign In tab —
+      // one less step, and the credentials are already right here.
+      const response = await authAPI.login(signupName, signupPassword);
+      if (response.access) window.location.href = "/";
     } catch (error) {
       console.error("Signup failed:", error);
-      alert("Signup failed. That username might be taken.");
+      const errors = fieldErrorsFrom(error);
+      setSignupErrors(
+        Object.keys(errors).length ? errors : { form: "Signup failed. Please try again." }
+      );
+    }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
+    setGoogleError("");
+    if (!credentialResponse.credential) {
+      setGoogleError("Google did not return a credential. Please try again.");
+      return;
+    }
+    try {
+      const data = await authAPI.googleLogin(credentialResponse.credential);
+      if (data.access) window.location.href = "/";
+    } catch (error) {
+      console.error("Google sign-in failed:", error);
+      setGoogleError("Google sign-in failed. Please try again.");
     }
   };
 
@@ -117,6 +171,34 @@ export default function Auth() {
           </div>
 
           <CardContent className="pb-8">
+            {/* GOOGLE SIGN-IN — shared by both tabs: one click either logs
+                you in (matching email) or creates an account, no separate
+                flow needed. Renders nothing if Google isn't configured
+                (no VITE_GOOGLE_CLIENT_ID), so this is always safe to ship. */}
+            {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+              <div className="mb-6 space-y-4">
+                <div className="flex justify-center [&>div]:w-full">
+                  <GoogleLogin
+                    onSuccess={handleGoogleSuccess}
+                    onError={() => setGoogleError("Google sign-in failed. Please try again.")}
+                    theme="filled_black"
+                    shape="pill"
+                    width="336"
+                  />
+                </div>
+                {googleError && (
+                  <p className="text-center text-xs text-rose-400">{googleError}</p>
+                )}
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-white/[0.08]" />
+                  <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-slate-500">
+                    Or continue with email
+                  </span>
+                  <div className="h-px flex-1 bg-white/[0.08]" />
+                </div>
+              </div>
+            )}
+
             <Tabs defaultValue="login" className="w-full">
               <TabsList className="grid w-full grid-cols-2 mb-6 h-11 p-1 rounded-xl bg-white/[0.02] backdrop-blur-2xl border border-white/[0.06]">
                 <TabsTrigger 
@@ -167,8 +249,12 @@ export default function Auth() {
                     </div>
                   </div>
 
-                  <Button 
-                    type="submit" 
+                  {loginError && (
+                    <p className="text-xs text-rose-400 text-center">{loginError}</p>
+                  )}
+
+                  <Button
+                    type="submit"
                     className="group w-full h-11 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white font-semibold shadow-[0_0_25px_rgba(99,102,241,0.4)] hover:shadow-[0_0_40px_rgba(99,102,241,0.65)] transition-all"
                   >
                     Sign In
@@ -198,6 +284,9 @@ export default function Auth() {
                         className={inputCls}
                       />
                     </div>
+                    {signupErrors.username && (
+                      <p className="text-xs text-rose-400">{signupErrors.username}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="signup-email" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Email</Label>
@@ -213,6 +302,9 @@ export default function Auth() {
                         className={inputCls}
                       />
                     </div>
+                    {signupErrors.email && (
+                      <p className="text-xs text-rose-400">{signupErrors.email}</p>
+                    )}
                   </div>
                   <div className="grid grid-cols-1 gap-4">
                     <div className="space-y-2">
@@ -229,6 +321,28 @@ export default function Auth() {
                           className={`${inputCls} font-mono tracking-widest`}
                         />
                       </div>
+                      {signupPassword.length > 0 && (
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 pt-1">
+                          {passwordChecks.map((check) => (
+                            <div
+                              key={check.label}
+                              className={`flex items-center gap-1.5 text-[11px] ${
+                                check.met ? "text-emerald-400" : "text-slate-500"
+                              }`}
+                            >
+                              {check.met ? (
+                                <Check className="h-3 w-3 shrink-0" />
+                              ) : (
+                                <X className="h-3 w-3 shrink-0" />
+                              )}
+                              {check.label}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {signupErrors.password && (
+                        <p className="text-xs text-rose-400">{signupErrors.password}</p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="signup-confirm-password" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Confirm Password</Label>
@@ -244,11 +358,18 @@ export default function Auth() {
                           className={`${inputCls} font-mono tracking-widest`}
                         />
                       </div>
+                      {signupErrors.confirm && (
+                        <p className="text-xs text-rose-400">{signupErrors.confirm}</p>
+                      )}
                     </div>
                   </div>
 
-                  <Button 
-                    type="submit" 
+                  {signupErrors.form && (
+                    <p className="text-xs text-rose-400 text-center">{signupErrors.form}</p>
+                  )}
+
+                  <Button
+                    type="submit"
                     className="group w-full h-11 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white font-semibold shadow-[0_0_25px_rgba(99,102,241,0.4)] hover:shadow-[0_0_40px_rgba(99,102,241,0.65)] transition-all"
                   >
                     Create Account

@@ -3,6 +3,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from common.auth_views import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
+from common.google_auth_views import GoogleAuthView
 from common.review_views import ReviewQueueView
 
 from .views import (
@@ -49,6 +50,7 @@ urlpatterns = [
     path('token/',         ThrottledTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', ThrottledTokenRefreshView.as_view(),    name='token_refresh'),
     path('register/',      CreateUserView.as_view(),      name='register'),
+    path('auth/google/',   GoogleAuthView.as_view(),       name='auth-google'),
 
     # ── User & Dashboard ────────────────────────────────────
     path('dashboard/stats/', UserDashboardStats.as_view(), name='dashboard-stats'),

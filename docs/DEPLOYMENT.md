@@ -89,7 +89,33 @@ Operational notes:
 4. Deploy, then put the resulting origin into Render's
    `CORS_ALLOWED_ORIGINS` (step 3) if it differs.
 
-## 5. Smoke checklist (live URL)
+## 5. Google Sign-In (optional) — you do this once
+
+The button only appears when `VITE_GOOGLE_CLIENT_ID` is set; skip this section
+to run without it.
+
+1. console.cloud.google.com → create or select a project.
+2. **APIs & Services → OAuth consent screen** → User type **External** → fill in
+   app name ("SparkLM"), your email as support/developer contact → save
+   (test users aren't needed once published, but "Testing" mode works fine
+   for a demo — just add your own Google account under **Test users**).
+3. **APIs & Services → Credentials → Create Credentials → OAuth client ID**
+   → Application type **Web application**.
+4. **Authorized JavaScript origins** — add both:
+   - `https://spark-lm-3y3e.vercel.app` (production)
+   - `http://localhost:5173` (local dev)
+
+   Redirect URIs are not needed — the button uses Google Identity Services'
+   token flow, not a server-side redirect.
+5. Create it, copy the **Client ID** (`xxxxx.apps.googleusercontent.com`;
+   the accompanying "Client secret" is unused here and can be ignored — the
+   backend verifies tokens by audience, not by presenting a secret).
+6. Set it in **two** places (it is not a secret — the same value is meant to
+   be public in the browser):
+   - Vercel → this project's env vars → `VITE_GOOGLE_CLIENT_ID` → redeploy.
+   - Render → `sparklm-api` → env vars → `GOOGLE_CLIENT_ID` → redeploy.
+
+## 6. Smoke checklist (live URL)
 
 1. `GET https://sparklm-api.onrender.com/healthz` → `{"status": "ok"}`.
 2. Admin loads **with CSS** at `/admin/` and login works (CSRF trusted origin).
@@ -99,7 +125,11 @@ Operational notes:
 5. Run + Submit a known-good Python solution → Judge0 verdict, Elo update.
 6. Learning Path renders the DAG with real mastery data.
 7. Group chat over `wss://` (Channels via Upstash layer).
-8. `python manage.py check --deploy` locally with prod-like env for the
+8. If Google Sign-In is configured: the Google button renders on `/auth`;
+   signing in with a fresh Google account creates a user with no usable
+   local password, signing in with one matching an existing account's
+   email logs into that account instead of duplicating it.
+9. `python manage.py check --deploy` locally with prod-like env for the
    security checklist (HSTS warnings are acceptable on Render's TLS).
 
 ## Observability (M8)

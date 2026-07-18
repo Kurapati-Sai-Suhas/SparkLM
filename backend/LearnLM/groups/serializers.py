@@ -34,6 +34,33 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("An account with this email already exists.")
         return value.lower()
 
+    def validate_username(self, value):
+        # AbstractUser.username is unique=True, so DRF's model introspection
+        # already adds a UniqueValidator for the auto-generated field — this
+        # exists to give it the same wording style as validate_email, and a
+        # single place to extend if username rules grow.
+        qs = User.objects.filter(username__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("That username is already taken.")
+        return value
+
+    def validate_password(self, value):
+        # AUTH_PASSWORD_VALIDATORS is configured in settings but nothing
+        # calls it unless a serializer does so explicitly — DRF does not
+        # wire this in automatically. Without this method every validator
+        # there (length, common-password, complexity, ...) was dead
+        # configuration and registration accepted any password.
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+        return value
+
     def create(self, validated_data):
         password = validated_data.pop('password', None)
         instance = self.Meta.model(**validated_data)

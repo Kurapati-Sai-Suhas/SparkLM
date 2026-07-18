@@ -69,3 +69,5 @@ services:
         value: "false"
       - key: SENTRY_DSN
         sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false

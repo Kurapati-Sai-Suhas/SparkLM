@@ -28,6 +28,9 @@ joblib==1.5.3
 # ── LLM services (test-case generation, coach, embeddings) ──
 groq==1.5.0
 google-generativeai==0.8.6   # EOL — migrate to google-genai (tracked backlog)
+google-auth==2.51.0          # Google Sign-In ID token verification (pinned explicitly —
+                             # previously only a transitive dep of google-generativeai,
+                             # which is itself scheduled for removal)
 langchain==1.2.17
 langchain-text-splitters==1.1.2  # NOT a dependency of langchain 1.x —
                                  # imported directly (groups/views.py)

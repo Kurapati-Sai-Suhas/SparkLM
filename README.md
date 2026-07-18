@@ -28,7 +28,8 @@ Platforms like LeetCode treat every user identically. SparkLM makes three bets:
 | **AI coach** | Escalating hints on consecutive failures: Socratic nudge (3) → pseudocode (5) → worked example (7+), via n8n/LLM webhook with resilient fallbacks |
 | **Content pipeline** | 2,900+ problem bank maintained by quota-aware, idempotent LLM batch commands (generation, validation gates, multi-language starter code, backfill, restore) |
 | **Collaboration** | JWT-authenticated WebSocket group chat, CRDT (Yjs) collaborative editor, study groups, quizzes, flashcards, document RAG, visual search |
-| **Ops discipline** | 85-test offline suite (all third parties mocked, incl. threaded race tests), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), Sentry error tracking + per-request access log, environment-driven config, tested backup/restore |
+| **Auth** | Google Sign-In (server-verified ID token, account linked by email) alongside password auth with enforced complexity (length + uppercase + number + symbol), case-insensitive unique username/email |
+| **Ops discipline** | 104-test offline suite (all third parties mocked, incl. threaded race tests), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), Sentry error tracking + per-request access log, environment-driven config, tested backup/restore |
 
 ## Architecture
 
@@ -88,6 +89,7 @@ npm run dev                   # http://localhost:5173
 | `N8N_WEBHOOK_URL` | optional | LLM coach hints (fallback hints without it) |
 | `ENABLE_SHAP_XAI` | optional | Real SHAP attributions (needs `requirements-ml.txt`) |
 | `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | prod | SPA origin(s); API origin for admin-over-HTTPS |
+| `GOOGLE_CLIENT_ID` (+ `VITE_GOOGLE_CLIENT_ID` on the frontend) | optional | Google Sign-In; button hidden and endpoint 503s without it |
 | `VITE_API_URL`, `VITE_WS_URL` | frontend | Backend origins at build time |
 
 ## Content pipeline
@@ -109,7 +111,7 @@ The problem bank is maintained by idempotent management commands — all dry-run
 
 ```bash
 cd backend/LearnLM
-python -m pytest groups common # 85 tests, fully offline (Judge0 + LLMs mocked)
+python -m pytest groups common # 104 tests, fully offline (Judge0 + LLMs mocked)
 ```
 
 The suite covers routing telemetry and thresholds, mastery rules, grading statuses, the anti-farming guard, coach escalation, XAI schema guarantees, cache invalidation (including queryset deletes), every content-ops command, and the physical schema itself (partition routing, index catalog, partition maintenance). CI runs it against a real Postgres service container on every push. After pulling schema changes, refresh your local test database once with `--create-db` (the default `--reuse-db` keeps the old schema).

@@ -3,9 +3,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { GoogleOAuthProvider } from "@react-oauth/google";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { ThemeProvider } from "@/components/theme-provider";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 // Route-level code splitting: previously every page was a static import,
 // so the Coding Portal's Monaco editor + y-monaco (collaborative editing)
@@ -40,6 +43,19 @@ const RouteFallback = () => (
 
 const queryClient = new QueryClient();
 
+// Wraps children in GoogleOAuthProvider only when a Client ID is actually
+// configured — so a deploy without VITE_GOOGLE_CLIENT_ID set (e.g. local
+// dev before Google Cloud credentials exist) still renders the app
+// normally; the Google button itself checks the same env var and simply
+// doesn't render when it's absent, rather than crashing on a missing
+// provider.
+const GoogleAuthWrapper = ({ children }: { children: React.ReactNode }) =>
+  GOOGLE_CLIENT_ID ? (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{children}</GoogleOAuthProvider>
+  ) : (
+    <>{children}</>
+  );
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const token =
     localStorage.getItem("authToken") ||
@@ -61,6 +77,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <GoogleAuthWrapper>
         <BrowserRouter>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
@@ -99,6 +116,7 @@ const App = () => (
             </Routes>
           </Suspense>
         </BrowserRouter>
+        </GoogleAuthWrapper>
       </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>

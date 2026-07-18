@@ -136,19 +136,28 @@ if 'pytest' in sys.modules or 'pytest' in sys.argv[0]:
     pass
 
 
-# Password validation
+# Password validation. NOTE: this list only takes effect where something
+# actually calls django.contrib.auth.password_validation.validate_password()
+# — DRF's ModelSerializer does NOT wire it in automatically. That call
+# lives in UserSerializer.validate_password (groups/serializers.py); prior
+# to that method existing, every validator below was configured but never
+# invoked, so registration silently accepted any password.
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
     },
     {
         "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
         "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
+    {
+        "NAME": "groups.validators.PasswordComplexityValidator",
     },
 ]
 
@@ -258,6 +267,11 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # 👇 Because load_dotenv() is at the top, these will now successfully grab your keys!
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Google Sign-In: the OAuth Client ID is the audience GoogleAuthView checks
+# ID tokens against — NOT a secret (it's also shipped to the browser as
+# VITE_GOOGLE_CLIENT_ID), but it must match exactly or every token is
+# rejected.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 JUDGE0_API_KEY = os.getenv("JUDGE0_API_KEY")
 JUDGE0_API_HOST = os.getenv("JUDGE0_API_HOST", "judge0-extra-ce.p.rapidapi.com")
 

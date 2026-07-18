@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Home, Users, Calendar, MessageSquare, Layers, ListChecks,
-  Bell, Settings, LogOut, FolderOpen, UserPlus, Terminal,
+  Bell, Settings, LogOut, FolderOpen, UserPlus, Terminal, X,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -25,7 +25,15 @@ const bottomMenuItems = [
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({
+  isOpen = false,
+  onClose,
+}: {
+  /** Mobile drawer state — ignored above the md breakpoint, where the
+   *  sidebar is always visible (unchanged desktop behavior). */
+  isOpen?: boolean;
+  onClose?: () => void;
+}) {
   const [user, setUser] = useState({ username: "Loading...", role: "Student" });
 
   useEffect(() => {
@@ -57,6 +65,7 @@ export function AppSidebar() {
       to={item.url}
       end={item.url === "/"}
       data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
+      onClick={onClose}
       className={({ isActive }) =>
         `group relative flex items-center gap-3 h-10 px-3 rounded-lg text-[13px] font-medium
          transition-all duration-200
@@ -80,12 +89,24 @@ export function AppSidebar() {
   );
 
   return (
-    <aside
-      data-testid="app-sidebar"
-      className="relative h-screen w-64 flex-shrink-0 flex flex-col font-sans overflow-hidden
-        bg-gradient-to-b from-[#0a0f1e] via-[#08091a] to-[#050612]
-        border-r border-white/[0.06]"
-    >
+    <>
+      {/* Mobile-only backdrop: tapping outside the open drawer closes it. */}
+      {isOpen && (
+        <div
+          data-testid="sidebar-backdrop"
+          onClick={onClose}
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+        />
+      )}
+      <aside
+        data-testid="app-sidebar"
+        className={`fixed inset-y-0 left-0 z-50 h-screen w-64 flex-shrink-0 flex flex-col font-sans overflow-hidden
+          bg-gradient-to-b from-[#0a0f1e] via-[#08091a] to-[#050612]
+          border-r border-white/[0.06]
+          transition-transform duration-200 ease-out
+          ${isOpen ? "translate-x-0" : "-translate-x-full"}
+          md:static md:translate-x-0`}
+      >
       {/* Ambient indigo glow */}
       <div className="pointer-events-none absolute -top-32 -left-20 h-72 w-72 rounded-full bg-indigo-600/20 blur-[100px]" />
       <div className="pointer-events-none absolute bottom-0 -right-20 h-64 w-64 rounded-full bg-blue-600/10 blur-[100px]" />
@@ -110,6 +131,14 @@ export function AppSidebar() {
             </span>
           </div>
         </div>
+        <button
+          data-testid="sidebar-close-btn"
+          onClick={onClose}
+          aria-label="Close menu"
+          className="md:hidden ml-auto h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       {/* NAV */}
@@ -158,6 +187,7 @@ export function AppSidebar() {
           </button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

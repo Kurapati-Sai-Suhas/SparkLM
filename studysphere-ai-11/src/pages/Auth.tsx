@@ -177,14 +177,28 @@ export default function Auth() {
                 (no VITE_GOOGLE_CLIENT_ID), so this is always safe to ship. */}
             {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
               <div className="mb-6 space-y-4">
-                <div className="flex justify-center [&>div]:w-full">
-                  <GoogleLogin
-                    onSuccess={handleGoogleSuccess}
-                    onError={() => setGoogleError("Google sign-in failed. Please try again.")}
-                    theme="filled_black"
-                    shape="pill"
-                    width="336"
-                  />
+                {/* Google renders its own button chrome (a personalized
+                    white "continue as" pill once you're signed into a
+                    Google account in-browser) and ignores our theme prop
+                    for that variant — Google's branding guidelines don't
+                    allow arbitrary recoloring. Framing it in a themed
+                    halo lets it sit intentionally in the dark UI instead
+                    of looking like a dropped-in white bar. */}
+                <div className="flex justify-center">
+                  <div className="rounded-full p-[3px] bg-gradient-to-r from-indigo-500/50 via-violet-500/50 to-indigo-500/50 shadow-[0_0_25px_rgba(99,102,241,0.3)]">
+                    <div className="rounded-full overflow-hidden">
+                      <GoogleLogin
+                        onSuccess={handleGoogleSuccess}
+                        onError={() => setGoogleError("Google sign-in failed. Please try again.")}
+                        useOneTap={false}
+                        theme="filled_black"
+                        shape="pill"
+                        size="large"
+                        width="300"
+                        logo_alignment="center"
+                      />
+                    </div>
+                  </div>
                 </div>
                 {googleError && (
                   <p className="text-center text-xs text-rose-400">{googleError}</p>

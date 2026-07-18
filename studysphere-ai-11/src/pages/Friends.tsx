@@ -58,9 +58,12 @@ export default function Friends() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const profileRes = await userAPI.getProfile();
+        // Independent — fetchFriends() doesn't use the profile result.
+        const [profileRes] = await Promise.all([
+          userAPI.getProfile(),
+          fetchFriends(),
+        ]);
         setCurrentUser(profileRes.data);
-        await fetchFriends();
       } catch (err) {
         console.error("Failed to load friends data", err);
       }

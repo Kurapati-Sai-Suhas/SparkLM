@@ -84,9 +84,13 @@ export default function GroupDetail() {
     const fetchData = async () => {
       if (!id) return;
       try {
-        const userRes = await userAPI.getProfile();
+        // Independent calls — fire together instead of one round-trip
+        // after the other.
+        const [userRes, groupRes] = await Promise.all([
+          userAPI.getProfile(),
+          groupsAPI.getById(id),
+        ]);
         setCurrentUser(userRes.data);
-        const groupRes = await groupsAPI.getById(id);
         setGroup(groupRes.data);
         fetchFiles();
         fetchAssignments();

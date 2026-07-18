@@ -36,10 +36,12 @@ export default function AIQuiz() {
   useEffect(() => {
     const loadInitialData = async () => {
         try {
-            const userRes = await userAPI.getProfile();
+            // Independent calls — fire together, not one after the other.
+            const [userRes, groupsRes] = await Promise.all([
+                userAPI.getProfile(),
+                groupsAPI.getAll(),
+            ]);
             setCurrentUser(userRes.data);
-
-            const groupsRes = await groupsAPI.getAll();
             setGroups(groupsRes.data.results || groupsRes.data || []);
         } catch (err) {
             console.error("Failed to load initial data", err);

@@ -46,13 +46,27 @@ export default function Dashboard() {
 
   useEffect(() => {
     const loadDashboard = async () => {
-      try {
-        const statsRes = await userAPI.getDashboardStats();
-        const statsData = statsRes.data || {};
-        const profileRes = await userAPI.getProfile();
-        const profileData = profileRes.data || {};
+      // MLOps telemetry is staff-only (403 for regular users) and purely
+      // decorative — kicked off here (not awaited yet) so its request
+      // starts at the same time as the three below, rather than only
+      // after they finish. It never gates the dashboard's loading state.
+      const mlopsPromise = fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/mlops/telemetry/`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` } }
+      ).then((res) => (res.ok ? res.json() : null)).catch(() => null);
 
-        const groupsRes = await api.get("/groups/");
+      try {
+        // These three calls are independent (none needs another's result) —
+        // firing them in parallel instead of sequentially awaiting each one
+        // turns 3 network round-trips into 1 (the slowest of the three),
+        // which is most of what makes the dashboard "slow to load".
+        const [statsRes, profileRes, groupsRes] = await Promise.all([
+          userAPI.getDashboardStats(),
+          userAPI.getProfile(),
+          api.get("/groups/"),
+        ]);
+        const statsData = statsRes.data || {};
+        const profileData = profileRes.data || {};
         const fetchedGroups = groupsRes.data.results || groupsRes.data || [];
 
         const totalGroups = statsData.active_groups || 0;
@@ -70,23 +84,14 @@ export default function Dashboard() {
           quizzes_taken: statsData.quizzes_taken || 0,
           achievement_points: statsData.achievement_points || 0,
         });
-
-        // Load MLOps Data
-        try {
-          const mlopsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/mlops/telemetry/`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` }
-          });
-          if (mlopsRes.ok) {
-            setMlops(await mlopsRes.json());
-          }
-        } catch (e) {
-          console.error("Failed to load MLOps telemetry");
-        }
       } catch (error) {
         console.error("❌ Failed to load dashboard:", error);
       } finally {
         setLoading(false);
       }
+
+      const mlopsData = await mlopsPromise;
+      if (mlopsData) setMlops(mlopsData);
     };
     loadDashboard();
   }, []);

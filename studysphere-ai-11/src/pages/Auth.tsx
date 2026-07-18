@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
-import logo from "@/assets/logo.jpg";
+import logo from "@/assets/logo.jpeg";
 import { authAPI } from "@/services/api";
 import { Sparkles, ArrowRight, User, Lock, Mail } from "lucide-react";
 

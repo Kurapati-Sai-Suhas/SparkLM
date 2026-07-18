@@ -22,16 +22,54 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// 3. RESPONSE INTERCEPTOR (Handles 401 Unauthorized globally)
+// 3. RESPONSE INTERCEPTOR: on a 401, try the refresh token ONCE and retry
+// the original request. Only if refresh also fails do we clear storage
+// and redirect — previously a plain 401 wiped the tokens and left the
+// page showing zeroed/empty state with no redirect, which is exactly
+// what silently expiring (the access token lives 60 minutes) looked
+// like to a user: "it shows dummy data until I log out and back in".
+let refreshPromise = null;
+
+function redirectToLogin() {
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('refreshToken');
+  if (window.location.pathname !== '/auth') {
+    window.location.href = '/auth';
+  }
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response && error.response.status === 401) {
-      console.warn("Session expired. Logging out.");
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('refreshToken');
-      // Optional: window.location.href = "/auth"; 
+  async (error) => {
+    const original = error.config;
+    const isAuthEndpoint = original?.url?.includes('/token/');
+
+    if (error.response?.status === 401 && original && !original._retried && !isAuthEndpoint) {
+      original._retried = true;
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        redirectToLogin();
+        return Promise.reject(error);
+      }
+
+      try {
+        // Single shared refresh in flight even if several requests 401
+        // at once — avoids hammering /token/refresh/ with duplicates.
+        if (!refreshPromise) {
+          refreshPromise = api
+            .post('/token/refresh/', { refresh: refreshToken })
+            .finally(() => { refreshPromise = null; });
+        }
+        const { data } = await refreshPromise;
+        localStorage.setItem('authToken', data.access);
+        original.headers.Authorization = `Bearer ${data.access}`;
+        return api(original);
+      } catch (refreshError) {
+        redirectToLogin();
+        return Promise.reject(refreshError);
+      }
     }
+
     return Promise.reject(error);
   }
 );

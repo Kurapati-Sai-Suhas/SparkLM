@@ -25,6 +25,7 @@ import XaiComponentCharts from '../components/XaiComponentCharts';
 import LearningPathVisualizer from '../components/LearningPathVisualizer';
 import ReviewQueueCard from '../components/ReviewQueueCard';
 import LanguageSelector from '../components/LanguageSelector';
+import ProblemDescription from '../components/ProblemDescription';
 
 export default function AdaptiveCodingPortal() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -351,9 +352,9 @@ export default function AdaptiveCodingPortal() {
             </div>
 
             <div className="relative rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-2xl p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
-              <div
-                className="prose prose-invert max-w-none text-sm leading-relaxed text-slate-300 prose-headings:text-white prose-strong:text-white prose-code:text-indigo-300 prose-code:bg-white/[0.05] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:border prose-code:border-white/10 prose-code:before:content-none prose-code:after:content-none"
-                dangerouslySetInnerHTML={{ __html: problem.description }}
+              <ProblemDescription
+                content={problem.description}
+                htmlClassName="prose prose-invert max-w-none text-sm leading-relaxed text-slate-300 prose-headings:text-white prose-strong:text-white prose-code:text-indigo-300 prose-code:bg-white/[0.05] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:border prose-code:border-white/10 prose-code:before:content-none prose-code:after:content-none"
               />
             </div>
           </div>

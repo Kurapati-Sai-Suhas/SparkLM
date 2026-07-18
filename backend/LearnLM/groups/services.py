@@ -58,10 +58,20 @@ import json
 
 if __name__ == '__main__':
     stdin_str = sys.stdin.read().strip()
+    args = None
     try:
         parsed_input = json.loads(stdin_str)
-    except:
-        parsed_input = stdin_str
+    except Exception:
+        # Whole-blob parse failed. Multi-parameter questions store one JSON
+        # value per line (e.g. nums1 on line 1, nums2 on line 2) — that is
+        # NOT valid single-document JSON, so try one json.loads per line
+        # before giving up and treating the input as an opaque string.
+        lines = [ln for ln in stdin_str.split(chr(10)) if ln.strip() != '']
+        try:
+            args = [json.loads(ln) for ln in lines]
+            parsed_input = None
+        except Exception:
+            parsed_input = stdin_str
 
     sol = Solution()
     try:
@@ -69,7 +79,9 @@ if __name__ == '__main__':
         methods = [m for m in dir(sol) if not m.startswith('_') and callable(getattr(sol, m))]
         target_method = getattr(sol, methods[0]) if methods else sol.solve
 
-        if isinstance(parsed_input, list):
+        if args is not None:
+            res = target_method(*args)
+        elif isinstance(parsed_input, list):
             res = target_method(*parsed_input) if type(parsed_input) is list else target_method(parsed_input)
         elif isinstance(parsed_input, dict):
             res = target_method(**parsed_input)
@@ -178,7 +190,21 @@ GENERIC_JS_WRAPPER = """{user_code}
 
 const __stdin = require('fs').readFileSync(0, 'utf8').trim();
 let __parsed;
-try { __parsed = JSON.parse(__stdin); } catch (e) { __parsed = __stdin; }
+let __args = null;
+try {
+    __parsed = JSON.parse(__stdin);
+} catch (e) {
+    // Whole-blob parse failed. Multi-parameter questions store one JSON
+    // value per line (nums1 on line 1, nums2 on line 2, ...) — not valid
+    // single-document JSON. Try one JSON.parse per line before giving up
+    // and treating the input as an opaque string.
+    const __lines = __stdin.split(String.fromCharCode(10)).map(l => l.trim()).filter(l => l.length > 0);
+    try {
+        __args = __lines.map(l => JSON.parse(l));
+    } catch (e2) {
+        __parsed = __stdin;
+    }
+}
 
 try {
     const __sol = new Solution();
@@ -187,7 +213,9 @@ try {
     const __target = __methods.length ? __sol[__methods[0]].bind(__sol) : __sol.solve.bind(__sol);
 
     let __res;
-    if (Array.isArray(__parsed)) {
+    if (__args !== null) {
+        __res = __target(...__args);
+    } else if (Array.isArray(__parsed)) {
         __res = __target(...__parsed);
     } else {
         __res = __target(__parsed);

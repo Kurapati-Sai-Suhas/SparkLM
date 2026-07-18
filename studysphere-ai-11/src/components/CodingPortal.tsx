@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 import axios from 'axios';
+import ProblemDescription from './ProblemDescription';
 
 const CodingPortal = () => {
     // 1. DYNAMIC STATE
@@ -149,10 +150,13 @@ const CodingPortal = () => {
                     </div>
                 )}
                 
-                {/* Formatting the Kaggle description */}
-                <div style={{ color: '#ccc', lineHeight: '1.6', marginTop: '15px', whiteSpace: 'pre-wrap' }}>
-                    {currentProblem.description}
-                </div>
+                {/* Formatting the Kaggle description — content is a mix of
+                    real HTML and plain text with literal newlines across
+                    the seeded bank; ProblemDescription renders each correctly. */}
+                <ProblemDescription
+                    content={currentProblem.description}
+                    style={{ color: '#ccc', lineHeight: '1.6', marginTop: '15px' }}
+                />
                 
                 {currentProblem.examples?.map((ex: any, idx: number) => (
                     <div key={idx} style={{ backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '8px', marginTop: '15px' }}>

@@ -102,7 +102,14 @@ export default function Auth() {
     }
     try {
       const data = await authAPI.googleLogin(credentialResponse.credential);
-      if (data.access) window.location.href = "/";
+      if (data.access) {
+        // Google sign-in silently reconnects to any existing account with a
+        // matching email rather than always creating a new one — without
+        // this signal that's indistinguishable from a stranger's data
+        // showing up. Read once and cleared on the other side (Dashboard).
+        sessionStorage.setItem("sparklm_google_welcome", data.created ? "new" : "existing");
+        window.location.href = "/";
+      }
     } catch (error) {
       console.error("Google sign-in failed:", error);
       setGoogleError("Google sign-in failed. Please try again.");

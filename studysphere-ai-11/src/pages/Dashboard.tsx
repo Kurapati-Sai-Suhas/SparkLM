@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   XCircle,
 } from "lucide-react";
+import { toast } from "sonner";
 import api, { userAPI } from "@/services/api";
 import GamificationDashboard from "@/components/GamificationDashboard";
 
@@ -94,6 +95,20 @@ export default function Dashboard() {
       if (mlopsData) setMlops(mlopsData);
     };
     loadDashboard();
+  }, []);
+
+  // One-shot flag set by Auth.tsx right before the post-Google-sign-in
+  // redirect (see handleGoogleSuccess) — makes an existing-account match
+  // visible instead of a stranger's groups/chats just silently appearing.
+  useEffect(() => {
+    const welcome = sessionStorage.getItem("sparklm_google_welcome");
+    if (!welcome) return;
+    sessionStorage.removeItem("sparklm_google_welcome");
+    if (welcome === "new") {
+      toast.success("Welcome to SparkLM! Your new account is ready.");
+    } else {
+      toast.info("Signed in to an existing SparkLM account for this email.");
+    }
   }, []);
 
   const getMotivationalQuote = (points: number) => {

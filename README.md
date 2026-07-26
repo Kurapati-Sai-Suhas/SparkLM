@@ -3,9 +3,7 @@
 [![CI](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions/workflows/ci.yml/badge.svg)](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions)
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://spark-lm-3y3e.vercel.app)
 
-SparkLM is a full-stack learning platform whose core is an **adaptive competitive-programming Coding Hub**: instead of serving a static problem list, it models each student's skill (Elo), memory (spaced-repetition half-life), and curriculum position (prerequisite DAG), then routes them to the next problem that maximizes learning — and explains *why* it chose it.
-
-Built with Django REST Framework + Channels (ASGI), React + TypeScript, and PostgreSQL.
+SparkLM is an adaptive coding-practice platform: it models a student's skill (Elo, weighted by runtime/memory efficiency) and memory (a spaced-repetition half-life curve), then routes them through a prerequisite curriculum DAG using a hybrid statistical/ML engine — a Wald–Wolfowitz runs-test streakiness check backing a RandomForest classifier — rather than a static problem list. Code runs in a sandboxed Judge0 pipeline across 4 languages; every recommendation ships with a real explainability payload (SHAP over a trained GCN, when enabled). Built on Django REST Framework + Channels, React/TypeScript, and PostgreSQL with pgvector, covered by a 104-test suite that mocks every third party (Judge0, Groq, Gemini) for a fully offline CI run.
 
 ---
 

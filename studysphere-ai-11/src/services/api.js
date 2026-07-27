@@ -76,6 +76,7 @@ api.interceptors.response.use(
 
 // ==================== User API ====================
 export const userAPI = {
+  getDashboardBootstrap: () => api.get('/dashboard/bootstrap/'),
   getDashboardStats: () => api.get('/dashboard/stats/'),
   getProfile: () => api.get('/user/profile/'),
   updateProfile: (updates) => api.patch('/user/profile/', updates),

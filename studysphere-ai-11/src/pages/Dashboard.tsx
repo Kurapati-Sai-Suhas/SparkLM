@@ -22,7 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import api, { userAPI } from "@/services/api";
+import { userAPI } from "@/services/api";
 import GamificationDashboard from "@/components/GamificationDashboard";
 
 // Decorative sparkline shape only — the headline number is real (stats.study_hours);
@@ -42,57 +42,46 @@ export default function Dashboard() {
   });
 
   const [realGroups, setRealGroups] = useState<any[]>([]);
+  const [gamification, setGamification] = useState<{ streak: number; leaderboard: any[]; badges: any[] }>({
+    streak: 0,
+    leaderboard: [],
+    badges: [],
+  });
   const [mlops, setMlops] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadDashboard = async () => {
       try {
-        // These three calls are independent (none needs another's result) —
-        // firing them in parallel instead of sequentially awaiting each one
-        // turns 3 network round-trips into 1 (the slowest of the three),
-        // which is most of what makes the dashboard "slow to load".
-        const [statsRes, profileRes, groupsRes] = await Promise.all([
-          userAPI.getDashboardStats(),
-          userAPI.getProfile(),
-          api.get("/groups/"),
-        ]);
-        const statsData = statsRes.data || {};
-        const profileData = profileRes.data || {};
-        const fetchedGroups = groupsRes.data.results || groupsRes.data || [];
+        // One request instead of five. The dashboard used to fire
+        // profile/stats/groups (in parallel) plus a conditional MLOps
+        // call, and GamificationDashboard fired its own separate request
+        // on top of that. On a CPU-constrained single instance, "parallel"
+        // requests from the browser still queue for the same limited
+        // compute — 5 requests paid a per-request tax 5 times over. This
+        // endpoint (common/dashboard_views.py) does the same queries
+        // server-side and returns them together.
+        const { data } = await userAPI.getDashboardBootstrap();
 
-        const totalGroups = statsData.active_groups || 0;
-
-        if (totalGroups === 0) {
-          setRealGroups([]);
-        } else {
-          setRealGroups(fetchedGroups.slice(0, 4));
-        }
+        setRealGroups(data.groups || []);
 
         setStats({
-          username: profileData.username || "Student",
-          active_groups: totalGroups,
-          study_hours: statsData.study_hours || 0,
-          quizzes_taken: statsData.quizzes_taken || 0,
-          achievement_points: statsData.achievement_points || 0,
+          username: data.username || "Student",
+          active_groups: data.stats?.active_groups || 0,
+          study_hours: data.stats?.study_hours || 0,
+          quizzes_taken: data.stats?.quizzes_taken || 0,
+          achievement_points: data.stats?.achievement_points || 0,
         });
 
-        // MLOps telemetry is staff-only and always 403s for everyone else —
-        // previously fired unconditionally on every dashboard load, paying
-        // a full request's latency for a call ~all users were guaranteed to
-        // fail. dashboard/stats now reports is_staff, so this only fires
-        // for the accounts it can actually succeed for.
-        if (statsData.is_staff) {
-          try {
-            const res = await fetch(
-              `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/mlops/telemetry/`,
-              { headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` } }
-            );
-            if (res.ok) setMlops(await res.json());
-          } catch {
-            // Decorative panel — a failure here should never affect the rest of the dashboard.
-          }
-        }
+        setGamification({
+          streak: data.gamification?.streak || 0,
+          leaderboard: data.gamification?.leaderboard || [],
+          badges: data.gamification?.badges || [],
+        });
+
+        // Only present at all when the server decided this user is staff —
+        // no separate request, no doomed-for-everyone-else call.
+        if (data.mlops) setMlops(data.mlops);
       } catch (error) {
         console.error("❌ Failed to load dashboard:", error);
       } finally {
@@ -359,7 +348,7 @@ export default function Dashboard() {
                   "bg-emerald-400",
                 ];
                 const accent = accents[idx % accents.length];
-                const membersCount = group.members ? group.members.length : 0;
+                const membersCount = group.members_count ?? (group.members ? group.members.length : 0);
                 const capacity = group.capacity || 10;
                 const pct = Math.min(100, (membersCount / capacity) * 100);
 
@@ -393,7 +382,11 @@ export default function Dashboard() {
 
         {/* Right column */}
         <div className="md:col-span-5 space-y-6">
-          <GamificationDashboard />
+          <GamificationDashboard
+            streak={gamification.streak}
+            leaderboard={gamification.leaderboard}
+            badges={gamification.badges}
+          />
 
           {/* Recent Activity */}
           <Card

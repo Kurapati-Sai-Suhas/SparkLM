@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -92,24 +91,22 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Bug, Network, Zap, Award, Flame, Trophy
 };
 
-export default function GamificationDashboard() {
-  const [streak, setStreak] = useState(0);
-  const [leaderboard, setLeaderboard] = useState<LeaderUser[]>([]);
-  const [badges, setBadges] = useState<any[]>([]);
+interface GamificationDashboardProps {
+  streak?: number;
+  leaderboard?: LeaderUser[];
+  badges?: any[];
+}
 
-  useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/coding-portals/gamification/`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` }
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.streak !== undefined) setStreak(data.streak);
-      if (data.leaderboard && data.leaderboard.length > 0) setLeaderboard(data.leaderboard);
-      if (data.badges && data.badges.length > 0) setBadges(data.badges);
-    })
-    .catch(console.error);
-  }, []);
-
+// Data comes from the parent Dashboard's single bootstrap request (see
+// Dashboard.tsx) rather than fetching it here — this component used to
+// fire its own independent request to the same gamification endpoint,
+// which meant the dashboard was paying for that call twice: once for
+// Dashboard.tsx's own data and once more here, on every page load.
+export default function GamificationDashboard({
+  streak = 0,
+  leaderboard = [],
+  badges = [],
+}: GamificationDashboardProps) {
   return (
     <div className="w-full max-w-sm space-y-4">
       {/* ============ STREAK ============ */}

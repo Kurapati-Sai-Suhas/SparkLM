@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 from common.auth_views import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from common.google_auth_views import GoogleAuthView
 from common.review_views import ReviewQueueView
+from common.dashboard_views import DashboardBootstrapView
 
 from .views import (
     # Auth & User
@@ -54,6 +55,7 @@ urlpatterns = [
 
     # ── User & Dashboard ────────────────────────────────────
     path('dashboard/stats/', UserDashboardStats.as_view(), name='dashboard-stats'),
+    path('dashboard/bootstrap/', DashboardBootstrapView.as_view(), name='dashboard-bootstrap'),
     path('user/profile/',    UserProfileView.as_view(),    name='user-profile'),
 
     # ── Group extras ────────────────────────────────────────

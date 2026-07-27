@@ -47,15 +47,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     const loadDashboard = async () => {
-      // MLOps telemetry is staff-only (403 for regular users) and purely
-      // decorative — kicked off here (not awaited yet) so its request
-      // starts at the same time as the three below, rather than only
-      // after they finish. It never gates the dashboard's loading state.
-      const mlopsPromise = fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/mlops/telemetry/`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` } }
-      ).then((res) => (res.ok ? res.json() : null)).catch(() => null);
-
       try {
         // These three calls are independent (none needs another's result) —
         // firing them in parallel instead of sequentially awaiting each one
@@ -85,14 +76,28 @@ export default function Dashboard() {
           quizzes_taken: statsData.quizzes_taken || 0,
           achievement_points: statsData.achievement_points || 0,
         });
+
+        // MLOps telemetry is staff-only and always 403s for everyone else —
+        // previously fired unconditionally on every dashboard load, paying
+        // a full request's latency for a call ~all users were guaranteed to
+        // fail. dashboard/stats now reports is_staff, so this only fires
+        // for the accounts it can actually succeed for.
+        if (statsData.is_staff) {
+          try {
+            const res = await fetch(
+              `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/mlops/telemetry/`,
+              { headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('access')}` } }
+            );
+            if (res.ok) setMlops(await res.json());
+          } catch {
+            // Decorative panel — a failure here should never affect the rest of the dashboard.
+          }
+        }
       } catch (error) {
         console.error("❌ Failed to load dashboard:", error);
       } finally {
         setLoading(false);
       }
-
-      const mlopsData = await mlopsPromise;
-      if (mlopsData) setMlops(mlopsData);
     };
     loadDashboard();
   }, []);

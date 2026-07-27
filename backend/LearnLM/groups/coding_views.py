@@ -2,6 +2,7 @@ import os
 import base64
 import requests
 import logging
+from django.core.cache import cache
 from django.db.models import F, Func
 from django.utils import timezone
 
@@ -123,16 +124,23 @@ class GamificationDashboardView(APIView):
         profile, _ = UserCodingProfile.objects.get_or_create(user=request.user)
         streak = profile.current_streak
 
-        # 2. Get global leaderboard (Top 3 by Elo)
-        top_profiles = UserCodingProfile.objects.all().order_by('-elo_rating')[:3]
-        leaderboard = []
-        for idx, p in enumerate(top_profiles):
-            leaderboard.append({
-                "rank": idx + 1,
-                "name": p.user.get_full_name() or p.user.username,
-                "handle": f"@{p.user.username}",
-                "elo": int(p.elo_rating)
-            })
+        # 2. Get global leaderboard (Top 3 by Elo) — identical for every
+        # user viewing the dashboard at any given moment, so it's cached
+        # for a short window instead of re-running the ordered query (plus
+        # a user lookup per row) on every single dashboard load.
+        leaderboard = cache.get("gamification_leaderboard_top3")
+        if leaderboard is None:
+            top_profiles = UserCodingProfile.objects.select_related('user').order_by('-elo_rating')[:3]
+            leaderboard = [
+                {
+                    "rank": idx + 1,
+                    "name": p.user.get_full_name() or p.user.username,
+                    "handle": f"@{p.user.username}",
+                    "elo": int(p.elo_rating),
+                }
+                for idx, p in enumerate(top_profiles)
+            ]
+            cache.set("gamification_leaderboard_top3", leaderboard, timeout=60)
 
         # 3. Get recent badges
         recent_badges = UserBadge.objects.filter(user=request.user).select_related('badge').order_by('-awarded_at')[:3]

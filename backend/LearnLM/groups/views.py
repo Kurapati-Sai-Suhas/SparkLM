@@ -74,7 +74,13 @@ class UserDashboardStats(APIView):
             "joined_groups":      joined_count,
             "study_hours":        0,
             "quizzes_taken":      0,
-            "achievement_points": 100
+            "achievement_points": 100,
+            # Lets the frontend skip the staff-only MLOps telemetry fetch
+            # entirely for the ~all-users case it always 403s for, instead
+            # of paying a full request's latency for a call that's known
+            # to fail. Deliberately not added to UserSerializer, which
+            # CreateUserView also uses for registration writes.
+            "is_staff":           user.is_staff,
         })
 
 

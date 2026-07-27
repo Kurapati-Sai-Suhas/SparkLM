@@ -109,6 +109,12 @@ DATABASES = {
         'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'yourpassword'),
         'HOST': os.getenv('POSTGRES_HOST', '127.0.0.1'),
         'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        # Without this, Django opens and tears down a fresh TLS-wrapped
+        # connection to Neon on every single request (CONN_MAX_AGE defaults
+        # to 0) — measured as a real, consistent chunk of per-request
+        # latency in production, not just a cold-start artifact. 60s lets
+        # each worker thread reuse one connection across requests instead.
+        'CONN_MAX_AGE': 60,
     }
 }
 

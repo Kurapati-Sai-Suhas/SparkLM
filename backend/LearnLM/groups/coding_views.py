@@ -135,7 +135,7 @@ class GamificationDashboardView(APIView):
             })
 
         # 3. Get recent badges
-        recent_badges = UserBadge.objects.filter(user=request.user).order_by('-awarded_at')[:3]
+        recent_badges = UserBadge.objects.filter(user=request.user).select_related('badge').order_by('-awarded_at')[:3]
         badges = []
         for ub in recent_badges:
             badges.append({

@@ -422,13 +422,14 @@ def test_backfill_adds_missing_languages_and_preserves_python(question, monkeypa
         "java": "class Solution {\n    public int solve(int x) { return 0; }\n}",
         "cpp": "class Solution {\npublic:\n    int solve(int x) { return 0; }\n};",
         "javascript": "class Solution {\n    solve(x) {}\n}",
+        "c": "int solve(int x) {\n    return 0;\n}",
     }
     monkeypatch.setattr(backfill, "generate_starter_stubs", lambda *a, **k: fake_stubs)
 
     call_command("backfill_boilerplate", delay=0)
 
     question.refresh_from_db()
-    assert set(question.boilerplate_code.keys()) == {"python", "java", "cpp", "javascript"}
+    assert set(question.boilerplate_code.keys()) == {"python", "java", "cpp", "javascript", "c"}
     assert "def solve" in question.boilerplate_code["python"]  # original preserved
 
     # Second run: nothing left to do (resume/skip behavior)

@@ -32,6 +32,51 @@ Changes in this version (based on the actual production run logs):
        thousands of rows again.
     5. Question titles are stripped of leading/trailing whitespace before being sent
        to the AI (source data had leading spaces like " Longest Common Prefix").
+
+Review pass (code-review request — real gaps found and fixed):
+    6. FIXED: validation only ran AFTER _generate_with_retry returned, so a
+       schema-invalid-but-non-empty response (e.g. missing hidden_test_cases)
+       was treated as "success" by the retry loop and never got a second
+       attempt — the retry budget only ever covered outright API failures,
+       not the malformed-JSON case it's needed for most. Validation now runs
+       inside the retry loop, so a bad response actually gets re-rolled.
+    7. FIXED a real crash risk: stdin/expected_output were only checked for
+       None, not for being strings. An LLM returning an unquoted number
+       (e.g. "stdin": 5 instead of "5") passed validation, then crashed a
+       real user's submission later with AttributeError('int' object has no
+       attribute 'replace') in the grading path (services.py). Both fields
+       are now required to be strings.
+    8. FIXED a staleness gap in --retry-failed: it reprocessed every ID in
+       the failure file unconditionally, even ones already fixed by other
+       means (e.g. hand-edited in admin) since the file was written —
+       silently re-burning quota and risking clobbering a manual fix. It now
+       re-applies the placeholder-content filter and reports how many were
+       already resolved and skipped.
+    9. Added "c" to the starter-code languages the LLM is asked for
+       (ai_services.generate_full_question) — the frontend's LanguageSelector
+       offers Python/Java/C++/C/JavaScript, but C was never requested by any
+       generation path. Coverage of java/cpp/javascript/c stays best-effort
+       here (only python is a hard requirement — see note below); backfill_
+       boilerplate's job is to guarantee full coverage after the fact, and
+       it still does that ~5x cheaper per question than a full regeneration.
+       This run also logs which of the 4 bonus languages actually came back,
+       so thin coverage is visible without a separate audit pass.
+
+Deliberately NOT changed: starter_code validation still only requires
+"python". Requiring all 5 languages here would make every reseed call ~5x
+more expensive in tokens (see backfill_boilerplate's docstring) purely to
+guarantee something a cheaper, dedicated second pass already guarantees —
+that would fight the two-phase design, not fix a bug in it.
+
+Known pre-existing limitation, NOT fixed here (out of scope for this file):
+    C and C++ have no generic execution harness (services.py) — a question
+    without an admin-authored hidden_wrapper_code entry can show a C/C++
+    starter template that will never actually compile+run, because raw
+    Solution-only code has no main(). This was already true for C++; adding
+    "c" to the generation prompt makes the same limitation now visible for
+    C too, but does not create it. Fixing it means either hand-authoring
+    wrappers per question or building a generic C/C++ harness — a services.py
+    change, not a reseed_questions.py one.
 """
 
 import json
@@ -54,6 +99,13 @@ MAX_RETRIES = 3
 MAX_RAW_LOG_CHARS = 2000
 
 DEFAULT_FAILURE_FILE = "reseed_failures.json"
+
+# Every language the frontend actually offers
+# (studysphere-ai-11/src/components/LanguageSelector.tsx). Only "python" is
+# a hard validation requirement (see the module docstring for why) — the
+# rest are tracked here purely so a successful save can report real
+# coverage instead of that being invisible until a separate audit.
+BONUS_LANGUAGES = ("java", "cpp", "javascript", "c")
 
 
 class Command(BaseCommand):
@@ -111,7 +163,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"[{processed + 1}/{total}] Generating for: {title!r} ...")
 
                 try:
-                    ai_data = self._generate_with_retry(title, delay)
+                    ai_data, last_error = self._generate_with_retry(title, delay)
                 except DailyQuotaExhausted as e:
                     # Every remaining question would hit the same wall —
                     # stop cleanly. Untouched questions still carry the
@@ -124,21 +176,14 @@ class Command(BaseCommand):
                 processed += 1
 
                 if ai_data is None:
-                    msg = "AI generation failed after retries"
+                    # _generate_with_retry already validates every attempt,
+                    # so a None here means either every attempt raised (no
+                    # validation error recorded) or every attempt was
+                    # schema-invalid (last_error holds the specific reason).
+                    msg = last_error or "AI generation failed after retries"
                     self.stdout.write(self.style.ERROR(f"  ❌ {msg}: {title}"))
                     logger.error("id=%s title=%r reason=%s", q.id, title, msg)
                     failures.append({"id": q.id, "title": title, "reason": msg})
-                    failed += 1
-                    continue
-
-                validation_error = self._validate_ai_payload(ai_data)
-                if validation_error:
-                    self.stdout.write(self.style.ERROR(f"  ❌ Invalid AI response ({validation_error}): {title}"))
-                    logger.error(
-                        "id=%s title=%r reason=%s raw=%r",
-                        q.id, title, validation_error, str(ai_data)[:MAX_RAW_LOG_CHARS],
-                    )
-                    failures.append({"id": q.id, "title": title, "reason": validation_error})
                     failed += 1
                     continue
 
@@ -148,6 +193,7 @@ class Command(BaseCommand):
                 if dry_run:
                     self.stdout.write(self.style.SUCCESS(f"  ✅ [DRY RUN] Would update: {title}"))
                     self.stdout.write(f"     Preview:\n{self._indent(examples_block)}")
+                    self.stdout.write(f"     Bonus language coverage: {self._bonus_language_summary(ai_data)}")
                     success += 1
                     continue
 
@@ -158,6 +204,7 @@ class Command(BaseCommand):
                     continue
 
                 self.stdout.write(self.style.SUCCESS(f"  ✅ Updated: {title}"))
+                self.stdout.write(f"     Bonus language coverage: {self._bonus_language_summary(ai_data)}")
                 success += 1
 
         except KeyboardInterrupt:
@@ -177,8 +224,19 @@ class Command(BaseCommand):
                 raise SystemExit(f"Failure file not found: {path}")
             data = json.loads(path.read_text())
             ids = [entry["id"] for entry in data]
-            self.stdout.write(self.style.WARNING(f"Retry mode: reprocessing {len(ids)} question(s) from {path}"))
-            return Question.objects.filter(id__in=ids)
+            # Re-apply the placeholder filter: a question logged as a
+            # failure may have since been fixed by other means (e.g. a
+            # hand-edit in admin). Reprocessing it unconditionally would
+            # burn quota for nothing and could clobber that fix.
+            qs = Question.objects.filter(id__in=ids, content__icontains=PLACEHOLDER_MARKER)
+            resolvable = qs.count()
+            skipped = len(ids) - resolvable
+            self.stdout.write(self.style.WARNING(f"Retry mode: reprocessing {resolvable} question(s) from {path}"))
+            if skipped:
+                self.stdout.write(self.style.WARNING(
+                    f"({skipped} of {len(ids)} already resolved since the failure file was written — skipped)"
+                ))
+            return qs
 
         qs = Question.objects.filter(content__icontains=PLACEHOLDER_MARKER)
         if topic_filter:
@@ -190,8 +248,17 @@ class Command(BaseCommand):
     # Django is forced to open a fresh one for the DB write that follows,
     # instead of reusing a connection that may have been dropped while we
     # were waiting on the AI response.
+    #
+    # Validation happens INSIDE this loop, not after it returns. A response
+    # that is well-formed JSON but fails schema validation (e.g. missing
+    # hidden_test_cases) used to count as "success" here — the retry budget
+    # only ever covered outright API/parse failures, never the malformed-
+    # but-present case it exists for. Returns (ai_data, None) on success or
+    # (None, last_validation_error) once retries are exhausted, so the
+    # caller can report the real reason instead of a generic failure.
     # ------------------------------------------------------------------
     def _generate_with_retry(self, title, delay):
+        last_validation_error = None
         for attempt in range(1, MAX_RETRIES + 1):
             # Never close inside an atomic block (e.g. under test runners).
             if not connection.in_atomic_block:
@@ -200,8 +267,17 @@ class Command(BaseCommand):
                 ai_data = generate_full_question(title)
                 time.sleep(delay)
                 if ai_data:
-                    return ai_data
-                logger.warning("Empty AI response for %r (attempt %d/%d)", title, attempt, MAX_RETRIES)
+                    validation_error = self._validate_ai_payload(ai_data)
+                    if validation_error is None:
+                        return ai_data, None
+                    last_validation_error = validation_error
+                    logger.warning(
+                        "Invalid AI response for %r (attempt %d/%d): %s raw=%r",
+                        title, attempt, MAX_RETRIES, validation_error,
+                        str(ai_data)[:MAX_RAW_LOG_CHARS],
+                    )
+                else:
+                    logger.warning("Empty AI response for %r (attempt %d/%d)", title, attempt, MAX_RETRIES)
             except DailyQuotaExhausted:
                 raise  # handled by the main loop — retrying is pointless
             except Exception as e:
@@ -213,7 +289,7 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f"  Retrying in {backoff:.1f}s..."))
                 time.sleep(backoff)
 
-        return None
+        return None, last_validation_error
 
     # ------------------------------------------------------------------
     # Saves the question, retrying once if the connection was dropped while
@@ -281,10 +357,22 @@ class Command(BaseCommand):
                 return f"test case {i} is not an object"
             if "stdin" not in tc or "expected_output" not in tc:
                 return f"test case {i} missing stdin/expected_output key"
-            if tc["stdin"] is None or tc["expected_output"] is None:
+            stdin_val = tc["stdin"]
+            expected_val = tc["expected_output"]
+            if stdin_val is None or expected_val is None:
                 # None means the AI didn't provide a value at all.
                 # An empty string "" is a legitimate value and is NOT rejected here.
                 return f"test case {i} has a null stdin/expected_output"
+            # The grading path (services.py) calls .replace()/.strip() on
+            # these unconditionally. An LLM returning an unquoted number
+            # (e.g. "stdin": 5 instead of "5") passes a None-check but
+            # crashes a real submission later with AttributeError — reject
+            # it here instead, where it's cheap to just retry the call.
+            if not isinstance(stdin_val, str) or not isinstance(expected_val, str):
+                return (
+                    f"test case {i} stdin/expected_output must be strings, got "
+                    f"{type(stdin_val).__name__}/{type(expected_val).__name__}"
+                )
 
         # Reject only exact-duplicate inputs across every test case (degenerate case
         # where the model didn't vary inputs at all).
@@ -293,6 +381,24 @@ class Command(BaseCommand):
             return "all test cases have identical input"
 
         return None
+
+    # ------------------------------------------------------------------
+    # Only "python" is validated as required (see module docstring), so
+    # this is purely visibility: which of java/cpp/javascript/c did the
+    # LLM actually include this time, without a separate audit command.
+    # Real coverage gaps are closed later by backfill_boilerplate.
+    # ------------------------------------------------------------------
+    def _bonus_language_summary(self, ai_data):
+        starter = ai_data.get("starter_code")
+        if not isinstance(starter, dict):
+            return "none (starter_code was not multi-language)"
+        present = [lang for lang in BONUS_LANGUAGES if isinstance(starter.get(lang), str) and starter[lang].strip()]
+        missing = [lang for lang in BONUS_LANGUAGES if lang not in present]
+        if not missing:
+            return f"all present ({', '.join(present)})"
+        if not present:
+            return f"none — missing {', '.join(missing)} (backfill_boilerplate will pick these up)"
+        return f"{', '.join(present)} present; missing {', '.join(missing)} (backfill_boilerplate will pick these up)"
 
     # ------------------------------------------------------------------
     def _build_examples_block(self, test_cases, max_examples=3):

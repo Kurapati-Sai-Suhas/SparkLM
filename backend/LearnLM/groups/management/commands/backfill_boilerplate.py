@@ -21,14 +21,17 @@ import logging
 import time
 
 from django.core.management.base import BaseCommand
-from django.db import connection
+from django.db import connection, OperationalError
 
 from groups.models import Question
 from groups.ai_services import generate_starter_stubs, DailyQuotaExhausted
 
 logger = logging.getLogger("backfill_boilerplate")
 
-TARGET_LANGUAGES = ("java", "cpp", "javascript")
+# Keep in sync with studysphere-ai-11/src/components/LanguageSelector.tsx —
+# "c" was added there without ever being generated anywhere in the content
+# pipeline, so every question showed an empty C tab.
+TARGET_LANGUAGES = ("java", "cpp", "javascript", "c")
 
 
 class Command(BaseCommand):
@@ -110,10 +113,31 @@ class Command(BaseCommand):
                 continue
 
             q.boilerplate_code = {**(q.boilerplate_code or {}), **stubs}
-            q.save(update_fields=["boilerplate_code"])
+            if not self._save_with_retry(q):
+                self.stdout.write(self.style.ERROR("  ❌ DB write failed after retry — will retry on next run."))
+                failed += 1
+                continue
             self.stdout.write(self.style.SUCCESS(f"  ✅ Added: {', '.join(stubs.keys())}"))
             done += 1
 
         self.stdout.write(self.style.SUCCESS(
             f"\n🎉 Backfilled {done}/{total} question(s); {failed} failed (rerun picks them up)."
         ))
+
+    # ------------------------------------------------------------------
+    # The AI call this write follows can take several seconds, long enough
+    # for Neon's pooled connection to be dropped underneath us
+    # (psycopg.OperationalError: "server closed the connection
+    # unexpectedly") — observed live in production. Retry once on a fresh
+    # connection before giving up; the question is picked up again on the
+    # command's next (auto-resuming) run either way.
+    # ------------------------------------------------------------------
+    def _save_with_retry(self, q):
+        for attempt in range(2):
+            try:
+                q.save(update_fields=["boilerplate_code"])
+                return True
+            except OperationalError:
+                logger.warning("DB connection error saving id=%s, attempt %d/2 — reconnecting", q.id, attempt + 1)
+                connection.close()
+        return False

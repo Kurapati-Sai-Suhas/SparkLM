@@ -273,6 +273,10 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # 👇 Because load_dotenv() is at the top, these will now successfully grab your keys!
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Backup provider: NVIDIA NIM is called only when Groq's DAILY token quota
+# is exhausted (ai_services._generate_json_with_fallback). Optional — if
+# unset, Groq's daily cap still stops the run cleanly exactly as before.
+NIM_API_KEY = os.getenv("NIM_API_KEY")
 # Google Sign-In: the OAuth Client ID is the audience GoogleAuthView checks
 # ID tokens against — NOT a secret (it's also shipped to the browser as
 # VITE_GOOGLE_CLIENT_ID), but it must match exactly or every token is

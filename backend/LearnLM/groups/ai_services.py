@@ -3,6 +3,7 @@ import io
 import logging
 import PyPDF2
 import numpy as np
+import requests
 from django.conf import settings
 from PIL import Image as PILImage
 import google.generativeai as genai
@@ -21,6 +22,19 @@ try:
     groq_client = Groq(api_key=settings.GROQ_API_KEY)
 except:
     groq_client = None
+
+# Backup provider for content generation (reseed_questions,
+# backfill_boilerplate): NVIDIA NIM's OpenAI-compatible chat completions
+# endpoint, called via `requests` (already a dependency) rather than
+# adding the `openai` SDK for one endpoint. Only used when Groq's DAILY
+# token quota is hit — see _generate_json_with_fallback.
+NIM_API_KEY = getattr(settings, "NIM_API_KEY", None)
+NIM_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+# NOT "meta/llama-3.3-70b-instruct" -- verified live that it queues for 2+
+# minutes on NVIDIA's free/shared tier (oversubscribed), which is useless
+# for a per-question batch call. "meta/llama-3.1-70b-instruct" is the same
+# scale and answered in ~1s in the same test.
+NIM_MODEL = "meta/llama-3.1-70b-instruct"
 
 class AIService:
 
@@ -363,6 +377,97 @@ def _is_daily_quota_error(exc) -> bool:
     return 'rate_limit_exceeded' in s and ('per day' in s or 'TPD' in s)
 
 
+def _call_nim_raw(prompt):
+    """
+    Raw call to NVIDIA NIM's OpenAI-compatible chat completions endpoint.
+    Returns the response text, or None if NIM isn't configured or the call
+    fails for any reason (network, auth, model unavailable, etc.) — a
+    backup provider failing silently must never crash the caller, since
+    the caller's whole point in calling it was "Groq already failed".
+
+    No response_format="json_object" here: unlike Groq/OpenAI, not every
+    NIM-hosted model supports strict JSON mode, and sending an unsupported
+    field risks a hard 400 instead of a usable response. Reliance is on
+    the prompt itself demanding raw JSON (every caller already writes that
+    instruction) plus the same markdown-fence-stripping + json.loads the
+    Groq path uses.
+    """
+    if not NIM_API_KEY:
+        return None
+    try:
+        resp = requests.post(
+            NIM_CHAT_URL,
+            headers={
+                "Authorization": f"Bearer {NIM_API_KEY}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            json={
+                "model": NIM_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 4096,
+            },
+            # Generous on purpose: verified live that a trivial prompt
+            # answers in ~1s, but a full ~1000-token JSON generation on
+            # NVIDIA's free/shared tier can take well over a minute under
+            # load. This path only runs after Groq's daily cap is already
+            # hit, so slower-but-working beats fast-but-timing-out.
+            timeout=150,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error("NVIDIA NIM call failed: %s", e)
+        return None
+
+
+def _generate_json_with_fallback(prompt, context_label):
+    """
+    Calls Groq first (unchanged behavior). If — and only if — Groq's DAILY
+    token quota is exhausted, falls back to NVIDIA NIM instead of stopping
+    for the day. Any other Groq failure (per-minute limit, transport error,
+    bad JSON) does NOT fall back: those are usually transient or real bugs
+    that a second provider wouldn't fix, and the existing per-call retry
+    loop in the management commands already handles them.
+
+    Returns parsed JSON (a dict), or None on failure. Raises
+    DailyQuotaExhausted only when Groq is out for the day AND NIM is
+    either unconfigured or also failed — so callers only see the "stop for
+    today" signal when there truly is nowhere else to go.
+    """
+    try:
+        if not groq_client:
+            raise Exception("Groq API key missing")
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content
+    except Exception as e:
+        if not _is_daily_quota_error(e):
+            logger.error("%s: Groq call failed: %s", context_label, e)
+            return None
+        raw = _call_nim_raw(prompt)
+        if raw is None:
+            # Per-day cap and no working backup — retries are pointless
+            # until the window resets (or NIM_API_KEY gets configured).
+            raise DailyQuotaExhausted(str(e))
+        logger.info("%s: Groq daily quota hit — served by NVIDIA NIM instead", context_label)
+
+    clean_text = raw.replace('```json', '').replace('```', '').strip()
+    try:
+        data = json.loads(clean_text)
+    except Exception as e:
+        logger.error("%s: LLM response was not valid JSON: %s raw=%r", context_label, e, clean_text[:500])
+        return None
+    if not isinstance(data, dict):
+        logger.error("%s: LLM returned a non-object JSON payload", context_label)
+        return None
+    return data
+
+
 def generate_full_question(title):
     """
     Generates the complete content package for a placeholder question:
@@ -390,7 +495,8 @@ def generate_full_question(title):
         "python": "class Solution:\\n    def methodName(self, param1):\\n        # Write your code here\\n        pass",
         "java": "class Solution {{\\n    public int methodName(int param1) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}",
         "cpp": "class Solution {{\\npublic:\\n    int methodName(int param1) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}};",
-        "javascript": "class Solution {{\\n    methodName(param1) {{\\n        // Write your code here\\n    }}\\n}}"
+        "javascript": "class Solution {{\\n    methodName(param1) {{\\n        // Write your code here\\n    }}\\n}}",
+        "c": "int methodName(int param1) {{\\n    // Write your code here\\n    return 0;\\n}}"
       }},
       "hidden_test_cases": [
         {{"stdin": "2 7 11 15\\n9", "expected_output": "0 1", "explanation": "nums[0] + nums[1] == 9"}},
@@ -401,35 +507,21 @@ def generate_full_question(title):
     Rules:
     - Provide at least 4 diverse hidden_test_cases, including edge cases, each with different stdin.
     - stdin holds the raw input lines the program reads (newline-separated values). stdin must NEVER be empty.
+    - stdin and expected_output must ALWAYS be JSON strings — quote numbers too (e.g. "5", not 5).
     - If the problem involves a binary tree, encode it in stdin as ONE line of space-separated
       level-order values using the word null for missing children (e.g. "3 9 20 null null 15 7"),
       and write the problem content so the solution is expected to parse that encoding.
     - If the problem involves a linked list, encode it as one line of space-separated values.
     - expected_output is the exact stdout string the correct solution prints.
-    - starter_code must be a Python class Solution with one public method and no solution logic.
+    - starter_code should include an entry for every language shown above: python, java, cpp,
+      javascript, c. python/java/cpp/javascript must be a "Solution" class with one public method
+      and no solution logic. "c" has no classes — it must be a single free function with the same
+      method name and equivalent parameter types (arrays as pointer+length pairs, e.g.
+      "int* nums, int numsSize"), also with no solution logic. Only "python" is strictly required;
+      the others are included whenever you can, at no extra cost to you.
     """
 
-    try:
-        if not groq_client:
-            raise Exception("Groq API key missing")
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        clean_text = response.choices[0].message.content.replace('```json', '').replace('```', '').strip()
-        data = json.loads(clean_text)
-        if not isinstance(data, dict):
-            logger.error("LLM returned non-object question payload for %r", title)
-            return None
-        return data
-    except Exception as e:
-        if _is_daily_quota_error(e):
-            # Per-day cap — retries are pointless until the window resets.
-            # (Per-minute limits fall through to the normal retry path.)
-            raise DailyQuotaExhausted(str(e))
-        logger.error("Full question generation failed for %r: %s", title, e)
-        return None
+    return _generate_json_with_fallback(prompt, f"full question generation for {title!r}")
 
 
 def generate_starter_stubs(title, python_starter, languages):
@@ -444,6 +536,12 @@ def generate_starter_stubs(title, python_starter, languages):
     Raises DailyQuotaExhausted on the provider's per-day cap.
     """
     langs = ", ".join(languages)
+    c_note = (
+        "\n    Note: \"c\" has no classes. Its stub must be a single free function "
+        "with the same method name and equivalent parameter types (arrays as "
+        "pointer+length pairs, e.g. \"int* nums, int numsSize\"), not a Solution class."
+        if "c" in languages else ""
+    )
     prompt = f"""
     You are generating starter code templates for a coding-practice platform.
 
@@ -452,36 +550,27 @@ def generate_starter_stubs(title, python_starter, languages):
     {python_starter}
 
     Write matching starter code for these languages: {langs}.
-    Mirror the same class name (Solution), method name, and parameters.
+    Mirror the same method name and parameters, using a Solution class for
+    the object-oriented languages (java/cpp/javascript).{c_note}
     No solution logic — just the empty template with a comment where the
     code goes, returning a default value where the language requires one.
 
     Respond with ONLY a raw, valid JSON object keyed by language, e.g.:
-    {{"java": "class Solution {{\\n    public int methodName(int x) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}", "cpp": "...", "javascript": "..."}}
+    {{"java": "class Solution {{\\n    public int methodName(int x) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}", "cpp": "...", "javascript": "...", "c": "int methodName(int x) {{\\n    // Write your code here\\n    return 0;\\n}}"}}
     """
 
-    try:
-        if not groq_client:
-            raise Exception("Groq API key missing")
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        clean_text = response.choices[0].message.content.replace('```json', '').replace('```', '').strip()
-        data = json.loads(clean_text)
-        if not isinstance(data, dict):
-            return None
-        stubs = {
-            lang: code for lang, code in data.items()
-            if lang in languages and isinstance(code, str) and "Solution" in code
-        }
-        return stubs or None
-    except Exception as e:
-        if _is_daily_quota_error(e):
-            raise DailyQuotaExhausted(str(e))
-        logger.error("Starter-stub generation failed for %r: %s", title, e)
+    data = _generate_json_with_fallback(prompt, f"starter-stub generation for {title!r}")
+    if data is None:
         return None
+    # "Solution" is a required sanity marker for the class-based languages,
+    # but "c" stubs are plain functions and will never contain that word —
+    # requiring it there rejected every valid C stub.
+    stubs = {
+        lang: code for lang, code in data.items()
+        if lang in languages and isinstance(code, str) and code.strip()
+        and (lang == "c" or "Solution" in code)
+    }
+    return stubs or None
 
 
 def _valid_test_cases(cases) -> bool:

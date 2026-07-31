@@ -24,7 +24,7 @@ from .hybrid_router import (
     HierarchicalEngine,
     compute_routing_telemetry, get_mastered_topic_names,
 )
-from .services import GradingService, GradingUnavailable, ProgressionService
+from .services import GradingService, GradingUnavailable, ProgressionService, wrapper_for
 from .ai_services import generate_test_cases
 from .engines.tensor_builder import TensorBuilder
 USE_REAL_SHAP = os.environ.get('ENABLE_SHAP_XAI', 'false') == 'true'
@@ -186,8 +186,10 @@ class CodeRunView(APIView):
         if problem_id:
             try:
                 question = Question.objects.get(id=problem_id)
-                if question.hidden_wrapper_code and lang_key in question.hidden_wrapper_code:
-                    wrapper_template = question.hidden_wrapper_code[lang_key]
+                # Same alias-aware lookup the submit path uses, so Run and
+                # Submit cannot disagree about which wrapper applies.
+                wrapper_template = wrapper_for(question, lang_key)
+                if wrapper_template is not None:
                     executable_code = wrapper_template.replace("{user_code}", raw_code)
             except Question.DoesNotExist:
                 pass

@@ -17,6 +17,48 @@ from groups.models import CodingPortal, Question, Topic
 from groups.services import GENERIC_JS_WRAPPER, GENERIC_PYTHON_WRAPPER, GradingService, GradingUnavailable
 
 
+def test_wrapper_lookup_resolves_js_and_javascript_interchangeably(question):
+    """
+    A2: LANGUAGE_IDS accepts both spellings and the frontend selector submits
+    "js" while questions store templates under "javascript". Before this,
+    a wrapper stored under one spelling was invisible to the other, so the
+    submission silently fell through to the generic harness and was graded
+    against the wrong scaffolding.
+    """
+    from groups.services import wrapper_for
+
+    question.hidden_wrapper_code = {"javascript": "JS_WRAPPER {user_code}"}
+    assert wrapper_for(question, "javascript") == "JS_WRAPPER {user_code}"
+    assert wrapper_for(question, "js") == "JS_WRAPPER {user_code}"
+
+    question.hidden_wrapper_code = {"js": "JS_WRAPPER {user_code}"}
+    assert wrapper_for(question, "js") == "JS_WRAPPER {user_code}"
+    assert wrapper_for(question, "javascript") == "JS_WRAPPER {user_code}"
+
+    # Non-aliased languages resolve only under their own key.
+    question.hidden_wrapper_code = {"java": "JAVA_WRAPPER {user_code}"}
+    assert wrapper_for(question, "java") == "JAVA_WRAPPER {user_code}"
+    assert wrapper_for(question, "python") is None
+
+
+def test_wrapper_lookup_treats_blank_and_malformed_entries_as_absent(question):
+    """A stray empty wrapper must not produce an empty executable."""
+    from groups.services import wrapper_for
+
+    question.hidden_wrapper_code = {}
+    assert wrapper_for(question, "python") is None
+
+    question.hidden_wrapper_code = {"python": "   "}
+    assert wrapper_for(question, "python") is None
+
+    question.hidden_wrapper_code = {"python": None}
+    assert wrapper_for(question, "python") is None
+
+    # Defensive: the column has no schema enforcement.
+    question.hidden_wrapper_code = "not-a-dict"
+    assert wrapper_for(question, "python") is None
+
+
 def accepted_runner(stdout="1"):
     """Stub runner returning an accepted Judge0 verdict for every case."""
     def run(source_code, language, stdin):

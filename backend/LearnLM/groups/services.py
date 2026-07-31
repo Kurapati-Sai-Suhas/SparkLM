@@ -234,6 +234,34 @@ try {
 """
 
 
+# The API accepts two spellings for JavaScript: LANGUAGE_IDS maps both "js"
+# and "javascript" to the same Judge0 id, and the frontend's selector submits
+# "js" while questions store their templates under "javascript". A
+# per-question wrapper must therefore be found under either spelling —
+# otherwise a submission silently falls through to the generic harness and is
+# graded against the wrong scaffolding.
+WRAPPER_LANGUAGE_ALIASES = {
+    "js": ("js", "javascript"),
+    "javascript": ("javascript", "js"),
+}
+
+
+def wrapper_for(question, lang_key):
+    """
+    The per-question wrapper template for a language, or None if the question
+    does not carry a usable one. Empty/blank entries count as absent so a
+    stray "" never produces an empty executable.
+    """
+    wrappers = getattr(question, "hidden_wrapper_code", None) or {}
+    if not isinstance(wrappers, dict):
+        return None
+    for key in WRAPPER_LANGUAGE_ALIASES.get(lang_key, (lang_key,)):
+        template = wrappers.get(key)
+        if isinstance(template, str) and template.strip():
+            return template
+    return None
+
+
 class GradingUnavailable(Exception):
     """Judge0 could not grade the submission (timeout or transport failure)."""
 
@@ -363,8 +391,9 @@ class GradingService:
         if lang_key == "java":
             raw_code = re.sub(r'^\s*import\s+.*?;', '', raw_code, flags=re.MULTILINE)
 
-        if question.hidden_wrapper_code and lang_key in question.hidden_wrapper_code:
-            executable_code = question.hidden_wrapper_code[lang_key].replace("{user_code}", raw_code)
+        custom_wrapper = wrapper_for(question, lang_key)
+        if custom_wrapper is not None:
+            executable_code = custom_wrapper.replace("{user_code}", raw_code)
         elif lang_key == "python":
             executable_code = GENERIC_PYTHON_WRAPPER.replace("{user_code}", raw_code)
         elif lang_key == "java":

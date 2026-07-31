@@ -24,7 +24,7 @@ import 'katex/dist/katex.min.css';
 import XaiComponentCharts from '../components/XaiComponentCharts';
 import LearningPathVisualizer from '../components/LearningPathVisualizer';
 import ReviewQueueCard from '../components/ReviewQueueCard';
-import LanguageSelector from '../components/LanguageSelector';
+import LanguageSelector, { extensionFor } from '../components/LanguageSelector';
 import ProblemDescription from '../components/ProblemDescription';
 
 // The language selector's value and the API's boilerplate_code key are not
@@ -429,7 +429,7 @@ export default function AdaptiveCodingPortal() {
             <div className="h-4 w-px bg-white/10" />
             <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400">
               <Code2 className="h-3.5 w-3.5 text-indigo-400" />
-              <span>solution.{language === 'python' ? 'py' : language === 'java' ? 'java' : 'cpp'}</span>
+              <span>solution.{extensionFor(language)}</span>
             </div>
           </div>
 

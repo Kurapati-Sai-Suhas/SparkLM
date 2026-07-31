@@ -20,13 +20,25 @@ interface LanguageSelectorProps {
   available?: string[];
 }
 
-const LANGUAGES: { value: string; label: string; ext: string }[] = [
+export const LANGUAGES: { value: string; label: string; ext: string }[] = [
   { value: "python", label: "Python",     ext: ".py"  },
   { value: "java",   label: "Java",       ext: ".java"},
   { value: "cpp",    label: "C++",        ext: ".cpp" },
   { value: "c",      label: "C",          ext: ".c"   },
   { value: "js",     label: "JavaScript", ext: ".js"  },
 ];
+
+/**
+ * File extension for a language, without the leading dot.
+ *
+ * Exported so callers reuse this table instead of re-deriving extensions.
+ * The editor's filename label previously hardcoded a ternary chain that fell
+ * through to "cpp", so selecting C or JavaScript displayed "solution.cpp".
+ */
+export function extensionFor(value: string): string {
+  const match = LANGUAGES.find((l) => l.value === value);
+  return (match?.ext ?? ".txt").replace(/^\./, "");
+}
 
 export default function LanguageSelector({
   value,

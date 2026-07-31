@@ -132,6 +132,54 @@ to run without it.
 9. `python manage.py check --deploy` locally with prod-like env for the
    security checklist (HSTS warnings are acceptable on Render's TLS).
 
+## Keeping the free tier warm (M1) — you do this once
+
+Render stops a free web service after ~15 min idle. A cold wake was measured
+at **92.9 s TTFB** (warm: 0.71 s) in a controlled test — 21 min of no traffic,
+no deploy in the window. A registration against a cold instance timed out at
+90 s and never persisted the row, so this is a correctness problem, not just
+a speed one.
+
+**The in-repo workflow is a mitigation, not the fix.** GitHub throttles
+free-tier `schedule:` cron hard — measured gaps between runs of
+`.github/workflows/keepalive.yml` were **54–213 min (mean 104.5)**, every one
+of them longer than the 15-min idle timeout. `keepalive.yml` now loops for
+50 min per run to widen its coverage (~14% → ~60% warm), and fails loudly if
+the instance goes cold mid-loop, but it cannot fix a trigger we don't control.
+
+**Set up an external uptime monitor (2 minutes, free):**
+
+1. Create an account at [cron-job.org](https://console.cron-job.org) or
+   [UptimeRobot](https://uptimerobot.com) — both honour a true 5-minute cadence.
+2. Add an HTTP(S) GET monitor for `https://sparklm-api.onrender.com/healthz`.
+3. Interval: **5 minutes**. Expected status: **200**.
+4. Enable failure notification to your email.
+
+**Verify it is actually working** (this is the step the old setup skipped —
+it reported success on all 194 runs while never preventing a spin-down):
+
+- Watch the `Keep production warm` workflow's run summary. Its
+  **"first ping (cold tolerated)"** metric is the signal: with the external
+  monitor working, first pings stay near ~1 s. If they creep toward 90 s, the
+  monitor has stopped covering the gaps.
+- Or repeat the controlled test directly: leave the site untouched for 20 min,
+  then time `curl -w "%{time_starttransfer}" https://sparklm-api.onrender.com/healthz`.
+  Under 3 s means warm.
+
+### Quota trade-offs — check these before enabling
+
+| Resource | Free allowance | Always-warm cost | Verdict |
+|---|---|---|---|
+| Render instance-hours | 750 / month | ~730 (one service, 24/7) | Fits, **~20 h margin — no room for a second free service** |
+| Neon compute-hours | ~191.9 / month | 0.25 CU × 730 h ≈ **182.5** | Fits, but **tight** — watch the Neon usage meter for the first full month |
+
+`/healthz` round-trips the database on purpose, so pinging it keeps Neon awake
+too. That is what makes the probe honest (a dead DB returns 503, not a lying
+200) — and it is also what consumes the Neon compute budget above. If Neon
+usage becomes the binding constraint, the lever is to lower the ping frequency,
+**not** to make `/healthz` skip its query: a Neon wake costs a few seconds,
+whereas a Render wake costs ~93 s.
+
 ## Observability (M8)
 
 - **Sentry:** create a free project at sentry.io (platform: Django), copy its

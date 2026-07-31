@@ -1,30 +1,152 @@
-# Free-tier warm-keeper: Render idles the web service after ~15 min and
-# Neon suspends its compute after ~5 min — the first visitor then pays a
-# 30-60s wake-up that reads as "the site is broken". This ping keeps both
-# warm (healthz round-trips the database). GitHub cron granularity is
-# 5 minutes with jitter, which is enough to keep Render awake and keeps
-# Neon's wake-ups down to warm-cache blips.
-# Render free tier = 750 instance-hours/month; one always-on service fits.
+# Free-tier warm-keeper: Render idles the web service after ~15 min and Neon
+# suspends its compute after ~5 min. The first visitor afterwards pays the
+# full wake-up, which reads as "the site is broken".
+#
+# MEASURED 2026-07-29 — the previous version of this file did not work, and
+# could not report that it did not work:
+#
+#   * Its comment claimed "GitHub cron granularity is 5 minutes with jitter".
+#     That premise is false on the free tier. Actual observed gaps between
+#     runs of THIS workflow (GitHub API, run_started_at deltas, last 20 runs):
+#       213.0  93.2  61.4  71.6  84.2  83.7  98.3  98.2 130.9  95.3
+#       119.4 154.6 168.5 192.7  80.7  63.2  62.2  60.0  54.2   (minutes)
+#     mean 104.5 · min 54.2 · max 213.0 — EVERY gap exceeds Render's ~15 min
+#     idle timeout, so the service spun down between essentially every pair
+#     of pings. Warm duty cycle was ~15/104.5 ≈ 14%.
+#
+#   * A controlled experiment (21 min of zero traffic, no deploy in the
+#     window) measured the resulting cold start at 92.9 s TTFB, versus 0.71 s
+#     warm. A registration attempt against a cold instance timed out at 90 s
+#     and never persisted the row.
+#
+#   * The old script exited 0 on the FIRST 200 it saw. Because a cold start
+#     still eventually returns 200, all 194 historical runs reported success
+#     while never once preventing a spin-down. A keepalive that cannot fail
+#     is not a keepalive — it is a green checkmark.
+#
+# What changed, and why it is only a MITIGATION:
+#   1. Each run now pings for LOOP_MINUTES instead of exiting after one
+#      request. This converts one sporadic cron firing into a sustained warm
+#      window, raising the duty cycle from ~14% to roughly 60% without
+#      depending on cron cadence we do not control.
+#   2. Cold responses AFTER the service is known warm now fail the job, so
+#      a regression is visible instead of silently green.
+#
+# The real fix is an external uptime monitor that honours a true 5-minute
+# cadence (see docs/DEPLOYMENT.md "Keeping the free tier warm"). This
+# workflow is the in-repo fallback for when that monitor is absent.
 name: Keep production warm
 
 on:
   schedule:
+    # Retained deliberately. GitHub throttles this heavily (see above), so it
+    # is a best-effort trigger, NOT a 5-minute guarantee. The in-run loop is
+    # what actually provides coverage.
     - cron: "*/5 * * * *"
   workflow_dispatch:
+
+# Never run two warm-keepers at once; a firing that lands while one is
+# already looping is queued rather than duplicated.
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    # Loop is 50 min; the margin covers a slow final request.
+    timeout-minutes: 55
+    env:
+      HEALTH_URL: https://sparklm-api.onrender.com/healthz
+      LOOP_MINUTES: "50"
+      INTERVAL_SECONDS: "300"
+      # Warm healthz measures 0.70-1.46 s. A cold start measured 92.9 s.
+      # 10 s sits far above warm noise and far below a cold start, so it
+      # detects real regressions without flapping on transient blips.
+      WARM_THRESHOLD_SECONDS: "10"
     steps:
-      - name: Ping API health (wakes Render + Neon)
+      - name: Keep API warm and report cold starts
         run: |
-          # Three attempts 20s apart: a single failed ping is usually just a
-          # Render redeploy in progress, and a red run for that is noise.
-          # Only a sustained outage should fail the job.
-          for attempt in 1 2 3; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 https://sparklm-api.onrender.com/healthz || true)
-            echo "attempt $attempt: healthz -> $code"
-            if [ "$code" = "200" ]; then exit 0; fi
-            sleep 20
+          set -uo pipefail
+
+          deadline=$(( $(date +%s) + LOOP_MINUTES * 60 ))
+          ping_no=0
+          unexpected_cold=0
+          first_ping_seconds=""
+          max_seconds=0
+
+          # One ping with the original 3-attempt tolerance: a single failure
+          # is usually a Render redeploy in progress, and a red run for that
+          # is noise. Echoes "<http_code> <seconds>".
+          probe() {
+            for attempt in 1 2 3; do
+              out=$(curl -s -o /dev/null -w "%{http_code} %{time_total}" --max-time 120 "$HEALTH_URL" || echo "000 0")
+              code=${out%% *}
+              if [ "$code" = "200" ]; then echo "$out"; return 0; fi
+              sleep 20
+            done
+            echo "$out"
+            return 1
+          }
+
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            ping_no=$(( ping_no + 1 ))
+            if ! result=$(probe); then
+              echo "::error::healthz did not return 200 after 3 attempts (last: $result)"
+              exit 1
+            fi
+            code=${result%% *}
+            seconds=${result##* }
+            whole=${seconds%%.*}
+            [ -z "$whole" ] && whole=0
+
+            if [ "$ping_no" -eq 1 ]; then
+              first_ping_seconds="$seconds"
+              # The first ping of a run arrives after an uncontrolled cron
+              # gap, so a cold start here is expected, not a regression. It
+              # is recorded as the metric that proves whether an external
+              # monitor is actually covering the gaps.
+              echo "ping $ping_no: $code in ${seconds}s (first ping - cold tolerated)"
+            else
+              echo "ping $ping_no: $code in ${seconds}s"
+              if [ "$whole" -ge "$WARM_THRESHOLD_SECONDS" ]; then
+                unexpected_cold=$(( unexpected_cold + 1 ))
+                echo "::warning::ping $ping_no took ${seconds}s while the service should have been warm"
+              fi
+            fi
+            [ "$whole" -gt "$max_seconds" ] && max_seconds="$whole"
+
+            [ "$(date +%s)" -ge "$deadline" ] && break
+            sleep "$INTERVAL_SECONDS"
           done
-          exit 1
+
+          echo "--- summary ---"
+          echo "pings: $ping_no | first: ${first_ping_seconds}s | max: ${max_seconds}s | unexpected cold: $unexpected_cold"
+
+          # Defensive: a run that somehow pinged zero times kept nothing warm
+          # and must not report success -- that is the exact class of silent
+          # green this milestone exists to remove.
+          if [ "$ping_no" -eq 0 ]; then
+            echo "::error::warm-keeper completed without sending a single ping"
+            exit 1
+          fi
+
+          # Set by GitHub Actions; defaulted so the script is runnable locally.
+          : "${GITHUB_STEP_SUMMARY:=/dev/null}"
+          {
+            echo "### Warm-keeper summary"
+            echo ""
+            echo "| metric | value |"
+            echo "| --- | --- |"
+            echo "| pings this run | $ping_no |"
+            echo "| first ping (cold tolerated) | ${first_ping_seconds}s |"
+            echo "| slowest ping | ${max_seconds}s |"
+            echo "| unexpected cold responses | $unexpected_cold |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Fail ONLY on a cold response after the service was already warm.
+          # That is a genuine regression; a slow first ping is not.
+          if [ "$unexpected_cold" -gt 0 ]; then
+            echo "::error::$unexpected_cold ping(s) exceeded ${WARM_THRESHOLD_SECONDS}s after warm-up - the instance is not staying warm"
+            exit 1
+          fi

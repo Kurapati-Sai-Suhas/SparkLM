@@ -132,6 +132,47 @@ to run without it.
 9. `python manage.py check --deploy` locally with prod-like env for the
    security checklist (HSTS warnings are acceptable on Render's TLS).
 
+## Password hashing (M3) — read before touching `PASSWORD_HASHERS`
+
+Passwords are hashed with **Argon2id** at pinned parameters
+(`time_cost=2, memory_cost=19456 KiB, parallelism=1`) defined in
+`common/hashers.py`. PBKDF2 remains listed for verification.
+
+**Do not use Django's stock `Argon2PasswordHasher`.** Its defaults are
+`memory_cost=102400 KiB` (100 MiB) and `parallelism=8`. The web tier's measured
+resident set is ~202 MiB on a 512 MB instance, so **four concurrent logins would
+exceed the limit**; an OOM restarts the container and every subsequent visitor
+pays the ~93 s cold start that M1 exists to prevent.
+
+Existing PBKDF2 accounts migrate **transparently on next successful login** —
+Django verifies with the stored algorithm, then rehashes and saves. No reset
+emails, no bulk migration, no user-visible step.
+
+### ⚠️ Rolling back is a REORDER, never a REMOVAL
+
+Once a user logs in after this deploy, their stored hash **is** Argon2. If
+`TunedArgon2PasswordHasher` is removed from `PASSWORD_HASHERS`, or `argon2-cffi`
+is uninstalled, `identify_hasher()` raises and Django reports it as an ordinary
+**failed login** — every migrated account is locked out, with nothing in the
+logs explaining why.
+
+To roll back safely, move PBKDF2 to the front and **leave Argon2 in the list**:
+
+```python
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "common.hashers.TunedArgon2PasswordHasher",   # keep — verifies migrated users
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+]
+```
+
+Both populations keep working (pinned by `test_reordering_keeps_both_populations_working`;
+the failure mode is pinned by `test_removing_argon2_locks_out_migrated_users`).
+
+`argon2-cffi` ships `abi3` manylinux wheels, so Render's builder needs no
+compiler. Removing the pin from `requirements.txt` has the same locking-out
+effect as removing the hasher.
+
 ## Keeping the free tier warm (M1) — you do this once
 
 Render stops a free web service after ~15 min idle. A cold wake was measured

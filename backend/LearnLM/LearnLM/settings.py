@@ -142,6 +142,27 @@ if 'pytest' in sys.modules or 'pytest' in sys.argv[0]:
     pass
 
 
+# Password hashing (M3). Order is preference order: the FIRST entry hashes
+# new and upgraded passwords, and every entry can verify.
+#
+# PBKDF2 stays listed second on purpose — it is what the existing user base
+# is stored under, and Django rehashes each account to Argon2 transparently
+# on its next successful login (AbstractBaseUser.check_password supplies a
+# setter that persists the upgrade). Removing it would lock those users out.
+#
+# ⚠ ROLLBACK IS A REORDER, NEVER A REMOVAL. Once a user has logged in after
+# this deploy, their stored hash IS Argon2. Dropping TunedArgon2PasswordHasher
+# from this list — or uninstalling argon2-cffi — makes identify_hasher() raise,
+# which Django reports as an ordinary failed login. Every migrated user would
+# be locked out, silently. To roll back, move PBKDF2 to the front and leave
+# Argon2 in place. See docs/DEPLOYMENT.md.
+PASSWORD_HASHERS = [
+    "common.hashers.TunedArgon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+]
+
+
 # Password validation. NOTE: this list only takes effect where something
 # actually calls django.contrib.auth.password_validation.validate_password()
 # — DRF's ModelSerializer does NOT wire it in automatically. That call

@@ -6,6 +6,11 @@
 Django==5.2.8
 djangorestframework==3.17.1
 djangorestframework-simplejwt==5.5.1
+argon2-cffi==25.1.0          # Argon2id password hashing (M3). Ships abi3 manylinux
+                             # wheels, so Render needs no compiler. Required by
+                             # common.hashers.TunedArgon2PasswordHasher — do NOT
+                             # remove while any user's stored hash starts argon2$,
+                             # or those accounts can no longer authenticate.
 django-cors-headers==4.9.0
 django-filter==25.2
 daphne==4.2.1

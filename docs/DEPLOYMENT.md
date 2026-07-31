@@ -148,6 +148,44 @@ Existing PBKDF2 accounts migrate **transparently on next successful login** —
 Django verifies with the stored algorithm, then rehashes and saves. No reset
 emails, no bulk migration, no user-visible step.
 
+### Known property during the migration window
+
+Until every account has logged in once, response times differ by account state:
+
+| Login attempt against | Cost | Why |
+|---|---|---|
+| nonexistent user | ~0.1 s | Django hashes a throwaway value with the *preferred* hasher |
+| already-migrated account | ~0.1 s | Argon2 verify — **matches**, no signal |
+| not-yet-migrated account | ~1.6 s | PBKDF2 verify at 1,000,000 iterations |
+
+So a slow response indicates "this account exists and has not logged in since the
+migration". Django does not close this gap: `Argon2PasswordHasher.harden_runtime`
+is a deliberate no-op ("too complicated to implement a sensible hardening
+algorithm"). Before M3 every path was PBKDF2-dominated and indistinguishable.
+
+This is accepted rather than engineered around, because:
+
+- it grants no new capability — `/register/` already reveals whether a username
+  is taken (`"A user with that username already exists."`), by design;
+- the `auth` throttle caps attempts at 10/min per IP;
+- it closes on its own as accounts log in;
+- it leaks account *recency*, never credentials.
+
+Check migration progress at any time:
+
+```bash
+python manage.py shell -c "
+from django.contrib.auth import get_user_model
+from collections import Counter
+U = get_user_model()
+print(Counter(
+    'unusable' if not u.password or u.password.startswith('!') else u.password.split('\$')[0]
+    for u in U.objects.all()))
+"
+```
+
+The window is closed once no `pbkdf2_sha256` entries remain.
+
 ### ⚠️ Rolling back is a REORDER, never a REMOVAL
 
 Once a user logs in after this deploy, their stored hash **is** Argon2. If

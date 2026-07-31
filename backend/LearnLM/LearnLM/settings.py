@@ -156,10 +156,14 @@ if 'pytest' in sys.modules or 'pytest' in sys.argv[0]:
 # which Django reports as an ordinary failed login. Every migrated user would
 # be locked out, silently. To roll back, move PBKDF2 to the front and leave
 # Argon2 in place. See docs/DEPLOYMENT.md.
+# Entries are limited to algorithms actually present in the database. A
+# PBKDF2SHA1 entry was carried here briefly as "costless insurance"; an audit
+# of production found zero SHA1 hashes, so it insured nothing while keeping a
+# weaker algorithm in the verification path. Add an entry only when a stored
+# hash needs it.
 PASSWORD_HASHERS = [
     "common.hashers.TunedArgon2PasswordHasher",
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
-    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
 ]
 
 

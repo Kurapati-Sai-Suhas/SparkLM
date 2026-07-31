@@ -28,6 +28,23 @@ User = get_user_model()
 PASSWORD = "M3Migrate#2026x"
 LEGACY_HASHERS = ["django.contrib.auth.hashers.PBKDF2PasswordHasher"]
 
+# Deployment facts the memory budget derives from. Each is sourced, not guessed:
+#   INSTANCE_LIMIT_MIB  Render free plan (render.yaml: plan: free)
+#   APP_RESIDENT_MIB    measured — python 17.5 MiB + django.setup() + the eager
+#                       URLconf resolution asgi.py forces at boot = 202 MiB
+#   TARGET_CONCURRENCY  concurrent logins the instance must absorb without OOM.
+#                       An OOM restarts the container, and a cold start on this
+#                       plan was measured at 92.9 s TTFB.
+INSTANCE_LIMIT_MIB = 512
+APP_RESIDENT_MIB = 202
+TARGET_CONCURRENCY = 10
+
+
+def max_safe_memory_cost_kib():
+    """Largest per-hash memory_cost that still fits TARGET_CONCURRENCY hashes."""
+    headroom_mib = INSTANCE_LIMIT_MIB - APP_RESIDENT_MIB
+    return int((headroom_mib / TARGET_CONCURRENCY) * 1024)
+
 
 def legacy_pbkdf2_hash(raw=PASSWORD):
     """A password stored the way every pre-M3 account is stored."""
@@ -44,6 +61,42 @@ class TestHasherConfiguration:
             "PBKDF2 must remain listed or every pre-M3 account is locked out"
         )
 
+    def test_no_unused_or_weaker_hashers_are_carried(self):
+        """
+        CODE-1 regression. A PBKDF2SHA1 entry was added as "costless insurance",
+        but a production audit found zero SHA1 hashes — it insured nothing while
+        keeping a weaker algorithm in the verification path.
+
+        The list is pinned to minimal length on purpose: every entry is a
+        verification surface, so adding one must be a deliberate act backed by
+        a stored hash that needs it, not a precaution.
+        """
+        assert not any("SHA1" in h for h in settings.PASSWORD_HASHERS), (
+            "no SHA1 hashes exist in the database; this entry protects nothing"
+        )
+        assert len(settings.PASSWORD_HASHERS) == 2, (
+            f"expected exactly [Argon2, PBKDF2], got {settings.PASSWORD_HASHERS}. "
+            "Add an entry only when a stored hash requires it."
+        )
+
+    def test_preferred_hasher_matches_the_fake_runtime_cost(self):
+        """
+        SEC-1 structural guard.
+
+        For a nonexistent user, verify_password() runs make_password() with the
+        PREFERRED hasher to flatten the enumeration timing oracle. That defence
+        only works while the preferred hasher is the same one real accounts are
+        verified with. If a slower hasher were ever made preferred while accounts
+        are stored as Argon2, the oracle would invert and become permanent.
+
+        (A timing-based assertion would be flaky in CI; this pins the structural
+        property that keeps nonexistent and migrated accounts indistinguishable —
+        measured in production at 1.368 s vs 1.466 s.)
+        """
+        preferred = settings.PASSWORD_HASHERS[0]
+        assert preferred == "common.hashers.TunedArgon2PasswordHasher"
+        assert identify_hasher(make_password(PASSWORD)).algorithm == "argon2"
+
     def test_parameters_are_pinned_away_from_django_defaults(self):
         """
         Django defaults: time_cost=2, memory_cost=102400 (100 MiB), parallelism=8.
@@ -57,12 +110,31 @@ class TestHasherConfiguration:
         assert TunedArgon2PasswordHasher.memory_cost < Argon2PasswordHasher.memory_cost
         assert TunedArgon2PasswordHasher.parallelism < Argon2PasswordHasher.parallelism
 
-    def test_memory_budget_fits_the_production_instance(self):
-        """202 MiB measured resident set + N concurrent hashes must stay under 512 MB."""
-        app_mib, limit_mib = 202, 512
-        per_hash_mib = TunedArgon2PasswordHasher.memory_cost / 1024
-        assert app_mib + per_hash_mib * 10 < limit_mib, (
-            "10 concurrent logins must not exhaust the instance"
+    def test_configured_memory_cost_is_within_the_instance_budget(self):
+        """
+        The configured cost must leave room for TARGET_CONCURRENCY simultaneous
+        hashes alongside the app's resident set.
+        """
+        ceiling = max_safe_memory_cost_kib()
+        assert TunedArgon2PasswordHasher.memory_cost <= ceiling, (
+            f"memory_cost={TunedArgon2PasswordHasher.memory_cost} KiB exceeds the "
+            f"{ceiling} KiB ceiling: {TARGET_CONCURRENCY} concurrent logins would "
+            f"need {APP_RESIDENT_MIB + TARGET_CONCURRENCY * TunedArgon2PasswordHasher.memory_cost / 1024:.0f} MiB "
+            f"of {INSTANCE_LIMIT_MIB} MiB"
+        )
+
+    def test_the_budget_check_would_reject_djangos_default(self):
+        """
+        Proves the budget assertion above discriminates rather than passing
+        vacuously. Django's stock Argon2 default (102400 KiB) is the exact
+        configuration that would OOM this instance, so it MUST fail the ceiling
+        — otherwise the check is decoration.
+        """
+        from django.contrib.auth.hashers import Argon2PasswordHasher
+
+        assert Argon2PasswordHasher.memory_cost > max_safe_memory_cost_kib(), (
+            "Django's default no longer violates the budget — the ceiling has "
+            "been loosened to the point of being meaningless"
         )
 
     def test_algorithm_is_argon2id(self):

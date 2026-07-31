@@ -40,15 +40,34 @@ const BOILERPLATE_KEYS: Record<string, string[]> = {
   js: ['javascript', 'js'],
 };
 
+// Languages the server can wrap generically (see services.py): submitting a
+// Solution class alone is enough, because the harness uses runtime reflection
+// to find the method. C and C++ have no such mechanism, so unless a question
+// ships its own wrapper their code is compiled and run exactly as written and
+// must be a complete program. Telling users "no template" without saying that
+// would still leave them writing code that cannot compile.
+const SELF_CONTAINED_LANGUAGES = new Set(['c', 'cpp']);
+
 // Shown only when a problem genuinely has no template for the chosen
 // language, so the editor is never blank and never left holding the previous
-// language's code.
+// language's code. For C/C++ this is a compilable skeleton rather than a bare
+// comment, since a bare comment cannot build.
 const EMPTY_STUB: Record<string, string> = {
   python: '# Write your solution here\n\n',
   java: '// Write your solution here\n\n',
-  cpp: '// Write your solution here\n\n',
-  c: '// Write your solution here\n\n',
   js: '// Write your solution here\n\n',
+  cpp:
+    '#include <bits/stdc++.h>\nusing namespace std;\n\n' +
+    'int main() {\n' +
+    '    // C++ runs as a complete program: read stdin, print the answer.\n' +
+    '    // Write your code here\n' +
+    '    return 0;\n}\n',
+  c:
+    '#include <stdio.h>\n\n' +
+    'int main(void) {\n' +
+    '    /* C runs as a complete program: read stdin, print the answer. */\n' +
+    '    /* Write your code here */\n' +
+    '    return 0;\n}\n',
 };
 
 const FALLBACK_STUB = '// Write your solution here\n\n';
@@ -446,7 +465,9 @@ export default function AdaptiveCodingPortal() {
                 data-testid="no-template-notice"
                 className="border-amber-400/40 bg-amber-400/10 text-amber-300 text-[11px] font-normal"
               >
-                No starter template for this language — writing from scratch
+                {SELF_CONTAINED_LANGUAGES.has(language)
+                  ? 'No template — C/C++ run as complete programs: include main() and read stdin'
+                  : 'No starter template for this language — writing from scratch'}
               </Badge>
             )}
 

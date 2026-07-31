@@ -10,6 +10,14 @@ import { Code2, Check } from "lucide-react";
 interface LanguageSelectorProps {
   value: string;
   onChange: (value: string) => void;
+  /**
+   * Languages the current problem actually ships a starter template for.
+   * Omit to keep the previous behaviour (every option shown unannotated).
+   * Options outside this list stay selectable — a user may still want to
+   * write from scratch — but are labelled so the choice is informed rather
+   * than a surprise blank editor.
+   */
+  available?: string[];
 }
 
 const LANGUAGES: { value: string; label: string; ext: string }[] = [
@@ -23,8 +31,11 @@ const LANGUAGES: { value: string; label: string; ext: string }[] = [
 export default function LanguageSelector({
   value,
   onChange,
+  available,
 }: LanguageSelectorProps) {
   const active = LANGUAGES.find((l) => l.value === value) ?? LANGUAGES[0];
+  // Undefined = caller did not supply availability, so annotate nothing.
+  const hasTemplate = (lang: string) => !available || available.includes(lang);
 
   return (
     <Select value={value} onValueChange={onChange}>
@@ -90,9 +101,18 @@ export default function LanguageSelector({
 
               <div className="flex items-center justify-between gap-3">
                 <span className="font-medium">{lang.label}</span>
-                <span className="text-[10px] font-mono text-muted-foreground/80 tracking-wider">
-                  {lang.ext}
-                </span>
+                {hasTemplate(lang.value) ? (
+                  <span className="text-[10px] font-mono text-muted-foreground/80 tracking-wider">
+                    {lang.ext}
+                  </span>
+                ) : (
+                  <span
+                    data-testid={`language-no-template-${lang.value}`}
+                    className="text-[10px] font-mono text-amber-300/80 tracking-wider"
+                  >
+                    no template
+                  </span>
+                )}
               </div>
             </SelectItem>
           );

@@ -27,6 +27,49 @@ import ReviewQueueCard from '../components/ReviewQueueCard';
 import LanguageSelector from '../components/LanguageSelector';
 import ProblemDescription from '../components/ProblemDescription';
 
+// The language selector's value and the API's boilerplate_code key are not
+// always the same string: the selector uses "js" while questions store their
+// template under "javascript". Submissions were unaffected (the backend's
+// LANGUAGE_IDS accepts both spellings), which is why the mismatch stayed
+// invisible while every JavaScript user got an empty editor.
+const BOILERPLATE_KEYS: Record<string, string[]> = {
+  python: ['python'],
+  java: ['java'],
+  cpp: ['cpp'],
+  c: ['c'],
+  js: ['javascript', 'js'],
+};
+
+// Shown only when a problem genuinely has no template for the chosen
+// language, so the editor is never blank and never left holding the previous
+// language's code.
+const EMPTY_STUB: Record<string, string> = {
+  python: '# Write your solution here\n\n',
+  java: '// Write your solution here\n\n',
+  cpp: '// Write your solution here\n\n',
+  c: '// Write your solution here\n\n',
+  js: '// Write your solution here\n\n',
+};
+
+const FALLBACK_STUB = '// Write your solution here\n\n';
+
+/** The stored starter template for a language, or null if there isn't one. */
+function templateFor(boilerplate: any, lang: string): string | null {
+  if (!boilerplate || typeof boilerplate !== 'object') return null;
+  for (const key of BOILERPLATE_KEYS[lang] ?? [lang]) {
+    const template = boilerplate[key];
+    if (typeof template === 'string' && template.trim()) return template;
+  }
+  return null;
+}
+
+/** Languages this problem actually ships a usable template for. */
+function availableLanguages(boilerplate: any): string[] {
+  return Object.keys(BOILERPLATE_KEYS).filter(
+    (lang) => templateFor(boilerplate, lang) !== null,
+  );
+}
+
 export default function AdaptiveCodingPortal() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -37,6 +80,9 @@ export default function AdaptiveCodingPortal() {
   const [problem, setProblem] = useState<any>(null);
   const [code, setCode] = useState('# Write your solution here\n\n');
   const [language, setLanguage] = useState('python');
+  // True when this problem ships no template for the selected language, so
+  // the UI can say so instead of silently presenting a blank file.
+  const [templateMissing, setTemplateMissing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState<any>(null);
@@ -54,11 +100,9 @@ export default function AdaptiveCodingPortal() {
       const data = await response.json();
       setProblem(data);
 
-      if (data.boilerplate_code && data.boilerplate_code[language]) {
-        setCode(data.boilerplate_code[language]);
-      } else {
-        setCode('# Write your solution here\n\n');
-      }
+      const template = templateFor(data.boilerplate_code, language);
+      setCode(template ?? EMPTY_STUB[language] ?? FALLBACK_STUB);
+      setTemplateMissing(template === null);
     } catch (error) {
       console.error('Failed to fetch problem:', error);
     } finally {
@@ -71,9 +115,14 @@ export default function AdaptiveCodingPortal() {
   }, [fetchNextProblem]);
 
   useEffect(() => {
-    if (problem && problem.boilerplate_code && problem.boilerplate_code[language]) {
-      setCode(problem.boilerplate_code[language]);
-    }
+    if (!problem) return;
+    // Always resolve the editor contents. The previous version only assigned
+    // when a template existed, so switching to a language without one left
+    // the PREVIOUS language's code in the editor - which could then be
+    // submitted under the newly selected language.
+    const template = templateFor(problem.boilerplate_code, language);
+    setCode(template ?? EMPTY_STUB[language] ?? FALLBACK_STUB);
+    setTemplateMissing(template === null);
   }, [language, problem]);
 
   const handleSubmit = async () => {
@@ -385,7 +434,21 @@ export default function AdaptiveCodingPortal() {
           </div>
 
           <div className="flex items-center gap-2">
-            <LanguageSelector value={language} onChange={setLanguage} />
+            <LanguageSelector
+              value={language}
+              onChange={setLanguage}
+              available={availableLanguages(problem?.boilerplate_code)}
+            />
+
+            {templateMissing && (
+              <Badge
+                variant="outline"
+                data-testid="no-template-notice"
+                className="border-amber-400/40 bg-amber-400/10 text-amber-300 text-[11px] font-normal"
+              >
+                No starter template for this language — writing from scratch
+              </Badge>
+            )}
 
             <Button
               data-testid="submit-code-btn"

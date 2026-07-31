@@ -283,6 +283,44 @@ def test_next_problem_returns_frontend_schema(api_client, user, question, monkey
 
 
 @pytest.mark.django_db
+def test_boilerplate_code_is_always_a_language_keyed_object(api_client, user, question, monkeypatch):
+    """
+    M2 contract: the editor derives BOTH the starter template and the list of
+    languages offering one by indexing boilerplate_code by language key.
+
+    If this ever came back as a JSON string, null, or a list, the frontend's
+    lookup would silently yield undefined for every language -- an empty
+    editor with no error anywhere, which is precisely the failure M2 fixes.
+    A question with no templates must still serialize as {} so the UI can
+    report "no template" rather than crash on a null index.
+    """
+    from groups.hybrid_router import RoutingClassifier
+    monkeypatch.setattr(RoutingClassifier, "predict_route", lambda self, *a, **k: "flat")
+    api_client.force_authenticate(user=user)
+
+    # The fixture question deliberately carries no boilerplate at all.
+    response = api_client.get(reverse("code-next-problem"), {"topic": "Array"})
+    assert response.status_code == 200
+    assert isinstance(response.data["boilerplate_code"], dict)
+
+    question.boilerplate_code = {
+        "python": "class Solution:\n    def solve(self):\n        pass",
+        "javascript": "class Solution {\n    solve() {}\n}",
+    }
+    question.save(update_fields=["boilerplate_code"])
+
+    response = api_client.get(reverse("code-next-problem"), {"topic": "Array"})
+    payload = response.data["boilerplate_code"]
+    assert isinstance(payload, dict)
+    # Canonical key spelling matters: the selector's "js" option maps onto
+    # "javascript" in the client. Renaming this key server-side would blank
+    # the editor for every JavaScript user while submissions kept working,
+    # because LANGUAGE_IDS accepts both spellings.
+    assert "javascript" in payload
+    assert payload["python"].startswith("class Solution")
+
+
+@pytest.mark.django_db
 def test_placeholder_questions_are_never_served(api_client, user, question, monkeypatch):
     from groups.hybrid_router import RoutingClassifier
     monkeypatch.setattr(RoutingClassifier, "predict_route", lambda self, *a, **k: "flat")

@@ -132,6 +132,50 @@ to run without it.
 9. `python manage.py check --deploy` locally with prod-like env for the
    security checklist (HSTS warnings are acceptable on Render's TLS).
 
+## Cache backend (`REDIS_URL`) — not optional in production
+
+`REDIS_URL` is `sync: false` in `render.yaml`, meaning it must be set **by hand
+in the Render dashboard**. If it is unset, `settings.py` falls back to
+`LocMemCache`. Three features depend on the cache, and **all three fail
+silently** when it does not persist — no exception, no error, no failing test:
+
+| Feature | Consequence when the cache is dead |
+|---|---|
+| **DRF throttling (all scopes)** | **No rate limiting at all.** No brute-force brake on `/token/`; no 10/min cap on the **metered** Judge0 API |
+| Curriculum DAG cache (`hybrid_router` FIX-04) | NetworkX graph rebuilt from the database on **every** recommendation request |
+| Leaderboard cache (60 s) | Recomputed on every dashboard load |
+
+This was measured in production: 35 concurrent requests against a 30/min scope
+returned zero 429s, and a 60-second cached leaderboard reflected a database
+change immediately.
+
+### Verify it, don't assume it
+
+The app now probes the cache at boot (`common/apps.py`). Check the Render log
+tail after a deploy:
+
+- **Silence = healthy.** The probe only logs on failure.
+- `CACHE NOT PERSISTING …` → writes are being discarded. Set/repair `REDIS_URL`.
+- `CACHE UNAVAILABLE …` → the backend is unreachable.
+
+Confirm from outside at any time — this must eventually return `429`:
+
+```bash
+for i in $(seq 1 12); do
+  curl -s -o /dev/null -w "%{http_code} " -X POST \
+    https://sparklm-api.onrender.com/api/token/ \
+    -H "Content-Type: application/json" \
+    -d '{"username":"nosuchuser","password":"wrong"}'
+done; echo
+```
+
+Twelve `401`s means throttling is **not** enforced. Ten `401`s then `429`s is correct.
+
+> ⚠️ **Enabling the cache activates rate limits that have never actually run in
+> production.** `auth` (10/min) and `judge0` (10/min) will begin rejecting
+> traffic. Review those rates against real usage before switching `REDIS_URL`
+> on, rather than discovering them through user reports.
+
 ## Password hashing (M3) — read before touching `PASSWORD_HASHERS`
 
 Passwords are hashed with **Argon2id** at pinned parameters
@@ -167,9 +211,14 @@ This is accepted rather than engineered around, because:
 
 - it grants no new capability — `/register/` already reveals whether a username
   is taken (`"A user with that username already exists."`), by design;
-- the `auth` throttle caps attempts at 10/min per IP;
 - it closes on its own as accounts log in;
 - it leaks account *recency*, never credentials.
+
+> **Correction (SEC-B1).** An earlier revision of this section also cited the
+> `auth` throttle (10/min per IP) as a mitigating control. **Do not rely on
+> that until `REDIS_URL` is confirmed working** — throttling was measured
+> non-functional in production because the cache was not persisting, so no
+> rate limit was enforced at all. See "Cache backend" below.
 
 Check migration progress at any time:
 

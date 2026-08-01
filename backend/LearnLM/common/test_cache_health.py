@@ -20,6 +20,7 @@ production symptom: writes are accepted and discarded.
 import logging
 
 import pytest
+from django.conf import settings
 from django.core.cache import cache
 from django.core.cache.backends.base import BaseCache
 from django.test import override_settings
@@ -105,12 +106,19 @@ class TestCacheFailureDisablesThrottling:
         try:
             client = APIClient()
             url = reverse("token_obtain_pair")
+            # Derived, not hardcoded: Phase B lowered 'auth' from 10 to 5
+            # because the rate limits sat above measured service capacity.
+            allowed = int(
+                settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["auth"].split("/")[0]
+            )
             codes = [
                 client.post(url, {"username": "ghost", "password": "wrong"}, format="json").status_code
-                for _ in range(12)
+                for _ in range(allowed + 2)
             ]
             assert 429 in codes, "throttle should fire with a working cache"
-            assert codes.index(429) == 10, f"expected the 11th to be throttled, got {codes}"
+            assert codes.index(429) == allowed, (
+                f"expected request {allowed + 1} to be throttled, got {codes}"
+            )
         finally:
             cache.clear()
 

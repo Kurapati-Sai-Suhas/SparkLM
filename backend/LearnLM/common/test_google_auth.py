@@ -9,11 +9,30 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
 User = get_user_model()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_throttle_state():
+    """
+    GoogleAuthView shares the 'auth' throttle bucket with password login, and
+    every test here posts from the same (absent) client IP — so without this,
+    throttle counters accumulate ACROSS tests in this module.
+
+    That latent coupling was invisible while 'auth' allowed 10/minute: the
+    module's requests happened to fit. When Phase B lowered the limit to
+    5/minute, the later tests started receiving 429 instead of the status
+    they assert. The tests were wrong, not the limit — a test must not depend
+    on how many requests its neighbours happened to make.
+    """
+    cache.clear()
+    yield
+    cache.clear()
 
 
 def _post_google(credential="fake-credential"):
@@ -115,12 +134,18 @@ def test_unconfigured_server_fails_loudly_not_silently():
 @pytest.mark.django_db
 @override_settings(GOOGLE_CLIENT_ID="test-client-id")
 def test_google_login_is_rate_limited_same_scope_as_password_login():
-    from django.core.cache import cache
-    cache.clear()
-    try:
-        with patch("common.google_auth_views.google_id_token.verify_oauth2_token") as mock_verify:
-            mock_verify.side_effect = ValueError("bad token")
-            responses = [_post_google() for _ in range(11)]
-        assert responses[-1].status_code == 429
-    finally:
-        cache.clear()
+    from django.conf import settings
+    allowed = int(
+        settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["auth"].split("/")[0]
+    )
+    with patch("common.google_auth_views.google_id_token.verify_oauth2_token") as mock_verify:
+        mock_verify.side_effect = ValueError("bad token")
+        codes = [_post_google().status_code for _ in range(allowed + 2)]
+
+    # Assert the BOUNDARY, not just that a 429 shows up eventually: SSO must
+    # consume the same bucket as password login, or it becomes a way around
+    # the credential-stuffing brake.
+    assert 429 not in codes[:allowed], (
+        f"the first {allowed} attempts must pass the throttle, got {codes}"
+    )
+    assert codes[allowed] == 429, f"attempt {allowed + 1} must be throttled, got {codes}"

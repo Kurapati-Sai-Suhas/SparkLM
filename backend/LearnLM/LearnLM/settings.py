@@ -263,11 +263,37 @@ REST_FRAMEWORK = {
     # N=1, only the proxy-appended (unspoofable) last hop identifies the
     # client. Set DRF_NUM_PROXIES to match the deployment's proxy depth.
     'NUM_PROXIES': int(os.getenv('DRF_NUM_PROXIES', '1')),
+    # ── Rate limits are a CAPACITY control here, not only a security one ──
+    #
+    # Phase B measured the free-tier instance to destruction. Django's ASGI
+    # handler runs every sync view on ONE thread-sensitive worker, so
+    # requests do not run in parallel — they queue. Serialised cost of a
+    # login is ~0.63 s, so the instance sustains ~1.6 logins/s and no more,
+    # whatever the arrival rate.
+    #
+    # Measured behaviour of a single client IP:
+    #     10 concurrent  ->   7.1 s, 0 failures          healthy
+    #     20 concurrent  -> 103.0 s, 0 failures          degraded
+    #     40 concurrent  ->  32/40 -> 502, ~60 s outage  BROKEN
+    #
+    # The previous ceiling let one IP send anon(30) + auth(10) = 40/min —
+    # precisely the load that took production down. A caller could exhaust
+    # the service without ever exceeding its rate limit. The ceiling is now
+    # 20/min, the highest level measured to complete without failures.
+    #
+    # ⚠ These are per-IP. A campus behind one NAT shares a bucket, so this
+    # trades some legitimate-user headroom for survivability. Raise them only
+    # together with real capacity (paid instance, or admission control) —
+    # never on their own. See docs/DEPLOYMENT.md.
     'DEFAULT_THROTTLE_RATES': {
         # Global defaults. The SPA fires several API calls per page load
         # (dashboard, portals, profile, notifications), so 20/min per user
         # 429s legitimate browsing — 120/min ≈ 2 req/s sustained.
-        'anon': '30/minute',
+        #
+        # 'anon' lowered 30 -> 15: anonymous callers only reach login,
+        # register and Google auth, so 15/min is ample for a human while
+        # halving the burst one IP can aim at the auth pipeline.
+        'anon': '15/minute',
         'user': '120/minute',
         # Scoped rates for expensive endpoints (see throttle_scope on views):
         # each code run/submit fans out to N Judge0 calls (paid API), and
@@ -279,7 +305,11 @@ REST_FRAMEWORK = {
         # presents an existing token (not guessable credentials) and gets a
         # looser bucket so refresh traffic behind a shared NAT can never
         # starve logins (frozen architecture §7).
-        'auth': '10/minute',
+        #
+        # 'auth' lowered 10 -> 5: login is the most expensive anonymous
+        # operation (~0.63 s serialised, of which ~127 ms is Argon2), and
+        # 5 attempts/min is still well above human behaviour.
+        'auth': '5/minute',
         'auth-refresh': '30/minute',
     }
 }

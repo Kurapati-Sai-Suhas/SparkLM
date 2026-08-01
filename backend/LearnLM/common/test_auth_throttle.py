@@ -7,10 +7,24 @@ after it — regardless of whether the attempted credentials are valid.
 """
 
 import pytest
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.urls import reverse
 from rest_framework.test import APIClient
+
+
+def _limit(scope):
+    """
+    Read the configured allowance instead of hardcoding it.
+
+    These tests previously pinned 'auth' at 10/minute as a literal. When
+    Phase B lowered it to 5/minute (the rate limits sat ABOVE measured
+    service capacity — one IP could 502 the instance without exceeding
+    them), the literals broke. Deriving the number keeps the tests pinned
+    to the *behaviour* — allow N, reject N+1 — at whatever N is configured.
+    """
+    return int(settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"][scope].split("/")[0])
 
 
 @pytest.mark.django_db
@@ -23,15 +37,17 @@ def test_token_endpoint_throttles_after_limit():
         )
         client = APIClient()
         url = reverse("token_obtain_pair")
+        allowed = _limit("auth")
 
-        # First 10 attempts pass the throttle (and fail authentication).
-        for _ in range(10):
+        # Every attempt up to the allowance passes the throttle (and fails
+        # authentication).
+        for _ in range(allowed):
             response = client.post(
                 url, {"username": "authuser", "password": "wrong"}, format="json"
             )
             assert response.status_code == 401
 
-        # The 11th within the window is throttled — even with CORRECT
+        # The next one within the window is throttled — even with CORRECT
         # credentials, proving the brake sits in front of authentication.
         response = client.post(
             url, {"username": "authuser", "password": "right-password-1"}, format="json"
@@ -69,8 +85,8 @@ def test_rotating_infrastructure_hops_share_one_bucket():
         client = APIClient()
         url = reverse("token_obtain_pair")
 
-        # Same client, three different Render-internal last hops.
-        for i in range(10):
+        # Same client, a different Render-internal last hop each time.
+        for i in range(_limit("auth")):
             response = client.post(
                 url, {"username": "ghost", "password": "wrong"}, format="json",
                 HTTP_X_FORWARDED_FOR=f"203.0.113.7, 10.{i}.0.1",
@@ -114,10 +130,44 @@ def test_spoofing_the_client_hop_evades_the_throttle():
                 url, {"username": "ghost", "password": "wrong"}, format="json",
                 HTTP_X_FORWARDED_FOR=f"198.51.100.{i}, 10.0.0.1",
             ).status_code
-            for i in range(15)
+            for i in range(_limit("auth") * 3)
         ]
         assert 429 not in codes, (
             "documented limitation: rotating the client hop evades the limit"
         )
     finally:
         cache.clear()
+
+
+# Highest single-IP burst Phase B measured completing with ZERO failures.
+# 40 concurrent produced 32 x 502 and a ~60 s production outage; 20 concurrent
+# completed every request (slowly, 103 s). Sourced from measurement, not taste.
+MEASURED_SAFE_CONCURRENCY = 20
+
+
+def test_anonymous_rate_ceiling_stays_within_measured_capacity():
+    """
+    The defect Phase B found, pinned so it cannot come back.
+
+    Rate limits had been chosen purely as security controls, with no
+    reference to what the instance can actually serve. The result: one IP
+    was permitted anon(30) + auth(10) = 40 requests/minute, and 40
+    concurrent auth requests is exactly what returned 32 x 502 and took
+    production down for ~60 s. The limit authorised the outage.
+
+    Django's ASGI handler serialises sync views onto one worker thread, so
+    capacity does not grow with arrival rate — the ceiling must be set below
+    what the single queue can drain.
+
+    If you need to raise these, raise CAPACITY first (paid instance, or real
+    admission control) and re-measure; then update MEASURED_SAFE_CONCURRENCY
+    with the new number and say where it came from.
+    """
+    anon, auth = _limit("anon"), _limit("auth")
+    ceiling = anon + auth
+    assert ceiling <= MEASURED_SAFE_CONCURRENCY, (
+        f"one anonymous IP may send anon({anon}) + auth({auth}) = "
+        f"{ceiling} req/min, above the {MEASURED_SAFE_CONCURRENCY} concurrent "
+        f"requests measured to complete without failures. A client could "
+        f"exhaust the service without exceeding its rate limit."
+    )

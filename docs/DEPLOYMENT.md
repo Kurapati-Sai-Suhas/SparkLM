@@ -269,8 +269,7 @@ python manage.py password_hash_status
 It separates the three populations that matter — Argon2 (migrated), PBKDF2
 (awaiting first sign-in), and unusable/SSO (never migrates, so it is excluded
 from the denominator) — and prints `Migration window CLOSED` when no legacy
-hashes remain. `--fail-if-incomplete` exits non-zero while any remain, for a
-scheduled check.
+hashes remain. An open window is the normal state for months, so it exits 0.
 
 Two things it will tell you that a hand-written count will not:
 

@@ -119,7 +119,12 @@ class TestPasswordHashStatus:
         assert code == 0
         assert "CLOSED" in out
 
-    def test_fail_if_incomplete_exits_nonzero_while_legacy_hashes_remain(self):
+    def test_an_open_window_is_reported_but_is_not_an_error(self):
+        """
+        An unmigrated account is the normal, expected state for months — it
+        must read as progress, never as a fault. Only an actual lockout
+        (unreadable hash) is allowed to exit non-zero.
+        """
         with override_settings(PASSWORD_HASHERS=PBKDF2_ONLY):
             u = User.objects.create_user(
                 username="old2", password=PASSWORD, email="o2@t.com"
@@ -127,8 +132,10 @@ class TestPasswordHashStatus:
             u.password = make_password(PASSWORD)
             u.save(update_fields=["password"])
 
-        assert run_status()[2] == 0, "plain run must not fail on an open window"
-        assert run_status(fail_if_incomplete=True)[2] == 1
+        out, _, code = run_status()
+        assert code == 0
+        assert "awaiting first sign-in" in out
+        assert "CLOSED" not in out
 
     def test_unreadable_hashes_are_escalated_not_counted_as_migrated(self):
         """

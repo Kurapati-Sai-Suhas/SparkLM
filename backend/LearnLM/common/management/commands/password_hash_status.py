@@ -43,16 +43,6 @@ def classify(user):
 class Command(BaseCommand):
     help = "Report PBKDF2 -> Argon2id migration progress (M3)."
 
-    def add_arguments(self, parser):
-        parser.add_argument(
-            "--fail-if-incomplete",
-            action="store_true",
-            help=(
-                "Exit non-zero while any account still holds a legacy hash. "
-                "For a scheduled check that should page someone, not for CI."
-            ),
-        )
-
     def handle(self, *args, **options):
         User = get_user_model()
         counts = Counter()
@@ -113,5 +103,3 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 "\nMigration window CLOSED — no legacy hashes remain."
             ))
-        elif options["fail_if_incomplete"]:
-            raise SystemExit(1)

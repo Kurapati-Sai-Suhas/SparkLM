@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.throttling import ScopedRateThrottle
+from common.throttling import ClientIPScopedRateThrottle
 
 # Import Models
 from .models import (
@@ -167,7 +167,7 @@ class CodeRunView(APIView):
     POST /api/code/run/
     """
     permission_classes = [IsAuthenticated]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientIPScopedRateThrottle]
     throttle_scope = 'judge0'
 
     def post(self, request):
@@ -212,7 +212,7 @@ class CodeSubmitView(APIView):
     see the services module docstring before reordering anything.
     """
     permission_classes = [IsAuthenticated]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientIPScopedRateThrottle]
     throttle_scope = 'judge0'
 
     def post(self, request):
@@ -304,7 +304,7 @@ class NextProblemView(APIView):
     GET /api/code/next/?topic=Array
     """
     permission_classes = [IsAuthenticated]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientIPScopedRateThrottle]
     throttle_scope = 'recommend'
 
     def get(self, request):

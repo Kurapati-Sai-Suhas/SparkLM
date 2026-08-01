@@ -340,11 +340,11 @@ class VisualSearchUploadView(APIView):
         }, status=201)
 
 
-from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
+from common.throttling import ClientIPUserRateThrottle, ClientIPAnonRateThrottle
 
 class VisualSearchQueryView(APIView):
     permission_classes = [IsAuthenticated]
-    throttle_classes = [UserRateThrottle, AnonRateThrottle]
+    throttle_classes = [ClientIPUserRateThrottle, ClientIPAnonRateThrottle]
     parser_classes     = (parsers.MultiPartParser, parsers.FormParser)
 
     def post(self, request):
@@ -385,7 +385,7 @@ class VisualSearchQueryView(APIView):
 
 class RAGDoubtView(APIView):
     permission_classes = [IsAuthenticated]
-    throttle_classes = [UserRateThrottle, AnonRateThrottle]
+    throttle_classes = [ClientIPUserRateThrottle, ClientIPAnonRateThrottle]
 
     def post(self, request):
         material_id = request.data.get('materialId')
@@ -434,7 +434,7 @@ class HybridRouterView(APIView):
     POST { "subject": "Tech Trivia", "elo_rating": 1250, "question_difficulty": 1300, "got_correct": true }
     """
     permission_classes = [IsAuthenticated]
-    throttle_classes = [UserRateThrottle, AnonRateThrottle]
+    throttle_classes = [ClientIPUserRateThrottle, ClientIPAnonRateThrottle]
 
     def post(self, request):
         serializer = HybridRouterSerializer(data=request.data)

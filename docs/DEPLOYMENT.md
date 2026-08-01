@@ -132,7 +132,46 @@ to run without it.
 9. `python manage.py check --deploy` locally with prod-like env for the
    security checklist (HSTS warnings are acceptable on Render's TLS).
 
+## Rate limiting on Render — why `NUM_PROXIES` does not work here
+
+Throttling was measured **completely inert** in production. The cause was
+client identification, not configuration and not the cache.
+
+DRF's `NUM_PROXIES = 1` means "the last `X-Forwarded-For` hop is the client",
+which is correct behind one stable proxy. On Render the last hop is an
+**internal load balancer, and Render rotates across several**. Measured on
+production — 12 sequential requests to `/api/token/` created three buckets:
+
+```
+:1:throttle_auth_10.31.175.104
+:1:throttle_auth_10.26.174.7
+:1:throttle_auth_10.27.203.252
+```
+
+None reached the 10/min limit, so nothing was ever throttled — no
+brute-force brake on `/token/`, and no 10/min cap on the **metered** Judge0 API.
+
+`common/throttling.py` fixes this by keying on the **first** XFF entry (the
+real client). All throttle classes in the project use it.
+
+> **Accepted trade-off.** The first XFF entry is client-supplied, so a
+> determined attacker can rotate it and evade the limit. That is weaker than
+> `NUM_PROXIES=1` in theory — but the prior behaviour required *no* evasion
+> effort, because no limit existed. Both halves are asserted in
+> `common/test_auth_throttle.py`. If Render ever exposes a trusted client-IP
+> header, prefer it and revert to `NUM_PROXIES`.
+
+`REST_FRAMEWORK["NUM_PROXIES"]` is deliberately kept: these classes bypass it,
+but it still governs any stock DRF throttle added later.
+
 ## Cache backend (`REDIS_URL`) — not optional in production
+
+> **Correction.** An earlier revision of this section claimed the cache was
+> not persisting in production and blamed the throttle failure on it. **That
+> was wrong.** `REDIS_URL` is set, the Upstash instance is healthy (PING,
+> SET/GET verified directly), and Django writes to it correctly. The real
+> cause was client identification — see the section above. The probe below is
+> still worth keeping, but it was not the bug.
 
 `REDIS_URL` is `sync: false` in `render.yaml`, meaning it must be set **by hand
 in the Render dashboard**. If it is unset, `settings.py` falls back to
@@ -214,11 +253,12 @@ This is accepted rather than engineered around, because:
 - it closes on its own as accounts log in;
 - it leaks account *recency*, never credentials.
 
-> **Correction (SEC-B1).** An earlier revision of this section also cited the
-> `auth` throttle (10/min per IP) as a mitigating control. **Do not rely on
-> that until `REDIS_URL` is confirmed working** — throttling was measured
-> non-functional in production because the cache was not persisting, so no
-> rate limit was enforced at all. See "Cache backend" below.
+> **Correction (SEC-B1).** An earlier revision of this section cited the
+> `auth` throttle (10/min per IP) as a mitigating control while that control
+> was measured non-functional in production. The cause was client
+> identification on Render, not the cache; it is fixed in
+> `common/throttling.py`. The throttle is a valid mitigation again — with the
+> caveat that a client rotating its `X-Forwarded-For` entry can evade it.
 
 Check migration progress at any time:
 

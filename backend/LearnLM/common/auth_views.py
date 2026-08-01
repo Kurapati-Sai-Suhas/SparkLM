@@ -11,12 +11,12 @@ for anonymous callers and acts as the brute-force brake required by the
 frozen architecture §7/§13.7 without affecting any authenticated flow.
 """
 
-from rest_framework.throttling import ScopedRateThrottle
+from common.throttling import ClientIPScopedRateThrottle
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 
 class ThrottledTokenObtainPairView(TokenObtainPairView):
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientIPScopedRateThrottle]
     throttle_scope = 'auth'
 
 
@@ -24,5 +24,5 @@ class ThrottledTokenRefreshView(TokenRefreshView):
     # Separate bucket from login: refresh presents an existing token, so it
     # is not a credential-guessing surface, and behind shared-IP NATs the
     # hourly refresh traffic of many users must never starve sign-ins.
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientIPScopedRateThrottle]
     throttle_scope = 'auth-refresh'

@@ -248,9 +248,13 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 3,
+    # Client-IP-aware variants: Render's LAST X-Forwarded-For hop is a
+    # rotating internal load balancer, which silently defeated every
+    # throttle. See common/throttling.py for the measurement and the
+    # spoofability trade-off this accepts.
     'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
+        'common.throttling.ClientIPAnonRateThrottle',
+        'common.throttling.ClientIPUserRateThrottle'
     ],
     # Trust exactly N reverse proxies when identifying anonymous clients.
     # Left unset, DRF trusts the raw client-supplied X-Forwarded-For header,

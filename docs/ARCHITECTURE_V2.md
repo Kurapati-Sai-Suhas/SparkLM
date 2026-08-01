@@ -228,10 +228,14 @@ communication is designed; they do not enter the product UI in v2.
     `recommendation`). **Never** hidden test cases.
   - `POST /api/v1/predictions` → predict-then-submit vote `{submission_ref, will_pass}`.
   - `GET /api/v1/mastery-map?subject=` → nodes with `mastered/unlocked/depth/accuracy_pct/effective_mastery`.
-- Throttle scopes frozen: `judge0 10/min`, `recommend 30/min`, `user 120/min`, `anon 30/min`,
-  `auth 10/min` on token obtain, `auth-refresh 30/min` on token refresh (amended — see §16).
-  Anonymous throttle identity honors `NUM_PROXIES` (default 1) so client-supplied
-  X-Forwarded-For values cannot mint fresh buckets.
+- Throttle scopes frozen: `judge0 10/min`, `recommend 30/min`, `user 120/min`, `anon 15/min`,
+  `auth 5/min` on token obtain, `auth-refresh 30/min` on token refresh (amended — see §16).
+  Anonymous throttle identity is the FIRST `X-Forwarded-For` hop, via
+  `common.throttling` — **not** `NUM_PROXIES`. On Render the last hop is a
+  rotating internal load balancer, which made every IP-keyed throttle inert in
+  production. The accepted cost is that a client rotating its own XFF entry can
+  mint fresh buckets; a spoofable limit strictly dominates the absent one it
+  replaced. See §16 and docs/DEPLOYMENT.md.
 - camelCase in JSON is deprecated; snake_case for all new fields (`hiddenTestCases` is the
   cautionary fossil).
 
@@ -369,3 +373,7 @@ SLOs: API p99 < 300ms, grading p95 < 15s (async), judge queue depth alarmed.
 | 2026-07 (M2-2) | §4.3 | `id` is sequence-backed (`DEFAULT nextval`) rather than an IDENTITY column | PostgreSQL < 17 forbids IDENTITY columns on partitioned tables; insert semantics are identical |
 | 2026-07 (M2-3) | §4.4 | Single-column `user_id` FK index not carried onto the partitioned table; single-column `question_id` index retained | `user_id` equality scans are served by the leading column of `subm_user_ts_idx`/`subm_user_status_idx`; no catalog composite leads with `question_id` |
 | 2026-07 (M2-4) | §4.3 | A `DEFAULT` partition backstops the monthly ranges; `ensure_submission_partitions` (common app) maintains the horizon and relocates strays | An insert must never fail for lack of a partition; the maintenance command is idempotent and self-healing after downtime |
+| 2026-08 (M3-A) | §7 | Passwords hashed with Argon2id at pinned parameters (`t=2, m=19456 KiB, p=1`) in `common/hashers.py`; PBKDF2 retained for verification | Django's stock Argon2 defaults (100 MiB, p=8) would OOM the 512 MB instance at four concurrent logins, and an OOM costs every later visitor a ~93 s cold start. Legacy accounts migrate transparently on next sign-in; rollback is a REORDER, never a removal |
+| 2026-08 (M3-B, SEC-B1) | §7, §13 | Anonymous throttle identity moved OFF `NUM_PROXIES` onto the first `X-Forwarded-For` hop (`common/throttling.py`) | `NUM_PROXIES=1` keys on the LAST hop, which on Render is a rotating internal load balancer: 12 sequential requests landed in three buckets and no limit was ever reached, so throttling was measured completely inert in production. `REST_FRAMEWORK["NUM_PROXIES"]` is deliberately retained — these classes bypass it, and it is the correct setting again behind a stable proxy. Accepted cost: a client rotating its own XFF entry evades the limit (test-pinned) |
+| 2026-08 (M3-B) | §7 | `anon` 30→15/min, `auth` 10→5/min | Rate limits were set as security controls with no reference to capacity. The old ceiling permitted anon(30)+auth(10)=40 req/min from one IP, and 40 concurrent auth requests was measured returning 32×502 with a ~60 s outage — the limit authorised the outage. New ceiling 20/min is the highest burst measured to complete with zero failures. Per-IP, so a NATed campus shares a bucket: raise only together with real capacity |
+| 2026-08 (M3, R1) | §13 | `DATABASES` uses a psycopg connection pool (`OPTIONS['pool']`, `CONN_MAX_AGE=0`, `CONN_HEALTH_CHECKS=True`) | `CONN_MAX_AGE` never applied under Daphne: `ASGIHandler` opens a `ThreadSensitiveContext` per request, and `django.db.connections` is thread-critical, so every request opened a fresh connection to Neon (~7.2 round trips). Measured 20 requests → 21 TCP sockets before, 25 requests → 3 after; production p50 `/healthz` 699→392 ms. The pool lives in `DatabaseWrapper._connection_pools`, a class attribute, so it outlives request threads. Health checks are mandatory: Neon drops idle connections and the free tier auto-suspends, and without validation the pool serves dead connections as 5xx |

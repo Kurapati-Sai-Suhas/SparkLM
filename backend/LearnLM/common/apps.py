@@ -69,11 +69,71 @@ def verify_cache_backend():
     return True
 
 
+def verify_password_hashers():
+    """
+    Confirm every configured hasher can actually be constructed, and that the
+    preferred one is the tuned Argon2id. Returns True/False; never raises.
+
+    Why this exists: M3 documents one hazard it cannot otherwise detect.
+    Once an account has logged in post-migration its stored hash IS Argon2,
+    so dropping `common.hashers.TunedArgon2PasswordHasher` from
+    PASSWORD_HASHERS — or letting the `argon2-cffi` pin fall out of
+    requirements.txt — makes identify_hasher() raise on every migrated
+    account. Django catches that and reports an ordinary **failed login**.
+    Every migrated user is locked out and nothing in the logs says why.
+
+    test_removing_argon2_locks_out_migrated_users pins the behaviour, but a
+    test cannot see a bad deploy. This turns a silent lockout into one line
+    in the deploy log, the same way verify_cache_backend() does for the cache.
+
+    Advisory on purpose: it must never stop the service booting. A service
+    that refuses to start helps nobody, and the operator may be mid-rollback.
+    """
+    from django.conf import settings
+    from django.contrib.auth.hashers import get_hashers
+
+    configured = settings.PASSWORD_HASHERS
+    try:
+        hashers = get_hashers()
+    except Exception as exc:  # noqa: BLE001 - advisory probe, must not raise
+        logger.error(
+            "PASSWORD HASHERS UNUSABLE: %s. Configured: %s. Logins will fail "
+            "as ordinary bad-credential errors. If argon2-cffi is missing, "
+            "reinstall it — see docs/DEPLOYMENT.md.",
+            exc, configured,
+        )
+        return False
+
+    algorithms = [h.algorithm for h in hashers]
+    if "argon2" not in algorithms:
+        logger.error(
+            "ARGON2 HASHER ABSENT (configured: %s). Any account that has "
+            "logged in since the M3 deploy is stored as argon2$ and CANNOT "
+            "authenticate — Django reports it as a wrong password. Rolling "
+            "back is a REORDER, never a REMOVAL: put PBKDF2 first and keep "
+            "the Argon2 entry. See docs/DEPLOYMENT.md.",
+            configured,
+        )
+        return False
+
+    if algorithms[0] != "argon2":
+        # Not an error: this is exactly what a deliberate rollback looks like.
+        logger.warning(
+            "Preferred password hasher is %r, not argon2. New and rehashed "
+            "passwords will use it. Expected during a rollback; unexpected "
+            "otherwise.",
+            algorithms[0],
+        )
+
+    logger.debug("Password hashers verified: %s", algorithms)
+    return True
+
+
 class CommonConfig(AppConfig):
     """
     v2 shared-services app (frozen architecture §9). Holds no models; it is
     installed so its management commands (partition maintenance, wrapper
-    audit) are discoverable.
+    audit, password-hash status) are discoverable.
     """
 
     name = "common"
@@ -81,6 +141,8 @@ class CommonConfig(AppConfig):
 
     def ready(self):
         # Runs once per process, including the migrate/collectstatic steps of
-        # the Render start chain, so a misconfigured cache is visible at
-        # deploy time rather than after a security control silently lapses.
+        # the Render start chain, so a misconfigured cache or a missing
+        # password hasher is visible at deploy time rather than after a
+        # security control silently lapses or users start being locked out.
         verify_cache_backend()
+        verify_password_hashers()

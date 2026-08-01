@@ -263,17 +263,33 @@ This is accepted rather than engineered around, because:
 Check migration progress at any time:
 
 ```bash
-python manage.py shell -c "
-from django.contrib.auth import get_user_model
-from collections import Counter
-U = get_user_model()
-print(Counter(
-    'unusable' if not u.password or u.password.startswith('!') else u.password.split('\$')[0]
-    for u in U.objects.all()))
-"
+python manage.py password_hash_status
 ```
 
-The window is closed once no `pbkdf2_sha256` entries remain.
+It separates the three populations that matter — Argon2 (migrated), PBKDF2
+(awaiting first sign-in), and unusable/SSO (never migrates, so it is excluded
+from the denominator) — and prints `Migration window CLOSED` when no legacy
+hashes remain. `--fail-if-incomplete` exits non-zero while any remain, for a
+scheduled check.
+
+Two things it will tell you that a hand-written count will not:
+
+- **Exit code 2 means users are locked out right now.** It reports any hash no
+  configured hasher can read. That is the signature of something being removed
+  from `PASSWORD_HASHERS`, and Django reports it to those users as an ordinary
+  wrong password.
+- **"Migrated" does not mean "signed in".** `ModelBackend` checks the password
+  *before* `is_active`, so a disabled account still rehashes on a correct
+  password. The command notes this when disabled accounts exist.
+
+### Boot probe
+
+`common/apps.py` verifies the hasher configuration on every start (alongside the
+cache probe). A missing Argon2 hasher logs one actionable `ERROR` in the deploy
+log naming the consequence, rather than letting a wave of "wrong password"
+reports be the first symptom. A deliberate rollback — PBKDF2 first, Argon2
+retained — logs a `WARNING`, not an error. The probe is advisory and never
+blocks startup.
 
 ### ⚠️ Rolling back is a REORDER, never a REMOVAL
 

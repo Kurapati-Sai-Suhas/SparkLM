@@ -142,3 +142,53 @@ def test_pool_is_shared_across_threads():
     assert after["pool_size"] <= DB["OPTIONS"]["pool"]["max_size"], (
         "pool grew beyond max_size"
     )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_demand_above_max_size_queues_rather_than_failing():
+    """
+    Closes the risk R1 shipped with.
+
+    R1 was verified sequentially and I flagged pool exhaustion as a HIGH
+    untested risk in its own report: with max_size=10 and timeout=10s, demand
+    above max_size waits for a free connection and raises PoolTimeout — a
+    500 — if the wait runs out. That converts overload from "slow" into
+    "error", which the pre-R1 code never did.
+
+    So drive MORE concurrent queries than the pool can hold and assert they
+    all still succeed. This is the burst behaviour, exercised rather than
+    assumed.
+    """
+    pool = connections["default"].pool
+    assert pool is not None
+
+    max_size = DB["OPTIONS"]["pool"]["max_size"]
+    demand = max_size * 2 + 5           # comfortably oversubscribed
+    errors, results = [], []
+    barrier = threading.Barrier(demand)
+
+    def contend():
+        try:
+            barrier.wait(timeout=30)     # everyone hits the pool together
+            with connections["default"].cursor() as cur:
+                cur.execute("SELECT 1")
+                results.append(cur.fetchone()[0])
+        except Exception as exc:         # noqa: BLE001 - the thing under test
+            errors.append(f"{type(exc).__name__}: {exc}")
+        finally:
+            connections["default"].close()
+
+    workers = [threading.Thread(target=contend) for _ in range(demand)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join(timeout=90)
+
+    assert not errors, (
+        f"{len(errors)} of {demand} concurrent queries failed against a "
+        f"max_size={max_size} pool: {errors[:3]}. Oversubscription must queue, "
+        f"not raise — if this is PoolTimeout, either max_size or timeout needs "
+        f"raising, and R1's HIGH risk has materialised."
+    )
+    assert len(results) == demand, f"expected {demand} results, got {len(results)}"
+    assert pool.get_stats()["pool_size"] <= max_size, "pool exceeded max_size"

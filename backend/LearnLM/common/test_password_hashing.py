@@ -285,6 +285,97 @@ class TestAdminLogin:
 
 
 @pytest.mark.django_db
+class TestDisabledAccounts:
+    """
+    The gap two consecutive Phase B reviews marked ❌ and nobody closed.
+
+    Deactivating an account is the lever used when an account is compromised
+    or a student leaves, so "does the hasher swap change what a disabled
+    account can do?" is a question M3 has to answer, not assume.
+    """
+
+    def test_disabled_legacy_account_cannot_obtain_a_token(self):
+        user = User.objects.create_user(
+            username="disabled_legacy", password="ignored", email="d1@test.com"
+        )
+        user.password = legacy_pbkdf2_hash()
+        user.is_active = False
+        user.save(update_fields=["password", "is_active"])
+
+        assert authenticate(username="disabled_legacy", password=PASSWORD) is None
+
+        response = APIClient().post(
+            reverse("token_obtain_pair"),
+            {"username": "disabled_legacy", "password": PASSWORD},
+            format="json",
+        )
+        assert response.status_code == 401
+
+    def test_disabled_argon2_account_cannot_obtain_a_token(self):
+        User.objects.create_user(
+            username="disabled_argon2", password=PASSWORD,
+            email="d2@test.com", is_active=False,
+        )
+        assert authenticate(username="disabled_argon2", password=PASSWORD) is None
+
+        response = APIClient().post(
+            reverse("token_obtain_pair"),
+            {"username": "disabled_argon2", "password": PASSWORD},
+            format="json",
+        )
+        assert response.status_code == 401
+
+    def test_disabled_account_is_still_rehashed_on_a_correct_password(self):
+        """
+        Non-obvious, and worth pinning rather than discovering later.
+
+        ModelBackend.authenticate() evaluates
+        `user.check_password(password) and self.user_can_authenticate(user)`.
+        check_password comes FIRST and carries the rehash setter, so a
+        DISABLED account with the correct password still gets migrated to
+        Argon2 — even though authentication then fails on is_active.
+
+        This is benign (the upgrade is strictly stronger, and login still
+        fails), but it means the migration counter in
+        `manage.py password_hash_status` can advance for accounts that cannot
+        log in. Anyone reading "12 accounts migrated" as "12 accounts signed
+        in" would be wrong.
+        """
+        user = User.objects.create_user(
+            username="disabled_rehash", password="ignored", email="d3@test.com"
+        )
+        user.password = legacy_pbkdf2_hash()
+        user.is_active = False
+        user.save(update_fields=["password", "is_active"])
+
+        assert authenticate(username="disabled_rehash", password=PASSWORD) is None
+
+        user.refresh_from_db()
+        assert user.password.startswith("argon2$"), (
+            "expected the rehash setter to have fired before the is_active "
+            "check — if this now fails, Django reordered ModelBackend and the "
+            "docstring above needs revisiting"
+        )
+
+    def test_reactivating_an_account_restores_login_on_the_migrated_hash(self):
+        """The rehash above must not have corrupted anything."""
+        user = User.objects.create_user(
+            username="reactivated", password="ignored", email="d4@test.com"
+        )
+        user.password = legacy_pbkdf2_hash()
+        user.is_active = False
+        user.save(update_fields=["password", "is_active"])
+
+        authenticate(username="reactivated", password=PASSWORD)   # triggers rehash
+        user.refresh_from_db()
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+
+        restored = authenticate(username="reactivated", password=PASSWORD)
+        assert restored is not None and restored.pk == user.pk
+
+
+@pytest.mark.django_db
 class TestRollbackSafety:
     def test_reordering_keeps_both_populations_working(self):
         """

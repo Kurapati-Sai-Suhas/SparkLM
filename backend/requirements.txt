@@ -16,7 +16,8 @@ django-filter==25.2
 daphne==4.2.1
 channels==4.3.2
 channels-redis==4.3.0        # Redis channel layer (Upstash) — settings auto-detect
-psycopg[binary]==3.3.4
+psycopg[binary,pool]==3.3.4
+psycopg-pool==3.2.6
 pgvector==0.4.2
 redis==7.4.0
 whitenoise==6.12.0           # static files behind Daphne (admin CSS on Render)

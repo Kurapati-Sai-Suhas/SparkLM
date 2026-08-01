@@ -109,12 +109,67 @@ DATABASES = {
         'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'yourpassword'),
         'HOST': os.getenv('POSTGRES_HOST', '127.0.0.1'),
         'PORT': os.getenv('POSTGRES_PORT', '5432'),
-        # Without this, Django opens and tears down a fresh TLS-wrapped
-        # connection to Neon on every single request (CONN_MAX_AGE defaults
-        # to 0) — measured as a real, consistent chunk of per-request
-        # latency in production, not just a cold-start artifact. 60s lets
-        # each worker thread reuse one connection across requests instead.
-        'CONN_MAX_AGE': 60,
+
+        # ── R1: process-wide connection pool ─────────────────────────────
+        #
+        # This slot used to hold CONN_MAX_AGE=60, with a comment claiming it
+        # "lets each worker thread reuse one connection across requests".
+        # That was wrong, and measurably so.
+        #
+        # Django's ASGIHandler wraps every request in `async with
+        # ThreadSensitiveContext()`, which mints a fresh executor thread per
+        # request. django.db.connections is thread-critical
+        # (asgiref Local(thread_critical=True)), so each new thread starts
+        # with NO connection and dials Neon again. CONN_MAX_AGE can only
+        # persist a connection WITHIN one thread, so under Daphne it never
+        # applied at all.
+        #
+        # Measured against real Daphne (not the test client, which reuses a
+        # single thread and hides this): 12 requests produced 12 connections
+        # on 12 distinct thread ids. Counting TCP sockets to Neon:5432,
+        # 20 requests opened 21 sockets — one per request.
+        #
+        # OPTIONS['pool'] fixes it because psycopg_pool lives in
+        # DatabaseWrapper._connection_pools, a CLASS attribute shared by
+        # every per-thread wrapper. The pool outlives the request threads.
+        # Same measurement after: 20 requests reused 3 sockets.
+        #
+        # Pooling and persistent connections are mutually exclusive —
+        # CONN_MAX_AGE must be 0 or Django raises ImproperlyConfigured
+        # (django/db/backends/postgresql/base.py).
+        'CONN_MAX_AGE': 0,
+
+        # NOT optional. Neon's pooler drops idle connections and the free
+        # tier auto-suspends its compute, so a pooled connection can be dead
+        # by the time it is handed out. Observed twice with this disabled:
+        #   WARNING pool discarding closed connection: <Connection [BAD]>
+        #   ERROR   Service Unavailable: /healthz
+        # The pool only discards the corpse AFTER the request has failed.
+        # Django wires this setting to psycopg_pool's checkout validation
+        # (postgresql/base.py: check=ConnectionPool.check_connection).
+        # Costs exactly one round-trip per checkout; the handshake it
+        # replaces costs about 7.2.
+        'CONN_HEALTH_CHECKS': True,
+
+        'OPTIONS': {
+            'pool': {
+                # One Daphne process. Queries are short (~33 ms measured),
+                # so a small pool serves far more throughput than this
+                # instance can generate; sized for burst arrival, not
+                # sustained load.
+                'min_size': 2,
+                'max_size': 10,
+                # Seconds a request may wait for a free connection before
+                # raising PoolTimeout rather than hanging.
+                'timeout': 10,
+                # Recycle before anything upstream can: Neon free-tier
+                # compute auto-suspends after ~5 minutes idle. Both are
+                # handled by the pool's background worker, off the request
+                # path.
+                'max_idle': 300,
+                'max_lifetime': 1800,
+            },
+        },
     }
 }
 
@@ -266,10 +321,10 @@ REST_FRAMEWORK = {
     # ── Rate limits are a CAPACITY control here, not only a security one ──
     #
     # Phase B measured the free-tier instance to destruction. Django's ASGI
-    # handler runs every sync view on ONE thread-sensitive worker, so
-    # requests do not run in parallel — they queue. Serialised cost of a
-    # login is ~0.63 s, so the instance sustains ~1.6 logins/s and no more,
-    # whatever the arrival rate.
+    # handler runs every sync view on ONE thread-sensitive worker (proven:
+    # peak overlap 1 at 32-way concurrency), so requests do not run in
+    # parallel — they queue. Serialised cost of a login is ~0.63 s, so the
+    # instance sustains ~1.6 logins/s and no more, whatever the arrival rate.
     #
     # Measured behaviour of a single client IP:
     #     10 concurrent  ->   7.1 s, 0 failures          healthy

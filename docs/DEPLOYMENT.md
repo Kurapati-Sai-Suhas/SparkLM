@@ -348,6 +348,52 @@ usage becomes the binding constraint, the lever is to lower the ping frequency,
 **not** to make `/healthz` skip its query: a Neon wake costs a few seconds,
 whereas a Render wake costs ~93 s.
 
+## Database connection pooling (R1) — do not "restore" `CONN_MAX_AGE`
+
+`DATABASES['default']` uses a psycopg connection pool with `CONN_MAX_AGE: 0`.
+That looks backwards. It isn't, and the reason is worth reading before editing.
+
+**`CONN_MAX_AGE` never worked under Daphne.** Django's `ASGIHandler` wraps each
+request in `async with ThreadSensitiveContext()`, so every request runs its
+sync view on a *fresh* executor thread. `django.db.connections` is
+thread-critical, so each new thread starts with no connection and dials Neon
+again — a TCP + TLS + Postgres startup handshake worth ~7.2 network
+round-trips. `CONN_MAX_AGE` can only persist a connection *within* one thread,
+and the thread does not outlive the request.
+
+Measured against real Daphne:
+
+| | connections | TCP sockets to Neon for 25 requests |
+|---|---|---|
+| `CONN_MAX_AGE=60` | one per request | 26 |
+| `OPTIONS['pool']` | shared | **3** |
+
+The pool works because `psycopg_pool` lives in
+`DatabaseWrapper._connection_pools`, a **class** attribute shared by every
+per-thread wrapper, so it outlives the request threads.
+
+⚠️ **`CONN_HEALTH_CHECKS: True` is required, not cosmetic.** Neon's pooler
+drops idle connections and free-tier compute auto-suspends after ~5 min, so a
+pooled connection can be dead when handed out. With checks disabled this was
+observed twice in testing:
+
+```
+WARNING pool  discarding closed connection: <psycopg.Connection [BAD] ...>
+ERROR   log   Service Unavailable: /healthz
+```
+
+The pool discards the dead connection only *after* the request has failed.
+The check costs one round-trip; the handshake it replaces costs ~7.2.
+
+**Requires `psycopg-pool`** (in `requirements.txt`). If it is missing, Django
+raises `ImproperlyConfigured` on the first query — not at startup.
+
+Pooling and persistent connections are mutually exclusive: setting
+`CONN_MAX_AGE` back while keeping the pool raises `ImproperlyConfigured`
+immediately. The dangerous edit is *removing the pool* and restoring
+`CONN_MAX_AGE`, which fails silently and just makes everything slow again.
+`common/test_db_pooling.py` exists to catch exactly that.
+
 ## Observability (M8)
 
 - **Sentry:** create a free project at sentry.io (platform: Django), copy its

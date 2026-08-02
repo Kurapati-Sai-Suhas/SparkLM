@@ -22,6 +22,12 @@ class User(AbstractUser):
         ('admin', 'Admin'),
     )
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='student')
+    # M4 Phase A — JWT revocation. Every issued token carries this value as a
+    # claim; common.authentication rejects any token whose claim does not
+    # match. Bumping it invalidates every token for this user in one write.
+    # Free to check, because SimpleJWT already loads this row on every
+    # authenticated request. See common/tokens.py.
+    token_version = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.username

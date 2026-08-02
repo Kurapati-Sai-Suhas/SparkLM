@@ -36,8 +36,20 @@ services:
         value: https://sparklm-api.onrender.com
       - key: DRF_NUM_PROXIES
         value: "1"
+      # M4 Phase A — max requests in flight before shedding with 503.
+      # Derived from measured serialised throughput; see settings.py.
+      # 0 disables admission control entirely.
+      - key: ADMISSION_LIMIT
+        value: "12"
       - key: SECRET_KEY
         generateValue: true
+      # M4 Phase A — signs JWTs, separately from SECRET_KEY so that rotating
+      # one does not invalidate sessions and password-reset links too.
+      # ⚠ Setting or changing this logs out the entire fleet immediately:
+      # every outstanding token fails signature verification. Leave it unset
+      # to fall back to SECRET_KEY (the pre-M4 behaviour).
+      - key: JWT_SIGNING_KEY
+        sync: false
       # Paste these in the Render dashboard (sync: false = never in git):
       - key: POSTGRES_DB
         sync: false

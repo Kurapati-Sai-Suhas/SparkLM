@@ -6,13 +6,17 @@
     <link rel="icon" href="/favicon.jpg" type="image/jpeg" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Loaded non-render-blocking: the browser paints immediately with
-         the fallback font instead of waiting on this stylesheet fetch;
-         display=swap (already in the URL) then swaps to Inter once it
-         arrives, so there's no layout jump either. -->
+    <!-- Loaded non-render-blocking via preload + swap. The stylesheet link
+         below is plain (no media="print" / onload trick): that pattern needs
+         an INLINE event handler, which any useful Content-Security-Policy
+         must block, and buying it back with script-src 'unsafe-inline'
+         would weaken the whole policy to save one stylesheet round-trip.
+         The preload above still starts the fetch early, and display=swap
+         (in the URL) means the browser paints immediately with the fallback
+         and swaps to Inter on arrival — so the layout-jump protection is
+         unchanged. See studysphere-ai-11/vercel.json. -->
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
     <title>SparkLM - Adaptive AI Learning Platform</title>
     <meta name="description" content="SparkLM adapts to how you learn: an ML-routed coding hub, spaced-repetition review, and AI study tools that meet you where you are." />
     <meta name="author" content="SparkLM" />

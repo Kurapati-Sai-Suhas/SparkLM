@@ -28,8 +28,8 @@ from google.oauth2 import id_token as google_id_token
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from common.throttling import ClientIPScopedRateThrottle
+from common.tokens import issue_token_pair
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,12 @@ class GoogleAuthView(APIView):
                 user.save(update_fields=["password"])
                 created = True
 
-        refresh = RefreshToken.for_user(user)
+        # Routed through common.tokens so SSO tokens carry the same
+        # token_version claim as password logins (M4 Phase A). If this ever
+        # goes back to RefreshToken.for_user directly, SSO accounts silently
+        # become unrevocable — pinned by
+        # test_google_login_tokens_are_revocable.
+        refresh = issue_token_pair(user)
         return Response({
             "access": str(refresh.access_token),
             "refresh": str(refresh),

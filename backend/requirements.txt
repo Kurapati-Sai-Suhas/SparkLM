@@ -3,7 +3,7 @@
 # environment could not boot the app.
 
 # ── Core web stack ───────────────────────────────────────────
-Django==5.2.8
+Django==5.2.16
 djangorestframework==3.17.1
 djangorestframework-simplejwt==5.5.1
 argon2-cffi==25.1.0          # Argon2id password hashing (M3). Ships abi3 manylinux
@@ -13,7 +13,7 @@ argon2-cffi==25.1.0          # Argon2id password hashing (M3). Ships abi3 manyli
                              # or those accounts can no longer authenticate.
 django-cors-headers==4.9.0
 django-filter==25.2
-daphne==4.2.1
+daphne==4.2.2
 channels==4.3.2
 channels-redis==4.3.0        # Redis channel layer (Upstash) — settings auto-detect
 psycopg[binary,pool]==3.3.4
@@ -47,7 +47,7 @@ PyMuPDF==1.27.2.3            # imported as 'fitz' (groups/views.py) — package
                              # name differs from import name; missing pin
                              # broke every CI collection until 2026-07-16
 python-docx==1.2.0
-pillow==12.2.0
+pillow==12.3.0
 
 # ── Heavy ML extras ──────────────────────────────────────────
 # Moved to requirements-ml.txt (M6): the web tier ships torch-free

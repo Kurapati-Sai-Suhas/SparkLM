@@ -70,6 +70,12 @@ MIDDLEWARE = [
     "whitenoise.middleware.WhiteNoiseMiddleware",
     # One access-log line per API request (M8) — Daphne has no access log.
     "common.logging_middleware.AccessLogMiddleware",
+    # Bounded in-flight admission control (M4 Phase A). Placed BELOW the
+    # access log so rejections are still logged, and ABOVE session/auth so a
+    # shed request does not pay for a session lookup or a JWT verify it is
+    # not going to use. Overload becomes a fast 503 instead of a 502 issued
+    # after 20+ seconds of work has already been spent.
+    "common.middleware.AdmissionControlMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -298,8 +304,13 @@ CORS_ALLOW_CREDENTIALS = True
 
 # REST_FRAMEWORK is the master config for your API
 REST_FRAMEWORK = {
+    # SimpleJWT's authenticator plus a token_version check (M4 Phase A).
+    # The check is free: JWTAuthentication.get_user() already SELECTs the
+    # user row on every authenticated request, so revocation costs one
+    # integer comparison against data already in memory. See
+    # common/tokens.py for why the claim rides on the refresh token.
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'common.authentication.VersionedJWTAuthentication',
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 3,
@@ -371,10 +382,41 @@ REST_FRAMEWORK = {
 
 from datetime import timedelta
 
+# ── Admission control (M4 Phase A) ───────────────────────────────────────
+#
+# Maximum requests in flight before shedding with 503 + Retry-After.
+#
+# 12 is derived, not chosen. Milestone 3 measured this instance serialising
+# sync views onto one worker, so the n-th queued request waits roughly n × W:
+#
+#     10 concurrent ->   7.1 s, 0 failures        healthy
+#     20 concurrent -> 103.0 s, 0 failures        degraded but "passing"
+#     40 concurrent ->  32/40 -> 502, ~60 s outage
+#
+# 20 is where it BREAKS, not where it is usable — 103-second responses are a
+# failure with a 200 status. Sizing from acceptable wait instead:
+# W ≈ 0.6 s server-side for a login, a 10 s tolerance gives ~16, rounded down
+# to 12 for margin. Raise this only with a measurement, not a hunch.
+#
+# 0 disables the middleware entirely (logged loudly at boot).
+ADMISSION_LIMIT = int(os.getenv("ADMISSION_LIMIT", "12"))
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-    'SIGNING_KEY': SECRET_KEY,
+    # Separate signing key from SECRET_KEY (M4 Phase A).
+    #
+    # Sharing them couples three failure domains: SECRET_KEY signs session
+    # cookies and password-reset tokens as well, so rotating it to invalidate
+    # JWTs also invalidates every reset link and logs out every admin
+    # session. With a distinct key, JWT signing can be rotated on its own.
+    #
+    # Falls back to SECRET_KEY when JWT_SIGNING_KEY is unset, so this change
+    # is non-breaking: nothing is invalidated until the variable is
+    # deliberately set. ⚠ Setting or changing it IS a fleet-wide logout —
+    # every outstanding token fails signature verification. That is the
+    # intended behaviour of a key rotation, but do it knowingly.
+    'SIGNING_KEY': os.getenv("JWT_SIGNING_KEY") or SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 

@@ -409,6 +409,127 @@ immediately. The dangerous edit is *removing the pool* and restoring
 `CONN_MAX_AGE`, which fails silently and just makes everything slow again.
 `common/test_db_pooling.py` exists to catch exactly that.
 
+## JWT revocation (M4 Phase A)
+
+Every token carries a `token_version` claim, compared on each request against
+`User.token_version`. Bumping the column invalidates every token that user
+holds, immediately.
+
+**Two ways to revoke:**
+
+```bash
+# The user, for their own sessions:
+curl -X POST https://sparklm-api.onrender.com/api/auth/logout-all/ \
+     -H "Authorization: Bearer <access token>"
+```
+
+For an account the holder cannot act on (compromise, offboarding): Django
+Admin → Users → select → **"Revoke all sessions (invalidate every JWT)"**.
+
+**It costs nothing.** `JWTAuthentication.get_user()` already `SELECT`s the
+user row on every authenticated request — it must, so deactivation takes
+effect immediately. The check is one integer comparison against data already
+in memory.
+
+> ⚠️ **A token issued before this deploy has no claim, and is treated as
+> valid.** That is deliberate: rejecting them would have logged out every
+> signed-in user at deploy time. They age out within the 60-minute access
+> lifetime. `test_a_token_issued_before_this_deploy_still_works` pins it —
+> deleting that test is a decision to force a fleet-wide logout.
+
+### `JWT_SIGNING_KEY`
+
+Unset, JWT signing falls back to `SECRET_KEY` — the pre-M4 behaviour, and why
+this change broke nothing on deploy. Set it to decouple the two, so JWT
+signing can be rotated without invalidating session cookies and
+password-reset links.
+
+> ⚠️ **Setting or changing it logs out the whole fleet at once** — every
+> outstanding token fails signature verification. That is what a key rotation
+> is; do it knowingly, not as cleanup.
+
+## Admission control (M4 Phase A)
+
+`ADMISSION_LIMIT` (default **12**) caps requests in flight. Beyond it, the
+middleware returns **503 with `Retry-After: 5`** instead of queueing.
+
+Milestone 3 measured why:
+
+| Concurrency | Result |
+|---|---|
+| 10 | 7.1 s, 0 failures |
+| 20 | **103 s**, 0 failures |
+| 40 | 32/40 → 502, ~60 s outage |
+
+20 is where it *breaks*, not where it is usable — a 103-second response is a
+failure with a 200 status. Because sync views serialise here, the n-th queued
+request waits roughly n × W; at W ≈ 0.6 s and a 10-second tolerance the limit
+is ~16, rounded to 12 for margin.
+
+`/healthz` and `/api/health/` are exempt. A health check that reports failure
+under exactly the load where you need the truth would turn a busy minute into
+a deploy-level outage, since Render gates traffic on it.
+
+**Kill switch:** `ADMISSION_LIMIT=0` disables the middleware entirely and logs
+a warning at boot. Raising the limit past 12 requires re-measuring capacity —
+`test_the_shipped_limit_is_below_the_measured_failure_point` fails if the
+configured value reaches the measured degradation point.
+
+## Content-Security-Policy (M4 Phase A) — it lives at Vercel, not Django
+
+The CSP is in `studysphere-ai-11/vercel.json`, **not** in Django middleware.
+
+The XSS surface is the React SPA, which Vercel serves from a different origin.
+A CSP on JSON API responses would protect Django-rendered pages — essentially
+just the admin — and do nothing for the app. Putting it in the backend was the
+draft plan's mistake, caught in review.
+
+It ships as **`Content-Security-Policy-Report-Only`** first. Collect
+violations for at least 48 h in the browser console, fix what breaks, then
+rename the header to `Content-Security-Policy` to enforce.
+
+### What each origin is for — do not prune without checking
+
+| Origin | Directives | Why |
+|---|---|---|
+| `cdn.jsdelivr.net` | `script-src`, `style-src`, `font-src`, `connect-src` | **Monaco.** `@monaco-editor/react` loads the editor from `cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs` by default and this repo sets no `loader.config` override. Remove this and the code editor — the core product surface — stops loading. |
+| `fonts.googleapis.com` | `style-src` | Inter stylesheet (`index.html`) |
+| `fonts.gstatic.com` | `font-src` | the font files that stylesheet references |
+| `accounts.google.com` | `script-src`, `frame-src`, `connect-src` | Google Sign-In |
+| `sparklm-api.onrender.com` | `connect-src` | the API — **both** `https://` and `wss://`, or chat, notifications and collaborative editing break |
+
+`worker-src 'self' blob:` is required: Monaco spawns its language workers
+through a blob URL.
+
+`style-src` keeps `'unsafe-inline'` because Tailwind and the Radix/shadcn
+primitives set inline styles at runtime. `script-src` deliberately does
+**not** — the one inline handler in `index.html` (the `media="print"` /
+`onload` font trick) was removed instead, because buying it back with
+`script-src 'unsafe-inline'` would defeat most of the policy's value against
+XSS. That is the single most important line in this header.
+
+> **Better end state:** self-host Monaco (`vite-plugin-monaco-editor` or a
+> `loader.config({ paths: { vs: '/vs' } })` pointing at a bundled copy) and
+> drop `cdn.jsdelivr.net` from the trusted set entirely. A third-party script
+> origin in `script-src` means a jsDelivr compromise is a SparkLM compromise.
+> Logged for Milestone 4 Phase C; out of scope for Phase A, which is a
+> security *closeout*, not a build-system change.
+
+## Dependency audit (M4 Phase A)
+
+`pip-audit --strict` runs in CI as its own job — a vulnerability advisory is
+not a test failure, and folding it into the test job would make an unrelated
+CVE look like broken code.
+
+Its first run found **43 advisories across five packages**. Django, daphne and
+pillow were patch-level fixes on the same minor line and were taken
+immediately (5.2.8→5.2.16, 4.2.1→4.2.2, 12.2.0→12.3.0; suite green). Two are
+deferred with IDs, reasons and **expiry dates** in `ci.yml` — langchain and
+the deprecated PyPDF2, both needing a real upgrade with its own verification.
+
+At expiry, fix or re-justify in review. Do not extend silently, and do not
+drop `--strict` — that silences every future finding too.
+
 ## Observability (M8)
 
 - **Sentry:** create a free project at sentry.io (platform: Django), copy its

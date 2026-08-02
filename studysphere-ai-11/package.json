@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
     "@hookform/resolvers": "^3.10.0",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-accordion": "^1.2.11",

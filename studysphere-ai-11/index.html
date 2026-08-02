@@ -4,19 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/favicon.jpg" type="image/jpeg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Loaded non-render-blocking via preload + swap. The stylesheet link
-         below is plain (no media="print" / onload trick): that pattern needs
-         an INLINE event handler, which any useful Content-Security-Policy
-         must block, and buying it back with script-src 'unsafe-inline'
-         would weaken the whole policy to save one stylesheet round-trip.
-         The preload above still starts the fetch early, and display=swap
-         (in the URL) means the browser paints immediately with the fallback
-         and swaps to Inter on arrival — so the layout-jump protection is
-         unchanged. See studysphere-ai-11/vercel.json. -->
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <!-- Inter is self-hosted via @fontsource, imported in src/main.tsx.
+         There are deliberately NO font <link> tags here: the previous
+         Google Fonts markup needed fonts.googleapis.com in style-src,
+         fonts.gstatic.com in font-src, and an inline onload handler that
+         would have forced script-src 'unsafe-inline'. Self-hosting removes
+         all three at once. See studysphere-ai-11/vercel.json. -->
     <title>SparkLM - Adaptive AI Learning Platform</title>
     <meta name="description" content="SparkLM adapts to how you learn: an ML-routed coding hub, spaced-repetition review, and AI study tools that meet you where you are." />
     <meta name="author" content="SparkLM" />

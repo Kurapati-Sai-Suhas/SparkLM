@@ -484,36 +484,78 @@ A CSP on JSON API responses would protect Django-rendered pages — essentially
 just the admin — and do nothing for the app. Putting it in the backend was the
 draft plan's mistake, caught in review.
 
-It ships as **`Content-Security-Policy-Report-Only`** first. Collect
-violations for at least 48 h in the browser console, fix what breaks, then
-rename the header to `Content-Security-Policy` to enforce.
+It ships **enforcing**, not Report-Only, because it was verified in a real
+browser first (see below).
 
-### What each origin is for — do not prune without checking
+### The policy
 
-| Origin | Directives | Why |
+```
+default-src  'self'
+script-src   'self' https://accounts.google.com
+style-src    'self' 'unsafe-inline'
+img-src      'self' data: blob: https://sparklm-api.onrender.com
+font-src     'self'
+connect-src  'self' https://sparklm-api.onrender.com
+                    wss://sparklm-api.onrender.com https://accounts.google.com
+frame-src    https://accounts.google.com
+worker-src   'self' blob:
+object-src   'none'
+base-uri     'self'
+form-action  'self'
+frame-ancestors 'none'
+upgrade-insecure-requests
+```
+
+**Exactly one third-party origin: `accounts.google.com`.** It is unavoidable —
+`@react-oauth/google` injects Google's GSI client at runtime, and it needs
+`script-src` (the client), `frame-src` (the button/One Tap iframe) and
+`connect-src` (token exchange). It is a single-purpose first-party Google
+identity endpoint, not a general-purpose CDN that serves arbitrary packages.
+
+### Self-hosted, so their origins are NOT in the policy
+
+| Asset | How | Why it matters |
 |---|---|---|
-| `cdn.jsdelivr.net` | `script-src`, `style-src`, `font-src`, `connect-src` | **Monaco.** `@monaco-editor/react` loads the editor from `cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs` by default and this repo sets no `loader.config` override. Remove this and the code editor — the core product surface — stops loading. |
-| `fonts.googleapis.com` | `style-src` | Inter stylesheet (`index.html`) |
-| `fonts.gstatic.com` | `font-src` | the font files that stylesheet references |
-| `accounts.google.com` | `script-src`, `frame-src`, `connect-src` | Google Sign-In |
-| `sparklm-api.onrender.com` | `connect-src` | the API — **both** `https://` and `wss://`, or chat, notifications and collaborative editing break |
+| **Monaco** | `vite.config.ts` copies `node_modules/monaco-editor/min/vs` → `public/monaco/vs` at build; `src/main.tsx` sets `loader.config({ paths: { vs: '/monaco/vs' } })` | Otherwise `script-src https://cdn.jsdelivr.net` — a jsDelivr compromise would be arbitrary JS in SparkLM, which with tokens in `localStorage` is full account takeover. `monaco-editor` was **already** a direct dependency at the exact version the CDN served. |
+| **Inter** | `@fontsource/inter`, imported in `src/main.tsx` | Removes `fonts.googleapis.com` from `style-src` and `fonts.gstatic.com` from `font-src`. |
 
-`worker-src 'self' blob:` is required: Monaco spawns its language workers
-through a blob URL.
+`public/monaco/` is **gitignored** — a build artifact, not source. The copy is
+version-stamped, so it is skipped when current and re-copied on a
+`monaco-editor` upgrade. If `npm install` has not run, the build fails with a
+clear message rather than silently falling back to the CDN.
 
-`style-src` keeps `'unsafe-inline'` because Tailwind and the Radix/shadcn
-primitives set inline styles at runtime. `script-src` deliberately does
-**not** — the one inline handler in `index.html` (the `media="print"` /
-`onload` font trick) was removed instead, because buying it back with
-`script-src 'unsafe-inline'` would defeat most of the policy's value against
-XSS. That is the single most important line in this header.
+### `'unsafe-inline'` — used once, in `style-src` only
 
-> **Better end state:** self-host Monaco (`vite-plugin-monaco-editor` or a
-> `loader.config({ paths: { vs: '/vs' } })` pointing at a bundled copy) and
-> drop `cdn.jsdelivr.net` from the trusted set entirely. A third-party script
-> origin in `script-src` means a jsDelivr compromise is a SparkLM compromise.
-> Logged for Milestone 4 Phase C; out of scope for Phase A, which is a
-> security *closeout*, not a build-system change.
+Justification, because it should never be casual:
+
+- **Necessary.** Monaco positions its viewport, cursors and decorations with
+  runtime `style` attributes; Radix/shadcn primitives (popover, tooltip,
+  dropdown) position with inline styles from measured geometry. These are
+  computed at runtime, so hashes cannot cover them and a nonce cannot apply to
+  `style` attributes.
+- **Bounded.** CSS injection can restyle and, with attribute selectors, leak
+  limited data. It **cannot execute JavaScript**. That is a categorically
+  smaller hazard than the script equivalent.
+- **`script-src` has no `'unsafe-inline'`, and that is the line that matters.**
+  The one inline handler in `index.html` (the `media="print"` / `onload` font
+  trick) was deleted rather than allowed for. Do not add it back.
+
+### Verification performed before enforcing
+
+The production build was served locally with this exact header (only
+`connect-src` differed, pointing at a local API so login worked), driven in a
+real browser:
+
+- 13 routes visited, all rendered — **zero CSP violations**
+- **0** requests to `cdn.jsdelivr.net`; **0** to Google Fonts; **0** failed requests
+- Monaco: 12 scripts from `/monaco/vs`, `window.monaco` present, editor
+  writable, Python tokenizer loaded
+- Inter loaded from own origin; `document.fonts.status === "loaded"`
+- `document.querySelectorAll('[onload],[onclick],[onerror]').length === 0`
+
+**Re-verify after adding any third-party embed** (analytics, chat widget,
+payment iframe). Each is a new origin and the policy will block it — that is
+the policy working, not a bug.
 
 ## Dependency audit (M4 Phase A)
 

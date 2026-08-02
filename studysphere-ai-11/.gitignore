@@ -1,0 +1,5 @@
+
+# Monaco is self-hosted to keep cdn.jsdelivr.net out of script-src (M4
+# Phase A). vite.config.ts copies it here from node_modules at build time —
+# a build artifact, not source. See docs/DEPLOYMENT.md.
+public/monaco/

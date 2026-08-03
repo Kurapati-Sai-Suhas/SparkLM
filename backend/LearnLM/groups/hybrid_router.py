@@ -39,6 +39,20 @@ import os
 MASTERY_ACCURACY_THRESHOLD = 0.8
 MASTERY_MIN_REVIEWS = 3
 
+# Identifies the routing policy that produced a recommendation (M4 Phase B),
+# recorded on every RecommendationLog row.
+#
+# ⚠ BUMP THIS whenever routing behaviour changes — the features fed to
+# RoutingClassifier, the mastery rule, the candidate filter, or the Elo band
+# selection. It is the only way to tell later which policy produced a given
+# historical recommendation, and unlike counts and outcomes it CANNOT be
+# reconstructed after the fact: it depends on which code was running at
+# decision time and nothing else records that.
+#
+# Format: v<major>-<short-description>. Free text, compared for equality
+# only; nothing parses it.
+ROUTING_POLICY_VERSION = "v1-runs-test-elo-band"
+
 
 def get_mastered_topic_names(user) -> list:
     """Names of every topic the user has mastered per FR-HRCH-01."""

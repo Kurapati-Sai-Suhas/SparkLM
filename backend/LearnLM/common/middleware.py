@@ -62,6 +62,27 @@ logger = logging.getLogger(__name__)
 # throttling it would turn a busy minute into a deploy-level outage.
 EXEMPT_PATHS = frozenset({"/healthz", "/api/health/"})
 
+# Process-local counters for the /healthz operational snapshot (M4 Phase B).
+# Deliberately plain ints behind a lock rather than a metrics library: the
+# question is "has admission control ever fired, and how often", and a
+# collector agent costs the memory it would be measuring on a 512 MB
+# instance. Reset on restart, which is correct — they describe this process.
+_stats_lock = threading.Lock()
+_stats = {"admitted": 0, "rejected": 0}
+
+
+def admission_stats():
+    """Snapshot of the counters. Safe to call from any thread."""
+    with _stats_lock:
+        snapshot = dict(_stats)
+    snapshot["limit"] = int(getattr(settings, "ADMISSION_LIMIT", 0) or 0)
+    return snapshot
+
+
+def _bump(key):
+    with _stats_lock:
+        _stats[key] += 1
+
 
 class AdmissionControlMiddleware:
     """Reject beyond N in-flight requests with 503 instead of queueing."""
@@ -85,6 +106,7 @@ class AdmissionControlMiddleware:
         # Non-blocking: the entire point is to fail fast rather than join
         # the queue we are trying to bound.
         if not self._slots.acquire(blocking=False):
+            _bump("rejected")
             logger.warning(
                 "Admission control REJECTED %s %s (limit=%d in flight)",
                 request.method, request.path, self.limit,
@@ -101,6 +123,7 @@ class AdmissionControlMiddleware:
             response["Retry-After"] = "5"
             return response
 
+        _bump("admitted")
         try:
             return self.get_response(request)
         finally:

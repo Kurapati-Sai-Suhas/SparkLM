@@ -27,67 +27,18 @@ import ReviewQueueCard from '../components/ReviewQueueCard';
 import LanguageSelector, { extensionFor } from '../components/LanguageSelector';
 import ProblemDescription from '../components/ProblemDescription';
 
-// The language selector's value and the API's boilerplate_code key are not
-// always the same string: the selector uses "js" while questions store their
-// template under "javascript". Submissions were unaffected (the backend's
-// LANGUAGE_IDS accepts both spellings), which is why the mismatch stayed
-// invisible while every JavaScript user got an empty editor.
-const BOILERPLATE_KEYS: Record<string, string[]> = {
-  python: ['python'],
-  java: ['java'],
-  cpp: ['cpp'],
-  c: ['c'],
-  js: ['javascript', 'js'],
-};
-
-// Languages the server can wrap generically (see services.py): submitting a
-// Solution class alone is enough, because the harness uses runtime reflection
-// to find the method. C and C++ have no such mechanism, so unless a question
-// ships its own wrapper their code is compiled and run exactly as written and
-// must be a complete program. Telling users "no template" without saying that
-// would still leave them writing code that cannot compile.
-const SELF_CONTAINED_LANGUAGES = new Set(['c', 'cpp']);
-
-// Shown only when a problem genuinely has no template for the chosen
-// language, so the editor is never blank and never left holding the previous
-// language's code. For C/C++ this is a compilable skeleton rather than a bare
-// comment, since a bare comment cannot build.
-const EMPTY_STUB: Record<string, string> = {
-  python: '# Write your solution here\n\n',
-  java: '// Write your solution here\n\n',
-  js: '// Write your solution here\n\n',
-  cpp:
-    '#include <bits/stdc++.h>\nusing namespace std;\n\n' +
-    'int main() {\n' +
-    '    // C++ runs as a complete program: read stdin, print the answer.\n' +
-    '    // Write your code here\n' +
-    '    return 0;\n}\n',
-  c:
-    '#include <stdio.h>\n\n' +
-    'int main(void) {\n' +
-    '    /* C runs as a complete program: read stdin, print the answer. */\n' +
-    '    /* Write your code here */\n' +
-    '    return 0;\n}\n',
-};
-
-const FALLBACK_STUB = '// Write your solution here\n\n';
-
-/** The stored starter template for a language, or null if there isn't one. */
-function templateFor(boilerplate: any, lang: string): string | null {
-  if (!boilerplate || typeof boilerplate !== 'object') return null;
-  for (const key of BOILERPLATE_KEYS[lang] ?? [lang]) {
-    const template = boilerplate[key];
-    if (typeof template === 'string' && template.trim()) return template;
-  }
-  return null;
-}
-
-/** Languages this problem actually ships a usable template for. */
-function availableLanguages(boilerplate: any): string[] {
-  return Object.keys(BOILERPLATE_KEYS).filter(
-    (lang) => templateFor(boilerplate, lang) !== null,
-  );
-}
+// Template resolution moved to src/lib/editorTemplates.ts in M4 Phase B —
+// a pure move, so it could be unit-tested. It decides what a student sees
+// when the editor opens, which is where the M2 empty-editor defect lived,
+// and it had no coverage while it lived inside this component.
+import {
+  BOILERPLATE_KEYS,
+  EMPTY_STUB,
+  FALLBACK_STUB,
+  SELF_CONTAINED_LANGUAGES,
+  availableLanguages,
+  templateFor,
+} from '@/lib/editorTemplates';
 
 export default function AdaptiveCodingPortal() {
   const [searchParams, setSearchParams] = useSearchParams();

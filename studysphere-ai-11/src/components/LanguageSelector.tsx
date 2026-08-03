@@ -6,6 +6,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Code2, Check } from "lucide-react";
+import { LANGUAGE_REGISTRY } from "@/lib/editorTemplates";
 
 interface LanguageSelectorProps {
   value: string;
@@ -20,13 +21,16 @@ interface LanguageSelectorProps {
   available?: string[];
 }
 
-export const LANGUAGES: { value: string; label: string; ext: string }[] = [
-  { value: "python", label: "Python",     ext: ".py"  },
-  { value: "java",   label: "Java",       ext: ".java"},
-  { value: "cpp",    label: "C++",        ext: ".cpp" },
-  { value: "c",      label: "C",          ext: ".c"   },
-  { value: "js",     label: "JavaScript", ext: ".js"  },
-];
+// Derived from the backend registry rather than hand-maintained (M4 Phase B
+// polish). This list previously duplicated labels and extensions that
+// common/languages.py already carried, making it the third of four copies of
+// the same data. See src/lib/editorTemplates.ts.
+export const LANGUAGES: { value: string; label: string; ext: string }[] =
+  LANGUAGE_REGISTRY.map((l) => ({
+    value: l.key,
+    label: l.label,
+    ext: `.${l.extension}`,
+  }));
 
 /**
  * File extension for a language, without the leading dot.

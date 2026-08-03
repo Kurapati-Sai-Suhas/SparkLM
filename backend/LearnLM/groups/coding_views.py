@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from common import languages
 from common.throttling import ClientIPScopedRateThrottle
 
 # Import Models
@@ -21,6 +22,7 @@ from .models import CodingPortal
 
 # Import AI Engines & Services
 from .hybrid_router import (
+    ROUTING_POLICY_VERSION,
     HierarchicalEngine,
     compute_routing_telemetry, get_mastered_topic_names,
 )
@@ -33,16 +35,13 @@ USE_REAL_SHAP = os.environ.get('ENABLE_SHAP_XAI', 'false') == 'true'
 logger = logging.getLogger(__name__)
 
 
-LANGUAGE_IDS = {
-    "python":     71,
-    "java":       62,
-    "cpp":        54,
-    "c":          50,
-    "js":         63,
-    # The serializer validates 'javascript' but this map only had 'js',
-    # so every JS submission errored with "Unsupported language".
-    "javascript": 63,
-}
+# Derived from common.languages (M4 Phase B) rather than hand-maintained.
+# This map and the serializer's allowed set drifted twice: 'js' was here
+# without 'javascript' (breaking every JS submission), and 'c' was in here
+# but missing from the serializer (breaking every C submission). One
+# registry, so they cannot disagree again. Name kept for existing call
+# sites and tests.
+LANGUAGE_IDS = languages.LANGUAGE_IDS
 
 # Host and base URL are config-driven; the host header MUST match the
 # RapidAPI product the key is registered for (settings.py previously
@@ -229,7 +228,20 @@ class CodeSubmitView(APIView):
         except (Question.DoesNotExist, ValueError):
             return Response({"error": "Question not found"}, status=404)
         if not question.hidden_test_cases:
-            return Response({"error": "Question misconfigured: no test cases"}, status=500)
+            # 409, not 500 (M4 Phase B). A question with no test cases is a
+            # data-integrity condition, not a server fault: the code is
+            # behaving correctly and the client can do nothing about it
+            # either way. Reporting it as 500 polluted error metrics with a
+            # content problem and made real faults harder to see.
+            #
+            # _servable_questions() already excludes these from every
+            # recommendation path, so reaching this means the client asked
+            # for a specific unservable question by id.
+            return Response(
+                {"error": "Question misconfigured: no test cases",
+                 "detail": "question_not_gradable"},
+                status=409,
+            )
 
         # The runner is resolved from module globals at request time, so
         # the test seam (monkeypatching coding_views._run_on_judge0) keeps
@@ -436,7 +448,11 @@ class NextProblemView(APIView):
             recommended_topic=question.topic,
             engine_used=route_decision,
             predicted_success_prob=prob,
-            problem_id=str(question.pk)
+            problem_id=str(question.pk),
+            # M4 Phase B: which policy chose this. Bump
+            # ROUTING_POLICY_VERSION in hybrid_router.py when routing
+            # behaviour changes — this cannot be backfilled.
+            policy_version=ROUTING_POLICY_VERSION,
         )
 
         # 🤖 AI TEST CASE GENERATION FALLBACK

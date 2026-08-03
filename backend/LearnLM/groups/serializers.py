@@ -2,6 +2,8 @@ from rest_framework import serializers
 from .models import StudyGroup, StudyMaterial, QuizResult, Connection, AssignedQuiz, CodingPortal, Profile
 from django.contrib.auth import get_user_model
 
+from common import languages
+
 User = get_user_model()
 
 class StudyGroupMiniSerializer(serializers.ModelSerializer):
@@ -136,7 +138,12 @@ class ConnectionSerializer(serializers.ModelSerializer):
 # 👇 NEW: API Validation Serializers for AI and Coding
 from .models import Question
 
-ALLOWED_LANGUAGES = {'python', 'java', 'cpp', 'javascript'}
+# Derived from common.languages (M4 Phase B), not hand-maintained. The
+# hardcoded set this replaces omitted 'c' and 'js', so the serializer
+# rejected every C submission — while Judge0 had an id for it, the content
+# pipeline generated C stubs, and the frontend offered C in the language
+# picker. Retained under the original name so existing imports still work.
+ALLOWED_LANGUAGES = languages.ACCEPTED_SPELLINGS
 
 class CodeSubmitSerializer(serializers.Serializer):
     # NOTE: no test_cases field. Grading always reads hidden test cases from

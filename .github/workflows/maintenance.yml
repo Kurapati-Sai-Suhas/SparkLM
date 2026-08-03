@@ -1,0 +1,75 @@
+# Periodic maintenance sweep (M4 Phase B).
+#
+# Milestone 3 left two time-dependent commands that nothing invoked. In
+# production, 60 of 66 UserTopicMastery rows had never been decayed — so
+# /api/review/queue/, which reads that model, was serving state that had not
+# changed since the rows were created.
+#
+# ── Why GitHub Actions and not Celery beat ────────────────────────────────
+# Celery needs a worker tier and a second Redis, both of which the frozen
+# architecture places in Phase C+. An in-process scheduler is worse still:
+# the instance sleeps after ~15 minutes idle (which is why keepalive.yml
+# exists), so an in-process timer would simply not fire, and would occupy
+# the single serialised worker when it did. Actions cron already runs the
+# warm-keeper successfully.
+#
+# ── Why cron throttling is tolerable here, unlike the warm-keeper ─────────
+# Free-tier Actions cron was measured firing at 54-213 minute gaps against a
+# 5-minute schedule. keepalive.yml needed an in-run loop because Render's
+# idle timeout is ~15 minutes. Decay is daily-granularity and checkpointed
+# (EloEngine.apply_time_decay charges only after 7+ days of inactivity and
+# records last_decay_applied_at), so a late run is harmless and a re-run
+# never double-charges. Lateness is visible via the heartbeat on /healthz
+# rather than needing to be prevented.
+
+name: SparkLM Maintenance
+
+on:
+  schedule:
+    # 03:17 UTC — off the hour, because everyone schedules on the hour and
+    # free-tier runners are most contended there.
+    - cron: "17 3 * * *"
+  workflow_dispatch:        # manual trigger for debugging a failed sweep
+
+concurrency:
+  group: maintenance
+  cancel-in-progress: false   # a late run must not kill the one in flight
+
+jobs:
+  maintenance:
+    name: Decay sweep + review notifications
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      # Runs against PRODUCTION. Secrets are repository secrets, never in
+      # git. If POSTGRES_HOST is unset the command fails fast on connection
+      # rather than silently sweeping an empty local database and writing a
+      # heartbeat that says everything is fine.
+      - name: Run maintenance
+        working-directory: backend/LearnLM
+        env:
+          DJANGO_DEBUG: "false"
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          DJANGO_ALLOWED_HOSTS: sparklm-api.onrender.com
+        run: python manage.py run_maintenance

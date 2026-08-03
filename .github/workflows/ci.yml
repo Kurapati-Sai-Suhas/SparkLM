@@ -52,6 +52,18 @@ jobs:
       run: |
         python -m compileall -q backend/LearnLM
 
+    # The frontend's language registry is generated from
+    # common/languages.py. Drift means the picker and the backend disagree,
+    # which is user-visible: a language offered in the UI but rejected on
+    # submit. Fails the build rather than waiting for someone to notice.
+    - name: Language registry is in sync
+      working-directory: backend/LearnLM
+      env:
+        POSTGRES_HOST: 127.0.0.1
+        SECRET_KEY: ci-only-secret-key
+      run: |
+        python manage.py export_languages --check
+
     - name: Run test suite
       working-directory: backend/LearnLM
       env:
@@ -127,6 +139,12 @@ jobs:
     - name: Install dependencies
       working-directory: studysphere-ai-11
       run: npm ci --legacy-peer-deps
+
+    # Runs before the build: a failing unit test should be reported as a
+    # failing test, not as a build that happened to come after one.
+    - name: Frontend unit tests (Vitest)
+      working-directory: studysphere-ai-11
+      run: npm test
 
     - name: Build frontend
       working-directory: studysphere-ai-11

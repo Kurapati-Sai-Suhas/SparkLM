@@ -11,7 +11,26 @@ from rest_framework.test import APIClient
 def test_healthz_is_public_and_reports_ok():
     response = APIClient().get(reverse("healthz"))
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+
+
+@pytest.mark.django_db
+def test_healthz_payload_stays_disciplined():
+    """
+    Replaces an exact-equality assertion on {"status": "ok"}.
+
+    M4 Phase B added in-memory admission counters to the default payload, so
+    equality no longer holds — but the property that assertion was really
+    protecting does: this endpoint is PUBLIC and unauthenticated, so its
+    payload must stay a short, known set of operational fields and never
+    accrue anything useful to someone mapping the service.
+
+    Adding a key here is a deliberate act. If this fails, decide whether the
+    new field belongs on a public endpoint at all — and if it costs a query,
+    put it behind ?ops=1 (see TestHotPathStaysCheap in test_ops_snapshot.py).
+    """
+    body = APIClient().get(reverse("healthz")).json()
+    assert set(body) == {"status", "admission"}
 
 
 @pytest.mark.django_db

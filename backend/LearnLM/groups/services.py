@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 
 from django.db import transaction
 
+from common import languages
 from .engines.agentic_coach import trigger_agentic_coach
 from .engines.elo_engine import EloEngine
 from .engines.hlr_engine import HLREngine
@@ -240,9 +241,14 @@ try {
 # per-question wrapper must therefore be found under either spelling —
 # otherwise a submission silently falls through to the generic harness and is
 # graded against the wrong scaffolding.
+# Derived from common.languages (M4 Phase B). Seed data files a template
+# under any accepted spelling depending on which generation produced it, so
+# the lookup tries every spelling the registry knows for that language.
+# Name kept: test_wrapper_contract.py imports it.
 WRAPPER_LANGUAGE_ALIASES = {
-    "js": ("js", "javascript"),
-    "javascript": ("javascript", "js"),
+    spelling: lang.spellings
+    for lang in languages.REGISTRY
+    for spelling in lang.spellings
 }
 
 
@@ -255,7 +261,7 @@ def wrapper_for(question, lang_key):
     wrappers = getattr(question, "hidden_wrapper_code", None) or {}
     if not isinstance(wrappers, dict):
         return None
-    for key in WRAPPER_LANGUAGE_ALIASES.get(lang_key, (lang_key,)):
+    for key in languages.wrapper_spellings(lang_key):
         template = wrappers.get(key)
         if isinstance(template, str) and template.strip():
             return template

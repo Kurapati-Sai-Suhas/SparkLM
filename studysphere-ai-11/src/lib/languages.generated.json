@@ -1,0 +1,57 @@
+{
+  "_comment": "GENERATED from backend/LearnLM/common/languages.py by `manage.py export_languages`. Do not edit by hand \u2014 CI regenerates and fails on drift.",
+  "languages": [
+    {
+      "key": "python",
+      "backendKey": "python",
+      "label": "Python",
+      "extension": "py",
+      "spellings": [
+        "python"
+      ],
+      "selfContained": false
+    },
+    {
+      "key": "java",
+      "backendKey": "java",
+      "label": "Java",
+      "extension": "java",
+      "spellings": [
+        "java"
+      ],
+      "selfContained": false
+    },
+    {
+      "key": "cpp",
+      "backendKey": "cpp",
+      "label": "C++",
+      "extension": "cpp",
+      "spellings": [
+        "cpp",
+        "c++"
+      ],
+      "selfContained": true
+    },
+    {
+      "key": "c",
+      "backendKey": "c",
+      "label": "C",
+      "extension": "c",
+      "spellings": [
+        "c"
+      ],
+      "selfContained": true
+    },
+    {
+      "key": "js",
+      "backendKey": "javascript",
+      "label": "JavaScript",
+      "extension": "js",
+      "spellings": [
+        "javascript",
+        "js"
+      ],
+      "selfContained": false
+    }
+  ]
+}

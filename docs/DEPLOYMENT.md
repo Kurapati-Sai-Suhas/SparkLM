@@ -572,6 +572,85 @@ the deprecated PyPDF2, both needing a real upgrade with its own verification.
 At expiry, fix or re-justify in review. Do not extend silently, and do not
 drop `--strict` — that silences every future finding too.
 
+## Maintenance sweep (M4 Phase B)
+
+`.github/workflows/maintenance.yml` runs `manage.py run_maintenance` daily at
+03:17 UTC against production. It is the only scheduled job besides the
+warm-keeper.
+
+```bash
+python manage.py run_maintenance              # decay + review notifications
+python manage.py run_maintenance --dry-run    # report, write nothing
+python manage.py run_maintenance --only calculate_decay
+```
+
+**Required repository secrets:** `SECRET_KEY`, `POSTGRES_DB`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`, `REDIS_URL`. If
+`POSTGRES_HOST` is missing the job fails on connection rather than sweeping an
+empty database and writing a heartbeat that says everything is fine.
+
+### Checking it actually ran
+
+```bash
+curl -s https://sparklm-api.onrender.com/healthz?ops=1
+```
+
+```json
+{"status": "ok",
+ "admission": {"admitted": 1423, "rejected": 0, "limit": 12},
+ "maintenance": {"last_run_age_seconds": 41230, "succeeded": true}}
+```
+
+An age above ~36 h means the sweep has stopped. **A stale heartbeat does not
+make `/healthz` return 503** — widening a health check's failure conditions is
+how a monitoring signal becomes an outage, and Render gates traffic on this
+endpoint.
+
+> `?ops=1` is opt-in because it costs a database read. The default path stays
+> at exactly one query: this is the most-polled endpoint in the system (Render's
+> check plus the warm-keeper every 5 min for 45 min per run) and the heartbeat
+> changes once a day. `test_the_default_path_makes_exactly_one_query` pins it.
+
+### Sub-tasks are independent
+
+`calculate_decay` failing must not stop `send_spaced_repetition`, and neither
+must stop the heartbeat being written — a run that crashes before recording
+looks identical to a run that never started, which is the ambiguity the
+heartbeat exists to remove. The process still exits non-zero if any sub-task
+fails, so the workflow goes red: heartbeat for humans, exit code for CI.
+
+> ⚠️ **`send_spaced_repetition` was a stub until Phase B.** It pushed
+> notifications built from three hardcoded constants (`"Arrays"`, 9 days, 8
+> reviews) to *every* user, with the real `UserTopicMastery` query commented
+> out. Nothing scheduled it, which is the only reason nobody received them.
+> It now reads real mastery rows and uses `learning/memory.py` — the same
+> retention curve `/api/review/queue/` uses, so the notification and the queue
+> cannot disagree about the same topic.
+
+## Language support (M4 Phase B)
+
+`common/languages.py` is the single source of truth. To add a language, add one
+`Language(...)` row; the serializer's accepted set, the Judge0 id map and the
+wrapper alias table all derive from it.
+
+Before this, language identity was a bare string in four places that drifted
+apart three times:
+
+| Bug | Symptom |
+|---|---|
+| `LANGUAGE_IDS` had `js`, not `javascript` | every JavaScript submission failed |
+| `hidden_wrapper_code` keys varied by seed generation | wrapper lookups missed |
+| `ALLOWED_LANGUAGES` omitted **`c`** | **every C submission rejected** — while the UI offered C, the content pipeline generated C stubs, and Judge0 had an id |
+
+The third was found while building the registry and had been live. The
+consistency tests in `common/test_languages.py` are what prevent a fourth: they
+assert every accepted spelling has a Judge0 id and a wrapper entry, in both
+directions.
+
+**The frontend mirrors this in `src/lib/editorTemplates.ts`.** There is no
+shared artifact across the language boundary, so adding a language needs both
+edits; `editorTemplates.test.ts` pins the set on that side.
+
 ## Observability (M8)
 
 - **Sentry:** create a free project at sentry.io (platform: Django), copy its

@@ -418,6 +418,17 @@ class RecommendationLog(models.Model):
     problem_id = models.CharField(max_length=100, null=True, blank=True) # The specific problem recommended
     actual_result_correct = models.BooleanField(null=True, blank=True) # Populated after they submit
     created_at = models.DateTimeField(auto_now_add=True)
+    # Which routing policy produced this recommendation (M4 Phase B).
+    #
+    # The one piece of attribution that cannot be reconstructed later: it
+    # depends on which code was running at decision time, and nothing else
+    # records that. Item counters were deliberately NOT added alongside it
+    # because they ARE derivable — COUNT over CodeSubmission reproduces them
+    # exactly, so they can wait for the milestone that uses them.
+    #
+    # Nullable: the 177 rows that predate this stay valid, and a null means
+    # "before policy versioning" rather than "unknown policy".
+    policy_version = models.CharField(max_length=32, null=True, blank=True)
 
     class Meta:
         indexes = [

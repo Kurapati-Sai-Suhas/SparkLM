@@ -177,16 +177,25 @@ def extract_images_from_document(file_obj, filename):
     """
     Cracks open PDFs and DOCX files to extract raw images directly from memory.
     Returns a list of io.BytesIO image objects ready for MobileNetV2.
+
+    Best-effort: always returns a list, never raises. The caller runs inside
+    an upload, and losing a user's file because one diagram could not be
+    read is never the right trade.
     """
     images = []
-    file_bytes = file_obj.read()
-    file_obj.seek(0)  # CRITICAL: Reset pointer so Django can still save the original file
-    
     lower_name = filename.lower()
-    
+
     try:
+        # Inside the try. This read was previously above it, so an I/O error
+        # here escaped the function and 500'd the upload — reachable on
+        # Render's ephemeral filesystem, where a file can vanish between
+        # request and read. Found by a regression test that stubbed this
+        # function to raise and got a 500 instead of a logged warning.
+        file_bytes = file_obj.read()
+        file_obj.seek(0)  # reset so Django can still save the original file
+
         if lower_name.endswith('.pdf'):
-            print(f"📄 Scanning PDF: {filename} for diagrams...")
+            logger.info("Scanning PDF %s for diagrams", filename)
             pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
             for page_num in range(len(pdf_doc)):
                 page = pdf_doc.load_page(page_num)
@@ -196,16 +205,19 @@ def extract_images_from_document(file_obj, filename):
                     images.append(io.BytesIO(base_image["image"]))
                     
         elif lower_name.endswith('.docx'):
-            print(f"📝 Unzipping DOCX: {filename} for diagrams...")
+            logger.info("Unzipping DOCX %s for diagrams", filename)
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as docx_zip:
                 for item in docx_zip.namelist():
                     # Microsoft Word secretly stores all images in this internal folder
                     if item.startswith('word/media/') and item.lower().endswith(('.png', '.jpeg', '.jpg')):
                         images.append(io.BytesIO(docx_zip.read(item)))
-    except Exception as e:
-        print(f"⚠️ Extraction warning for {filename}: {e}")
-        
-    print(f"🔍 Found {len(images)} images hidden inside {filename}")
+    except Exception:
+        # Best-effort by design: a document whose images cannot be read must
+        # still upload. Logged rather than printed so a systematic failure
+        # is visible in Sentry instead of lost on stdout.
+        logger.exception("Image extraction failed for %s", filename)
+
+    logger.info("Found %d embedded images in %s", len(images), filename)
     return images
 
 
@@ -307,8 +319,15 @@ class MaterialViewSet(viewsets.ModelViewSet):
             images_to_index.append((material.file, material.title))
         
         elif file_name.endswith(('.pdf', '.docx')):
-            # It's a document, rip the images out of it!
-            extracted_images = extract_images_from_document(material.file, file_name)
+            # It's a document, rip the images out of it. The helper is
+            # best-effort and returns [] on any failure, but the call is
+            # guarded too: a stubbed or future version that raises must not
+            # cost the user their upload.
+            try:
+                extracted_images = extract_images_from_document(material.file, file_name)
+            except Exception:
+                logger.exception("Image extraction raised for material=%s", material.pk)
+                extracted_images = []
             for idx, img_bytes in enumerate(extracted_images):
                 # Give each extracted diagram a unique name (e.g., "Chapter 3 - Diagram 1")
                 images_to_index.append((img_bytes, f"{material.title} - Diagram {idx + 1}"))
@@ -316,26 +335,38 @@ class MaterialViewSet(viewsets.ModelViewSet):
         # 3. INDEXING: Pass everything we found through MobileNetV2
         for img_data, img_title in images_to_index:
             try:
-                print(f"🤖 Auto-indexing '{img_title}' for AI Semantic Search...")
+                logger.info("Auto-indexing %r for semantic search", img_title)
                 vector = VectorSearchService.extract_vector(img_data)
-                
-                # 👈 THE FIX: We must save the extracted bytes as a real .jpg file so the browser can render it!
+
+                # Save the extracted bytes as a real .jpg so the browser can render it
                 img_data.seek(0)
                 safe_filename = img_title.replace(" ", "_").replace("/", "_") + ".jpg"
                 actual_image_file = ContentFile(img_data.read(), name=safe_filename)
-                
+
                 Document.objects.create(
                     group=material.study_group,
                     uploaded_by=self.request.user,
                     title=img_title,
-                    file=actual_image_file,  # Link to the newly created JPG file!
+                    file=actual_image_file,
                     file_type='image',
-                    feature_vector=json.dumps(vector),
+                    # `vector`, not json.dumps(vector). feature_vector is a
+                    # pgvector VectorField and rejects a JSON string with
+                    # ValueError("could not convert string to float") — which
+                    # the bare `except` below then swallowed. Every diagram
+                    # extracted from an uploaded PDF or DOCX silently failed
+                    # to index. VisualSearchUploadView always passed the list
+                    # correctly, which is why explicit uploads worked and
+                    # this path did not.
+                    feature_vector=vector,
                 )
-            except Exception as e:
-                print(f"❌ AI Indexing failed for {img_title}: {e}")
-                
-        print("✅ Pipeline execution complete!")
+            except Exception:
+                # Still non-fatal — one malformed diagram must not fail the
+                # whole upload — but no longer silent. This ran for months
+                # printing to stdout, where nothing was watching; the defect
+                # above survived precisely because the failure was invisible.
+                logger.exception("Auto-indexing failed for %r", img_title)
+
+        logger.info("Upload pipeline complete for material=%s", material.pk)
 
 
 # ─────────────────────────────────────────────────────────────

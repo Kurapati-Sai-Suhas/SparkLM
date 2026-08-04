@@ -4,6 +4,19 @@ from rest_framework.permissions import IsAuthenticated
 from .models import DirectMessage, User, Connection
 from django.db.models import Q
 
+
+def are_connected(user, other):
+    """
+    True if `user` and `other` have an accepted Connection (M4 WP5).
+
+    Direction-agnostic: a friendship is one row, and which side sent the
+    request is irrelevant to whether they may message each other.
+    """
+    return Connection.objects.filter(
+        (Q(sender=user, receiver=other) | Q(sender=other, receiver=user)),
+        status='accepted',
+    ).exists()
+
 class DirectMessageFriendsView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -58,6 +71,14 @@ class DirectMessageView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=404)
 
+        # Reading was already safe — the query below is filtered to the
+        # pair, so a stranger's thread returns an empty list rather than
+        # anyone else's messages. The connection check is applied anyway so
+        # read and write agree on who counts as a correspondent, and so a
+        # blocked/removed friend cannot keep polling the thread.
+        if not are_connected(request.user, friend):
+            return Response({"error": "User not found"}, status=404)
+
         DirectMessage.objects.filter(sender=friend, receiver=request.user, is_read=False).update(is_read=True)
 
         messages = DirectMessage.objects.filter(
@@ -89,6 +110,13 @@ class DirectMessageView(APIView):
         try:
             friend = User.objects.get(id=friend_id)
         except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+
+        # An accepted Connection is required to send (M4 WP5). Without it,
+        # any authenticated user could deliver messages to any user id —
+        # measured: 200, and the row was written. 404 rather than 403 so a
+        # stranger's id is indistinguishable from a nonexistent one.
+        if not are_connected(request.user, friend):
             return Response({"error": "User not found"}, status=404)
 
         msg = DirectMessage.objects.create(

@@ -45,6 +45,46 @@ class StudyGroup(models.Model):
     # 🚀 V2 ARCHITECTURE: Groups can now subscribe to multiple global portals
     active_portals = models.ManyToManyField('CodingPortal', related_name='subscribed_groups', blank=True)
 
+    # Alphabet excludes look-alikes (0/O, 1/I/L) so a code read aloud or
+    # copied off a screen still works — this is shared verbally.
+    JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    JOIN_CODE_LENGTH = 10
+
+    @classmethod
+    def generate_join_code(cls):
+        """
+        A unique join code (M4 WP5).
+
+        31**10 ≈ 8.2e14 possibilities, drawn from `secrets`. The codes this
+        replaces were chosen by the client — creators typed short memorable
+        ones, and one frontend path used Math.random() — and a guessed code
+        grants full membership to a group's materials, chat and quizzes.
+
+        Retries on collision rather than trusting the loop: the unique
+        constraint on the column is still the authority, and at this
+        cardinality a collision is a curiosity, not a design concern.
+        """
+        import secrets
+        for _ in range(10):
+            code = "".join(
+                secrets.choice(cls.JOIN_CODE_ALPHABET)
+                for _ in range(cls.JOIN_CODE_LENGTH)
+            )
+            if not cls.objects.filter(join_code=code).exists():
+                return code
+        raise RuntimeError("Could not allocate a unique join code")
+
+    def save(self, *args, **kwargs):
+        # Generated here rather than only in the serializer so every creation
+        # path gets a code — API, admin, management commands, fixtures.
+        # An explicitly-set code is still honoured, which is what lets
+        # fixtures and tests pin a known value; the API cannot reach that
+        # path any more because the serializer marks the field read-only.
+        # Existing groups keep their codes — nothing is rotated.
+        if not self.join_code:
+            self.join_code = self.generate_join_code()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.name
 
@@ -63,6 +103,20 @@ class StudyMaterial(models.Model):
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     study_group = models.ForeignKey(StudyGroup, on_delete=models.CASCADE, related_name='files')
     upload_date = models.DateTimeField(auto_now_add=True)
+    # Text extracted from `file` once, at upload (M4 Phase C).
+    #
+    # Two problems, one field. Measured on a 212 KB PDF: extraction costs
+    # 398 ms and chunking costs 0.5 ms, so re-reading the file was 99.9% of
+    # the per-request preparation in RAGDoubtView — and it was paid on every
+    # question. And because Render's filesystem is ephemeral (no persistent
+    # disk; see docs/FEATURE_FLAGS.md), the file itself disappears on the
+    # next deploy, which broke RAG for every material older than the last
+    # restart. Text held here is in Postgres, so it survives.
+    #
+    # Blank means "not extracted yet" — the read path falls back to reading
+    # the file, so this is additive and older rows keep working exactly as
+    # before.
+    extracted_text = models.TextField(blank=True, default="")
 
     def __str__(self):
         return self.title

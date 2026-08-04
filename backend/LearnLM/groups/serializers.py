@@ -89,6 +89,13 @@ class StudyGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudyGroup
         fields = ['id', 'name', 'description', 'creator', 'members', 'join_code', 'created_at', 'capacity', 'active_portals']
+        # join_code is now server-generated (M4 WP5). It was client-supplied
+        # and unique, so creators picked their own — "AAA1", "TEST", or the
+        # frontend's Math.random() — and a guessed code grants full
+        # membership: materials, chat, quizzes, and the group's search index.
+        # Read-only here; StudyGroup.save() mints it. Still returned in the
+        # payload, so the creator can share it exactly as before.
+        read_only_fields = ['join_code']
 
 class StudyMaterialSerializer(serializers.ModelSerializer):
     study_group = StudyGroupMiniSerializer(read_only=True)
@@ -117,9 +124,14 @@ class AssignedQuizSerializer(serializers.ModelSerializer):
         read_only_fields = ['assigned_by', 'assigned_at'] 
 
 class UserBasicSerializer(serializers.ModelSerializer):
+    # `email` removed (M4 WP3). This serializer renders OTHER people: it
+    # backs /api/users/search/ (any 3-character substring, no relationship
+    # required) and ConnectionSerializer. Including the address made every
+    # user's email harvestable by any authenticated account — measured.
+    # No frontend consumer reads it; search renders username and name.
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name']
+        fields = ['id', 'username', 'first_name', 'last_name']
 
 class ProfileSerializer(serializers.ModelSerializer):
     user = UserBasicSerializer(read_only=True)
@@ -174,4 +186,4 @@ class HybridRouterSerializer(serializers.Serializer):
     )
     elo_rating = serializers.FloatField(required=False, default=1200.0)
     question_difficulty = serializers.FloatField(required=False, allow_null=True)
-    got_correct = serializers.BooleanField(required=False, allow_null=True)
+    got_correct = serializers.BooleanField(required=False, allow_null=True)

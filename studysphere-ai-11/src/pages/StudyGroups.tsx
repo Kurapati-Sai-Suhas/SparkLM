@@ -39,7 +39,6 @@ export default function StudyGroups() {
   // Inputs
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupDesc, setNewGroupDesc] = useState("");
-  const [newGroupCode, setNewGroupCode] = useState("");
   const [newGroupCapacity, setNewGroupCapacity] = useState(10);
   const [joinCode, setJoinCode] = useState("");
 
@@ -70,13 +69,11 @@ export default function StudyGroups() {
       await groupsAPI.create({
         name: newGroupName,
         description: newGroupDesc,
-        join_code: newGroupCode,
         capacity: newGroupCapacity,
       });
       alert("Group Created! 🎉");
       setNewGroupName("");
       setNewGroupDesc("");
-      setNewGroupCode("");
       setNewGroupCapacity(10);
       setPage(1);
       fetchGroups(1);
@@ -305,20 +302,13 @@ export default function StudyGroups() {
                       />
                     </div>
 
+                    {/* The "Secret Code" input is gone: join codes are now
+                        generated server-side (M4 WP5). Typed codes were
+                        short and memorable — "pass123" was the placeholder —
+                        and a guessed code grants full group membership. The
+                        generated code is shown on the group card as soon as
+                        the group exists, so sharing it is unchanged. */}
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-semibold">
-                          Secret Code
-                        </Label>
-                        <Input
-                          data-testid="create-code-input"
-                          value={newGroupCode}
-                          onChange={(e) => setNewGroupCode(e.target.value)}
-                          placeholder="pass123"
-                          required
-                          className={`${sleekInput} font-mono`}
-                        />
-                      </div>
                       <div className="space-y-1.5">
                         <Label className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-semibold">
                           Capacity

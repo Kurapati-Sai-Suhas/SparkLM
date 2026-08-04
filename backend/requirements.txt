@@ -57,3 +57,12 @@ pillow==12.3.0
 # ── Testing ──────────────────────────────────────────────────
 pytest==9.1.1
 pytest-django==4.12.0
+
+# ── Object storage (M5 Phase 3) ──────────────────────────────
+# S3-compatible durable storage. Render's filesystem is ephemeral, so
+# uploads did not survive a deploy. django-storages speaks the S3 API, so
+# Cloudflare R2 / Backblaze B2 / AWS S3 / MinIO are the same code path and
+# differ only in AWS_S3_ENDPOINT_URL. Inert until AWS_STORAGE_BUCKET_NAME
+# is set — development and CI keep using FileSystemStorage.
+django-storages==1.14.6
+boto3==1.40.47

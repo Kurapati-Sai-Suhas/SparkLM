@@ -101,6 +101,11 @@ requires the worker tier and an ONNX inference path (`export_onnx.py`), which is
 | `N8N_WEBHOOK_URL` | Agentic coach. | Falls back to static hints. |
 | `SENTRY_DSN` | Error tracking. | No-ops when unset. |
 | `EMAIL_HOST_{USER,PASSWORD}` | SMTP for the settings test-email endpoint. | Test email fails. |
+| `AWS_STORAGE_BUCKET_NAME` | **The switch for durable object storage (M5 Phase 3).** Unset ⇒ `FileSystemStorage`, i.e. uploads do not survive a deploy. Set ⇒ private S3-compatible bucket + signed URLs. | Uploads revert to the ephemeral disk; existing objects in the bucket become unreachable, though nothing is deleted. |
+| `AWS_S3_ENDPOINT_URL` | S3-compatible endpoint. This is the only vendor-specific value — Cloudflare R2, Backblaze B2, AWS S3 and MinIO all work. Unset ⇒ real AWS S3. | Wrong endpoint ⇒ every upload and signature fails. |
+| `AWS_S3_REGION_NAME` | Region. `auto` for R2. | Signature mismatch on providers that validate region. |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Bucket credentials. **Scope them to the one bucket** — they can read every object in it. | Uploads and signing fail; the app degrades to results without links rather than erroring. |
+| `SIGNED_URL_TTL` | Seconds a download URL stays valid. Default `300`. | Longer ⇒ a leaked URL is useful for longer; a URL that outlives the session recreates the unauthenticated `/media/` problem. Do not raise without a reason. |
 
 ---
 

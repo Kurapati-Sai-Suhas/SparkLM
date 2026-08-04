@@ -276,6 +276,58 @@ if not DEBUG:
     STORAGES["staticfiles"] = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
     }
+
+# ── Durable object storage (M5 Phase 3) ──────────────────────────────────
+#
+# Render's filesystem is ephemeral: every deploy discards uploaded files, so
+# download, preview and the vision path have been breaking on each restart
+# and four pre-Phase-C materials have lost their files permanently.
+#
+# Provider-agnostic on purpose. django-storages speaks the S3 API, so
+# Cloudflare R2, Backblaze B2, AWS S3 and MinIO differ only in
+# AWS_S3_ENDPOINT_URL. Nothing here names a vendor.
+#
+# Unconfigured => FileSystemStorage, so development and CI need no
+# credentials and no network. Setting AWS_STORAGE_BUCKET_NAME is the single
+# switch that turns this on.
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "")
+AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL") or None
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "auto")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+
+# Lifetime of a signed download URL. Short deliberately: a URL that outlives
+# the session is the unauthenticated /media/ problem again with extra steps.
+SIGNED_URL_TTL = int(os.getenv("SIGNED_URL_TTL", "300"))
+
+# Defined unconditionally so the security-critical options are always
+# assertable. Guarding them only inside `if AWS_STORAGE_BUCKET_NAME` meant
+# the test that checks them SKIPPED in every environment that does not have
+# a bucket — i.e. CI and development, which is everywhere the check would
+# actually run. Mutation testing caught that: flipping default_acl to
+# public-read was not detected by anything.
+S3_STORAGE_OPTIONS = {
+    # PRIVATE BUCKET. `default_acl=None` leaves objects governed by the
+    # bucket policy rather than stamping them public-read, and
+    # querystring_auth=True means .url is a signed URL, never a bare public
+    # one. Both are load-bearing: the M4 audit proved a leaked /media/ link
+    # was a permanent, unrevocable handle to the bytes.
+    "default_acl": None,
+    "querystring_auth": True,
+    "querystring_expire": SIGNED_URL_TTL,
+    # Never overwrite: two materials named notes.pdf must not collide, and
+    # an overwrite would silently destroy the first user's file.
+    "file_overwrite": False,
+    # R2 and most S3-compatibles require virtual-hosted addressing.
+    "addressing_style": "virtual",
+    "signature_version": "s3v4",
+}
+
+if AWS_STORAGE_BUCKET_NAME:
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": dict(S3_STORAGE_OPTIONS),
+    }
 # In DEBUG, serve straight from the app's static dirs per request instead
 # of pre-scanning a STATIC_ROOT that may not have been collected yet.
 WHITENOISE_AUTOREFRESH = DEBUG

@@ -126,6 +126,11 @@ MATRIX = {
     # ── material-scoped ─────────────────────────────────────────────────
     "studymaterial-list": MATERIAL_SCOPED,
     "studymaterial-detail": MATERIAL_SCOPED,
+    # Mints a signed URL, so it is a credential-issuing endpoint: it must be
+    # scoped exactly as tightly as retrieve. It resolves through the same
+    # get_queryset(), and common/test_object_storage.py asserts the two
+    # return identical statuses for a non-member.
+    "studymaterial-download": MATERIAL_SCOPED,
     "ai-flashcards": MATERIAL_SCOPED,
     "ai-quiz": MATERIAL_SCOPED,
     "ai-doubt": MATERIAL_SCOPED,

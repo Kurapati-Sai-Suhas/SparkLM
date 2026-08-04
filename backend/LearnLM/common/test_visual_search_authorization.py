@@ -223,18 +223,41 @@ class TestCrossGroupAccessIsDenied:
         assert response.status_code == 400
         assert SECRET_TITLE not in str(response.data)
 
-    def test_no_file_url_is_returned_even_to_an_authorised_member(self):
+    def test_no_permanent_file_url_is_returned_even_to_an_authorised_member(self):
         """
-        MEDIA is unauthenticated, so a URL in this payload is a permanent
-        handle to the bytes that survives losing group access.
+        UPDATED BY M5 PHASE 3 — the requirement changed, not the principle.
+
+        M4 removed `file_url` outright because MEDIA was unauthenticated: any
+        URL in this payload was a permanent, unrevocable handle to the bytes
+        that outlived group membership. There was nothing to scope it to.
+
+        Phase 3 gave the system a private bucket, so the payload now carries
+        `thumbnail_url` — a signed URL that expires in minutes and is minted
+        only for documents the caller has already been authorized to see.
+        The invariant that mattered is unchanged and asserted here: the
+        legacy permanent field is still gone, and with object storage
+        configured no raw /media/ path is ever emitted.
+
+        Without a bucket (CI and development) the helper degrades to the
+        local path, which is only reachable because DEBUG serves it and is
+        unreachable in production — so that case is excluded rather than
+        pretended away.
         """
+        from common.storage import object_storage_enabled
+
         alice = user("alice8")
         grp, _ = group_with_image(alice, code="VA8")
 
         result = search(alice, grp.pk).data["query_results"][0]
 
-        assert "file_url" not in result
-        assert "/media/" not in str(result)
+        assert "file_url" not in result, "the permanent legacy field is back"
+        assert "thumbnail_url" in result
+
+        if object_storage_enabled():
+            assert "/media/" not in str(result)
+            assert "X-Amz-Signature" in (result["thumbnail_url"] or ""), (
+                "an unsigned URL was returned — that is a permanent handle"
+            )
 
 
 # ── enumeration ──────────────────────────────────────────────────────────

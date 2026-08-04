@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { getAccessToken } from "@/services/api";
 
 interface Message {
   sender: string;
@@ -12,7 +13,7 @@ export function useGroupChat(groupId: string) {
 
   useEffect(() => {
     // 1. Grab the JWT token you saved when the user logged in
-    const token = localStorage.getItem('access_token');
+    const token = getAccessToken();
     if (!token) {
         console.error("No token found for chat auth");
         return;

@@ -39,6 +39,7 @@ import {
   availableLanguages,
   templateFor,
 } from '@/lib/editorTemplates';
+import { getAccessToken } from "@/services/api";
 
 export default function AdaptiveCodingPortal() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -61,7 +62,7 @@ export default function AdaptiveCodingPortal() {
   const fetchNextProblem = useCallback(async () => {
     setLoading(true);
     setResults(null);
-    const token = localStorage.getItem('authToken') || localStorage.getItem('access');
+    const token = getAccessToken();
 
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/next/?topic=${topic}`, {
@@ -97,7 +98,7 @@ export default function AdaptiveCodingPortal() {
 
   const handleSubmit = async () => {
     setSubmitting(true);
-    const token = localStorage.getItem('authToken') || localStorage.getItem('access');
+    const token = getAccessToken();
 
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/submit/`, {

@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Brain, Zap, Loader2, Sparkles, CheckCircle2 } from "lucide-react";
+import { getAccessToken } from "@/services/api";
 
 interface ModalProps {
   groupId: string;
@@ -33,7 +34,7 @@ export default function CodingOnboardingModal({ groupId, groupTopic, onClose }: 
 
   const handleEnterPortal = async () => {
     setLoading(true);
-    const token = localStorage.getItem("authToken") || localStorage.getItem("access");
+    const token = getAccessToken();
 
     try {
       if (selectedTopics.length > 0) {

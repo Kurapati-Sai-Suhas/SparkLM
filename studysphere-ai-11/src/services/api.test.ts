@@ -71,13 +71,29 @@ afterEach(() => {
 });
 
 describe("request interceptor", () => {
-  it("attaches the stored token as a Bearer header", async () => {
-    localStorage.setItem("authToken", "tok-123");
-    const { userAPI } = await loadApi();
+  it("attaches the in-memory token as a Bearer header", async () => {
+    // CHANGED BY THE PHASE 4 FOLLOW-UP. The access token is no longer
+    // mirrored into localStorage — it lives only in a module variable, so
+    // the test sets it through the exported seam rather than through
+    // storage. Seeding localStorage here would now prove nothing.
+    const { userAPI, setAccessToken } = await loadApi();
+    setAccessToken("tok-123");
 
     await userAPI.getProfile();
 
     expect(seen[0].headers.Authorization).toBe("Bearer tok-123");
+  });
+
+  it("never writes the access token to localStorage", async () => {
+    // The regression guard for the whole follow-up: a mirror reintroduced
+    // anywhere puts a script-readable credential back on the page.
+    const { setAccessToken } = await loadApi();
+
+    setAccessToken("must-not-persist");
+
+    expect(localStorage.getItem("authToken")).toBeNull();
+    expect(localStorage.getItem("access")).toBeNull();
+    expect(localStorage.getItem("access_token")).toBeNull();
   });
 
   it("sends no Authorization header when there is no token", async () => {
@@ -97,12 +113,14 @@ describe("401 refresh flow", () => {
       "/user/profile/": [reply(401), reply(200, { username: "sam" })],
       "/token/refresh/": [reply(200, { access: "fresh-token" })],
     };
-    const { userAPI } = await loadApi();
+    const { userAPI, getAccessToken } = await loadApi();
 
     const res = await userAPI.getProfile();
 
     expect(res.data.username).toBe("sam");
-    expect(localStorage.getItem("authToken")).toBe("fresh-token");
+    // The rotated access token is held in memory, never persisted.
+    expect(getAccessToken()).toBe("fresh-token");
+    expect(localStorage.getItem("authToken")).toBeNull();
     const urls = seen.map((r) => r.url);
     expect(urls).toEqual(["/user/profile/", "/token/refresh/", "/user/profile/"]);
   });
@@ -225,21 +243,26 @@ describe("401 refresh flow", () => {
 describe("authAPI token storage", () => {
   it("stores both tokens on successful login", async () => {
     responses = { "/token/": [reply(200, { access: "a-tok", refresh: "r-tok" })] };
-    const { authAPI } = await loadApi();
+    const { authAPI, getAccessToken } = await loadApi();
 
     await authAPI.login("sam", "correct");
 
-    expect(localStorage.getItem("authToken")).toBe("a-tok");
+    expect(getAccessToken()).toBe("a-tok");
+    expect(localStorage.getItem("authToken")).toBeNull();
+    // The refresh token is still stored on the LEGACY path (the backend
+    // returned one), which is what keeps a rollback working. Under Auth v2
+    // the body carries no refresh token at all.
     expect(localStorage.getItem("refreshToken")).toBe("r-tok");
   });
 
   it("stores both tokens on Google sign-in", async () => {
     responses = { "/auth/google/": [reply(200, { access: "g-tok", refresh: "gr-tok" })] };
-    const { authAPI } = await loadApi();
+    const { authAPI, getAccessToken } = await loadApi();
 
     await authAPI.googleLogin("google-credential");
 
-    expect(localStorage.getItem("authToken")).toBe("g-tok");
+    expect(getAccessToken()).toBe("g-tok");
+    expect(localStorage.getItem("authToken")).toBeNull();
     expect(localStorage.getItem("refreshToken")).toBe("gr-tok");
   });
 

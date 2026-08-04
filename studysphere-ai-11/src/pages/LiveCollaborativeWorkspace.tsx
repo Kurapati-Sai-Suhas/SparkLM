@@ -18,6 +18,7 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { MonacoBinding } from "y-monaco";
 import Editor from "@monaco-editor/react";
+import { getAccessToken } from "@/services/api";
 
 type Member = { id: string; name: string; role: string; color: string };
 
@@ -89,7 +90,7 @@ export default function LiveCollaborativeWorkspace() {
   const bindingRef = useRef<MonacoBinding | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken') || localStorage.getItem('access');
+    const token = getAccessToken();
     if (!groupId || !token) return;
 
     const ydoc = new Y.Doc();

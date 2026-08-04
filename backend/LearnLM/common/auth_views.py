@@ -143,6 +143,34 @@ class CookieTokenRefreshMixin:
 
     @staticmethod
     def _user_for(token):
+        """
+        The token's user, fetched with only the two columns this path uses.
+
+        Query accounting for the refresh path (measured, 9 total):
+
+          1  blacklist membership check   RefreshToken() -> verify()
+          2  THIS fetch                   token_version + issue_token_pair
+          3  user fetch inside blacklist()  SimpleJWT does this itself
+          4  SELECT OutstandingToken      get_or_create
+          5  SELECT BlacklistedToken      get_or_create — the replay check
+          6  SAVEPOINT                    }
+          7  INSERT BlacklistedToken      } atomic single-winner on races
+          8  RELEASE SAVEPOINT            }
+          9  INSERT OutstandingToken      so the NEW token can be spent later
+
+        Eight of the nine are required. #2 and #3 are the same row fetched
+        twice, and collapsing them would mean reimplementing SimpleJWT's
+        blacklist() to reuse our instance — hand-rolling the library's
+        security-critical primitive to save one indexed primary-key lookup.
+        That trade is refused; see the phase report.
+
+        A narrowing `.only("id", "token_version")` was tried here and
+        REVERTED: it took the count from 9 to 10. Something downstream —
+        SimpleJWT's for_user / OutstandingToken creation — touches a field
+        outside that pair, and the deferred load costs a whole extra round
+        trip to save a few hundred bytes on one row. Measured 11.3 ms
+        before, 14.1 ms after. The full fetch is the cheaper query.
+        """
         User = get_user_model()
         return User.objects.filter(pk=token.get("user_id")).first()
 

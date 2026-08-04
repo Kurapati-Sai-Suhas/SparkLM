@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,6 +7,7 @@ import { GoogleOAuthProvider } from "@react-oauth/google";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { ThemeProvider } from "@/components/theme-provider";
+import { getAccessToken, bootstrapAuth } from "@/services/api";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
@@ -57,13 +58,40 @@ const GoogleAuthWrapper = ({ children }: { children: React.ReactNode }) =>
   );
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const token =
-    localStorage.getItem("authToken") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("access_token") ||
-    localStorage.getItem("access");
+  // "Are we signed in?" is no longer answerable synchronously. The access
+  // token lives in memory and is null on every fresh page load; the only
+  // durable credential is an httpOnly cookie this code cannot read. So the
+  // question goes to the server once, and the answer is awaited.
+  //
+  // Without this, removing the localStorage mirror would redirect every
+  // reload to /auth despite a perfectly valid session.
+  const [status, setStatus] = useState<"checking" | "in" | "out">(
+    getAccessToken() ? "in" : "checking"
+  );
 
-  if (!token) {
+  useEffect(() => {
+    if (status !== "checking") return;
+    let cancelled = false;
+    bootstrapAuth().then((ok) => {
+      if (!cancelled) setStatus(ok ? "in" : "out");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
+  if (status === "checking") {
+    return (
+      <div
+        data-testid="auth-checking"
+        className="flex h-screen items-center justify-center bg-slate-950"
+      >
+        <div className="h-10 w-10 rounded-full border-2 border-transparent border-t-indigo-400 animate-spin" />
+      </div>
+    );
+  }
+
+  if (status === "out") {
     return <Navigate to="/auth" replace />;
   }
 

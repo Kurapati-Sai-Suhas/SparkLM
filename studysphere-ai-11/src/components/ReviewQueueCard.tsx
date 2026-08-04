@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { BookMarked, Clock3, Play } from "lucide-react";
+import { getAccessToken } from "@/services/api";
 
 interface ReviewItem {
   topic: string;
@@ -28,7 +29,7 @@ export default function ReviewQueueCard({
 
   useEffect(() => {
     const token =
-      localStorage.getItem("authToken") || localStorage.getItem("access");
+      getAccessToken();
     fetch(
       `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/api/review/queue/`,
       { headers: { Authorization: `Bearer ${token}` } }

@@ -512,3 +512,50 @@ class TestMultipleDevices:
         phone.post(REFRESH, {}, format="json", **SENTINEL)
 
         assert laptop.post(REFRESH, {}, format="json", **SENTINEL).status_code == 200
+
+
+# ── cost of the refresh path ─────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestRefreshCost:
+    """
+    The refresh path is the one place Auth v2 costs measurably more than
+    the legacy flow (2 queries -> 9). Every one of those nine was accounted
+    for in review; this pins the number so the cost cannot drift upward
+    unnoticed, and fails loudly if someone adds a query without deciding to.
+
+    An attempt to narrow the user fetch with .only("id", "token_version")
+    took it to TEN — a deferred-field load costs a whole round trip to save
+    a few hundred bytes. Reverted; this test is what caught it.
+    """
+
+    def test_refresh_costs_exactly_nine_queries(self, user, v2):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        client = APIClient()
+        login(client)
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = client.post(REFRESH, {}, format="json", **SENTINEL)
+
+        assert response.status_code == 200
+        assert len(ctx.captured_queries) == 9, (
+            "refresh query count changed from 9 to "
+            f"{len(ctx.captured_queries)}. Every query on this path was "
+            "justified in the Phase 4 review — account for the change "
+            "before updating this number."
+        )
+
+    def test_login_costs_no_more_than_the_legacy_path(self, user, v2):
+        """
+        Login is far more frequent than refresh, so it is the number that
+        actually matters. Cookies add no queries.
+        """
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as ctx:
+            login(APIClient())
+
+        assert len(ctx.captured_queries) == 2

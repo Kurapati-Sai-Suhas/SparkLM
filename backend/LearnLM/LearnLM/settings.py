@@ -359,6 +359,29 @@ CSRF_TRUSTED_ORIGINS = [
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
 
+# ── PRODUCTION INCIDENT FIX (M5 Phase 4 regression) ──────────────────────
+#
+# The SPA sends `X-SparkLM-Client: web` on EVERY request — it is set on the
+# shared axios instance, because the refresh and logout endpoints require it
+# as their CSRF control (SameSite=None means the browser attaches the refresh
+# cookie to cross-site requests, so a custom header is what forces a
+# preflight an attacker's page cannot satisfy).
+#
+# django-cors-headers' default allow-list is:
+#   accept, authorization, content-type, user-agent, x-csrftoken, x-requested-with
+#
+# `x-sparklm-client` is not in it. The preflight therefore answered 200 while
+# omitting the header from Access-Control-Allow-Headers, and the browser
+# blocked the real request — every cross-origin call from the deployed
+# frontend failed, including login. The endpoint itself was healthy the whole
+# time, which is why it looked like a login bug rather than a CORS bug.
+#
+# Adding to the defaults rather than replacing them: dropping `authorization`
+# here would break every authenticated request.
+from corsheaders.defaults import default_headers  # noqa: E402
+
+CORS_ALLOW_HEADERS = (*default_headers, "x-sparklm-client")
+
 
 # REST_FRAMEWORK is the master config for your API
 REST_FRAMEWORK = {

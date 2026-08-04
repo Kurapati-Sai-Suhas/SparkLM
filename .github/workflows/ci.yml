@@ -129,10 +129,18 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Use Node.js 20.x
+    # 24.x, not 20.x. jsdom 30.0.1 declares
+    # engines.node = "^22.22.2 || ^24.15.0 || >=26.0.0", so on Node 20 the
+    # vitest forks worker failed to start and BOTH test files errored out
+    # before running. CI has been red on every push since the frontend
+    # tests were added, and the tests it was meant to enforce never
+    # executed once. Local dev is 24.15.0 — pinning the same major means
+    # green locally and green in CI mean the same thing.
+    # (Also clears the runner's Node 20 deprecation warning.)
+    - name: Use Node.js 24.x
       uses: actions/setup-node@v4
       with:
-        node-version: '20.x'
+        node-version: '24.x'
         cache: 'npm'
         cache-dependency-path: studysphere-ai-11/package-lock.json
 

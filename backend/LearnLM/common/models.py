@@ -47,13 +47,26 @@ class MaintenanceRun(models.Model):
 
     @classmethod
     def record(cls, task, succeeded, duration_ms=None, detail=""):
-        """Upsert the heartbeat for one task. Never raises on detail length."""
+        """
+        Upsert the heartbeat for one task. Never raises on detail length —
+        or on its type.
+
+        The type coercion is not defensive clutter: run_maintenance calls
+        this from inside its own `except` block to record a failure. If
+        `record` itself raised there, the sweep would lose the very failure
+        it was reporting and crash on the way out — the observability path
+        of last resort taking the incident with it. A caller passing a dict
+        (a stats payload rather than a summary) is the obvious way for that
+        to happen, so it is turned into text rather than a KeyError.
+        """
+        if not isinstance(detail, str):
+            detail = "" if detail is None else str(detail)
         return cls.objects.update_or_create(
             task=task,
             defaults={
                 "last_run_at": timezone.now(),
                 "succeeded": bool(succeeded),
                 "duration_ms": duration_ms,
-                "detail": (detail or "")[:2000],
+                "detail": detail[:2000],
             },
         )[0]

@@ -150,6 +150,15 @@ jobs:
 
     # Runs before the build: a failing unit test should be reported as a
     # failing test, not as a build that happened to come after one.
+    # `tsc --noEmit` with the ROOT tsconfig checks nothing: it has
+    # "files": [] and only project references, so it silently compiles zero
+    # files. It was used as a verification step for two phases and passed
+    # over a real defect (an import swallowed by a template literal, leaving
+    # an undefined identifier at runtime). The app project is the real one.
+    - name: Typecheck (project config, not the empty root one)
+      working-directory: studysphere-ai-11
+      run: npm run typecheck
+
     - name: Frontend unit tests (Vitest)
       working-directory: studysphere-ai-11
       run: npm test

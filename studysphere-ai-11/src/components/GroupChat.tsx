@@ -3,6 +3,7 @@ import { Send, WifiOff, Wifi, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { getAccessToken } from "@/services/api";
 
 export default function GroupChat({
   groupId,
@@ -19,7 +20,7 @@ export default function GroupChat({
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("authToken") || localStorage.getItem("access") || "";
+    const token = getAccessToken();
     const wsUrl = `${import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000'}/ws/chat/${groupId}/?token=${token}`;
 
     ws.current = new WebSocket(wsUrl);

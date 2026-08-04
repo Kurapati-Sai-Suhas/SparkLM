@@ -64,6 +64,13 @@ PUBLIC_ENDPOINTS = {
     "auth-google",
     "health-check",
     "healthz",
+    # Auth v2 (M5 Phase 4). Deliberately reachable without a token: an
+    # expired access token is precisely when a user reaches for logout, and
+    # failing then would strand a live refresh cookie in their browser.
+    # Safe to expose — it only ENDS a session, reveals nothing (always 200,
+    # same body with or without a valid token), and authorization comes
+    # from possessing the refresh token rather than from the request.
+    "auth-logout",
 }
 
 
@@ -77,6 +84,7 @@ MATRIX = {
     "auth-google": PUBLIC,
     "health-check": PUBLIC,
     "healthz": PUBLIC,
+    "auth-logout": PUBLIC,
     # ── self-scoped ─────────────────────────────────────────────────────
     "auth-logout-all": SELF_SCOPED,
     "dashboard-stats": SELF_SCOPED,

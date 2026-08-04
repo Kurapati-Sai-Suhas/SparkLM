@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Code2, Sparkles, ArrowRight, Terminal, Zap } from 'lucide-react';
+import { getAccessToken } from "@/services/api";
 
 interface Portal {
   id: number | string;
@@ -17,7 +18,7 @@ const CodingHub: React.FC = () => {
   useEffect(() => {
     const fetchPortals = async () => {
       try {
-        const token = localStorage.getItem('authToken') || localStorage.getItem('access');
+        const token = getAccessToken();
 
         const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/api/coding-portals/`, {
           method: 'GET',

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 import axios from 'axios';
 import ProblemDescription from './ProblemDescription';
+import { getAccessToken } from "@/services/api";
 
 const CodingPortal = () => {
     // 1. DYNAMIC STATE
@@ -19,7 +20,7 @@ const CodingPortal = () => {
         setOutput(''); // Clear the terminal for the new question
         
         try {
-            const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('access'); 
+            const token = getAccessToken(); 
             
             const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/next/`, {
                 headers: { 'Authorization': `Bearer ${token}` }
@@ -48,7 +49,7 @@ const CodingPortal = () => {
         setOutput('🚀 Running your code in Sandbox...');
         
         try {
-            const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('access'); 
+            const token = getAccessToken(); 
             
             const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/run/`, {
                 code: code,
@@ -77,7 +78,7 @@ const CodingPortal = () => {
         setOutput('⚔️ Running against hidden test cases...');
         
         try {
-            const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('access'); 
+            const token = getAccessToken(); 
             
             const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/code/submit/`, {
                 code: code,

@@ -105,6 +105,10 @@ requires the worker tier and an ONNX inference path (`export_onnx.py`), which is
 | `AWS_S3_ENDPOINT_URL` | S3-compatible endpoint. This is the only vendor-specific value — Cloudflare R2, Backblaze B2, AWS S3 and MinIO all work. Unset ⇒ real AWS S3. | Wrong endpoint ⇒ every upload and signature fails. |
 | `AWS_S3_REGION_NAME` | Region. `auto` for R2. | Signature mismatch on providers that validate region. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Bucket credentials. **Scope them to the one bucket** — they can read every object in it. | Uploads and signing fail; the app degrades to results without links rather than erroring. |
+| `AUTH_V2_COOKIES` | **The switch for Authentication v2 (M5 Phase 4).** Off ⇒ refresh tokens in the response body and `localStorage`, no rotation, no cookie — today's behaviour byte-for-byte. On ⇒ httpOnly refresh cookie, rotation with replay detection, refresh token absent from every response body. | Turning it on requires the new frontend to be deployed FIRST. Turning it off is a safe rollback: `read_refresh_token()` accepts the cookie or the body, so nobody is logged out in either direction. |
+| `AUTH_COOKIE_SECURE` | `Secure` attribute on the refresh cookie. Defaults to `not DEBUG`. | Setting it false in production would let the refresh cookie travel over plain HTTP. Only ever set it false for local HTTP development. |
+| `AUTH_COOKIE_SAMESITE` | Defaults to `None`, which is **required**, not a weakening: the SPA (Vercel) and API (Render) are different sites, so `Lax` would never send the cookie at all. | `Lax`/`Strict` silently break refresh in the deployed topology. `None` is why the refresh endpoint requires the `X-SparkLM-Client` header. |
+| `AUTH_COOKIE_PATH` | Cookie scope, default `/api/`. | Narrower breaks refresh or logout; `/` widens exposure for no gain. |
 | `SIGNED_URL_TTL` | Seconds a download URL stays valid. Default `300`. | Longer ⇒ a leaked URL is useful for longer; a URL that outlives the session recreates the unauthenticated `/media/` problem. Do not raise without a reason. |
 
 ---

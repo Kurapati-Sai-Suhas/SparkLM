@@ -26,13 +26,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
+import { getAccessToken } from "@/services/api";
 
 export default function Settings() {
   const [profile, setProfile] = useState({ first_name: "", last_name: "", email: "", bio: "", email_alerts: true });
 
   useEffect(() => {
     fetch("/api/settings/profile/", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("access_token")}` }
+      headers: { Authorization: `Bearer ${getAccessToken()}` }
     })
     .then(res => res.json())
     .then(data => {
@@ -47,7 +48,7 @@ export default function Settings() {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          Authorization: `Bearer ${getAccessToken()}`,
         },
         body: JSON.stringify(profile),
       });
@@ -64,7 +65,7 @@ export default function Settings() {
       fetch("/api/settings/email/", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          Authorization: `Bearer ${getAccessToken()}`,
         }
       })
       .then(res => res.json())

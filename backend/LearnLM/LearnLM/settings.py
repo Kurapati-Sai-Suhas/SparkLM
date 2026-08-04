@@ -57,6 +57,12 @@ INSTALLED_APPS = [
     "common.apps.CommonConfig",
     "rest_framework",
     "rest_framework_simplejwt",
+    # Refresh-token replay detection (M5 Phase 4). Rotation without a record
+    # of spent tokens is theatre — the old token stays valid for its full
+    # remaining lifetime. Adds OutstandingToken/BlacklistedToken plus one
+    # write per rotation. See CookieTokenRefreshMixin for why rotation is
+    # bound to the AUTH_V2_COOKIES flag and not to a global setting.
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "channels",
     "pgvector",
@@ -492,7 +498,37 @@ SIMPLE_JWT = {
     # intended behaviour of a key rotation, but do it knowingly.
     'SIGNING_KEY': os.getenv("JWT_SIGNING_KEY") or SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    # ⚠ ROTATE_REFRESH_TOKENS / BLACKLIST_AFTER_ROTATION are deliberately
+    # NOT set here (M5 Phase 4). Setting them globally would rotate on the
+    # legacy path too, and the currently-deployed frontend stores the new
+    # `access` on refresh but never updates its stored refresh token — so
+    # every old client would break permanently after its first refresh.
+    # Rotation is implemented in CookieTokenRefreshMixin and bound to the
+    # AUTH_V2_COOKIES flag, so flag-off behaviour is byte-identical to
+    # today's. See common/auth_views.py.
 }
+
+# ── Auth v2: httpOnly refresh cookies (M5 Phase 4) ───────────────────────
+#
+# OFF by default. With the flag off not a single response header changes —
+# the legacy localStorage flow is untouched, which is what makes this
+# deployable ahead of the frontend and reversible without a code change.
+#
+# Rollout: deploy the new frontend (it works under both settings), THEN set
+# AUTH_V2_COOKIES=true. Rollback: unset it. Neither direction logs anyone
+# out, because read_refresh_token() accepts the cookie OR the request body.
+AUTH_V2_COOKIES = os.getenv("AUTH_V2_COOKIES", "false").lower() == "true"
+
+# Cookie attributes. The defaults are the production-correct values; they
+# are overridable only so the test client and local HTTP development work.
+#
+# SameSite=None is a requirement, not a weakening: the SPA (Vercel) and the
+# API (Render) are different sites, so Lax would never send the cookie at
+# all. That is exactly why the refresh and logout endpoints require a
+# custom header — see CSRF_SENTINEL_HEADER in common/auth_cookies.py.
+AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", str(not DEBUG)).lower() == "true"
+AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "None")
+AUTH_COOKIE_PATH = os.getenv("AUTH_COOKIE_PATH", "/api/")
 
 AUTH_USER_MODEL = 'groups.User'
 

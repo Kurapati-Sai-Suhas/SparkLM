@@ -7,15 +7,83 @@ const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     "Content-Type": "application/json",
+    // Auth v2 (M5 Phase 4): proves the request came from our own XHR
+    // rather than a cross-site form or image. The refresh cookie is
+    // SameSite=None (Vercel and Render are different sites), so the
+    // browser would otherwise attach it to a forged cross-site POST.
+    // A custom header forces a CORS preflight our origin allowlist
+    // answers for. Harmless when the backend flag is off.
+    "X-SparkLM-Client": "web",
   },
+  // Required for the httpOnly refresh cookie to be sent at all.
+  withCredentials: true,
 });
+
+// ── Access token: in memory, not localStorage (Auth v2) ────────────────
+//
+// A module-scoped variable dies with the tab. localStorage does not, and
+// is readable by any script that gets injected — which is the entire
+// reason this phase exists. The refresh token is no longer here at all;
+// it lives in an httpOnly cookie the browser attaches automatically.
+//
+// Nothing seeds this from storage. On a fresh page load it is null and
+// bootstrapAuth() below exchanges the httpOnly refresh cookie for a new
+// access token — which is the only way an in-memory token can survive a
+// reload without also being readable by script.
+let accessToken = null;
+
+export function setAccessToken(token) {
+  accessToken = token || null;
+  // The localStorage mirror is GONE (M5 Phase 4 follow-up). It was the
+  // last script-readable credential, kept only because 13 components read
+  // the token directly; they now call getAccessToken(). One stale key is
+  // cleared on the way past so a browser carrying a token from before
+  // this deploy does not keep it indefinitely.
+  localStorage.removeItem('authToken');
+}
+
+export function getAccessToken() {
+  return accessToken;
+}
+
+// Exchange the refresh cookie for an access token exactly once per page
+// load. Resolves true when a session was recovered.
+//
+// Required by in-memory tokens, not a convenience: ProtectedRoute used to
+// answer "are we signed in?" by reading localStorage synchronously. With
+// nothing in storage that check would redirect every reload to /auth even
+// though the cookie is perfectly valid. The question is now answered by
+// the server, which is the only party that can answer it.
+let bootstrapPromise = null;
+
+export function bootstrapAuth() {
+  if (!bootstrapPromise) {
+    const legacyRefresh = localStorage.getItem('refreshToken');
+    bootstrapPromise = api
+      .post('/token/refresh/', legacyRefresh ? { refresh: legacyRefresh } : {})
+      .then(({ data }) => {
+        setAccessToken(data.access);
+        // Legacy path may still return a rotated body token; keeping it is
+        // what lets a rollback to AUTH_V2_COOKIES=false keep working.
+        if (data.refresh) localStorage.setItem('refreshToken', data.refresh);
+        return true;
+      })
+      .catch(() => false);
+  }
+  return bootstrapPromise;
+}
+
+// Test/logout seam: forget the in-flight bootstrap so a later sign-in
+// starts clean rather than resolving against the previous session.
+export function resetAuthBootstrap() {
+  bootstrapPromise = null;
+}
 
 // 2. REQUEST INTERCEPTOR (Attaches Token Automatically)
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     }
     return config;
   },
@@ -31,7 +99,8 @@ api.interceptors.request.use(
 let refreshPromise = null;
 
 function redirectToLogin() {
-  localStorage.removeItem('authToken');
+  setAccessToken(null);
+  resetAuthBootstrap();
   localStorage.removeItem('refreshToken');
   if (window.location.pathname !== '/auth') {
     window.location.href = '/auth';
@@ -46,22 +115,28 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && original && !original._retried && !isAuthEndpoint) {
       original._retried = true;
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        redirectToLogin();
-        return Promise.reject(error);
-      }
+      // Under Auth v2 the refresh token is an httpOnly cookie the browser
+      // attaches on its own, so there is nothing to look up. The legacy
+      // body token is still sent when one exists, which is what keeps a
+      // pre-rollout session working until it next rotates.
+      const legacyRefresh = localStorage.getItem('refreshToken');
 
       try {
-        // Single shared refresh in flight even if several requests 401
-        // at once — avoids hammering /token/refresh/ with duplicates.
+        // Single shared refresh in flight even if several requests 401 at
+        // once. This is now load-bearing rather than a nicety: rotation
+        // makes each refresh token single-use, so two parallel refreshes
+        // would race and one would be rejected as a replay.
         if (!refreshPromise) {
           refreshPromise = api
-            .post('/token/refresh/', { refresh: refreshToken })
+            .post('/token/refresh/', legacyRefresh ? { refresh: legacyRefresh } : {})
             .finally(() => { refreshPromise = null; });
         }
         const { data } = await refreshPromise;
-        localStorage.setItem('authToken', data.access);
+        setAccessToken(data.access);
+        // The rotated refresh token arrives as a Set-Cookie header, not in
+        // the body. If the backend is still on the legacy path it may
+        // return one; store it so a rollback keeps working.
+        if (data.refresh) localStorage.setItem('refreshToken', data.refresh);
         original.headers.Authorization = `Bearer ${data.access}`;
         return api(original);
       } catch (refreshError) {
@@ -91,8 +166,12 @@ export const authAPI = {
   login: async (username, password) => {
     const response = await api.post('/token/', { username, password });
     if (response.data.access) {
-      localStorage.setItem('authToken', response.data.access);
+      setAccessToken(response.data.access);
+      // Present only while the backend flag is off. Under Auth v2 the
+      // refresh token arrives as an httpOnly cookie and is absent here,
+      // which is the point — nothing readable is left behind.
       if (response.data.refresh) localStorage.setItem('refreshToken', response.data.refresh);
+      else localStorage.removeItem('refreshToken');
     }
     return response.data;
   },
@@ -100,13 +179,24 @@ export const authAPI = {
   googleLogin: async (credential) => {
     const response = await api.post('/auth/google/', { credential });
     if (response.data.access) {
-      localStorage.setItem('authToken', response.data.access);
+      setAccessToken(response.data.access);
       if (response.data.refresh) localStorage.setItem('refreshToken', response.data.refresh);
+      else localStorage.removeItem('refreshToken');
     }
     return response.data;
   },
-  logout: () => {
-    localStorage.removeItem('authToken');
+  logout: async () => {
+    // Must reach the server. An httpOnly cookie cannot be removed by
+    // client script, so clearing localStorage alone would leave a live
+    // refresh token in the browser — a logout that logs nobody out.
+    try {
+      await api.post('/auth/logout/', {});
+    } catch {
+      // Network failure or already signed out. Clearing locally is still
+      // correct; the cookie expires on its own and rotation limits reuse.
+    }
+    setAccessToken(null);
+    resetAuthBootstrap();
     localStorage.removeItem('refreshToken');
     window.location.href = "/auth";
   },

@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { getAccessToken } from "@/services/api";
 
 export default function Schedule() {
   const [date, setDate] = useState<Date | undefined>(new Date());
@@ -16,7 +17,7 @@ export default function Schedule() {
 
   useEffect(() => {
     fetch("/api/schedule/", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("access_token")}` }
+      headers: { Authorization: `Bearer ${getAccessToken()}` }
     })
     .then(res => res.json())
     .then(data => {
@@ -37,7 +38,7 @@ export default function Schedule() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("access_token")}`
+        Authorization: `Bearer ${getAccessToken()}`
       },
       body: JSON.stringify({ title: newTitle, start_time })
     })

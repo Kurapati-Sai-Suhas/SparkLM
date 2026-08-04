@@ -25,6 +25,7 @@ import {
   Target,
   TrendingUp,
 } from "lucide-react";
+import { getAccessToken } from "@/services/api";
 
 type NodeStatus = "mastered" | "learning" | "struggling" | "locked";
 
@@ -113,7 +114,7 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
     // Real router telemetry for the "Why You're Here" panel — this panel
     // previously showed static placeholder text, which misrepresented the
     // actual routing decision.
-    const token = localStorage.getItem('authToken') || localStorage.getItem('access');
+    const token = getAccessToken();
     fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/review/queue/`, {
       headers: { Authorization: `Bearer ${token}` }
     })
@@ -125,7 +126,7 @@ export default function LearningPathVisualizer({ onStartTopic }: { onStartTopic?
   useEffect(() => {
     const fetchMasteryMap = async () => {
       try {
-        const token = localStorage.getItem('authToken') || localStorage.getItem('access');
+        const token = getAccessToken();
         const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/ai/mastery-map/?subject=${subject}`, {
           headers: { Authorization: `Bearer ${token}` }
         });

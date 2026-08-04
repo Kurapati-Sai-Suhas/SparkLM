@@ -5,13 +5,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bell, CheckCheck, Trash2, Sparkles, Settings2 } from "lucide-react";
 
 import { useState, useEffect } from "react";
+import { getAccessToken } from "@/services/api";
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState<any[]>([]);
 
   useEffect(() => {
     fetch("/api/notifications/", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("access_token")}` }
+      headers: { Authorization: `Bearer ${getAccessToken()}` }
     })
     .then(res => res.json())
     .then(data => {
@@ -29,7 +30,7 @@ export default function Notifications() {
   const handleMarkAllRead = () => {
     fetch("/api/notifications/", {
       method: "PUT",
-      headers: { Authorization: `Bearer ${localStorage.getItem("access_token")}` }
+      headers: { Authorization: `Bearer ${getAccessToken()}` }
     }).then(() => {
       setNotifications(notifications.map(n => ({ ...n, read: true })));
     });

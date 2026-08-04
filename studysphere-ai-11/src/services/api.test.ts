@@ -71,13 +71,29 @@ afterEach(() => {
 });
 
 describe("request interceptor", () => {
-  it("attaches the stored token as a Bearer header", async () => {
-    localStorage.setItem("authToken", "tok-123");
-    const { userAPI } = await loadApi();
+  it("attaches the in-memory token as a Bearer header", async () => {
+    // CHANGED BY THE PHASE 4 FOLLOW-UP. The access token is no longer
+    // mirrored into localStorage — it lives only in a module variable, so
+    // the test sets it through the exported seam rather than through
+    // storage. Seeding localStorage here would now prove nothing.
+    const { userAPI, setAccessToken } = await loadApi();
+    setAccessToken("tok-123");
 
     await userAPI.getProfile();
 
     expect(seen[0].headers.Authorization).toBe("Bearer tok-123");
+  });
+
+  it("never writes the access token to localStorage", async () => {
+    // The regression guard for the whole follow-up: a mirror reintroduced
+    // anywhere puts a script-readable credential back on the page.
+    const { setAccessToken } = await loadApi();
+
+    setAccessToken("must-not-persist");
+
+    expect(localStorage.getItem("authToken")).toBeNull();
+    expect(localStorage.getItem("access")).toBeNull();
+    expect(localStorage.getItem("access_token")).toBeNull();
   });
 
   it("sends no Authorization header when there is no token", async () => {
@@ -97,12 +113,14 @@ describe("401 refresh flow", () => {
       "/user/profile/": [reply(401), reply(200, { username: "sam" })],
       "/token/refresh/": [reply(200, { access: "fresh-token" })],
     };
-    const { userAPI } = await loadApi();
+    const { userAPI, getAccessToken } = await loadApi();
 
     const res = await userAPI.getProfile();
 
     expect(res.data.username).toBe("sam");
-    expect(localStorage.getItem("authToken")).toBe("fresh-token");
+    // The rotated access token is held in memory, never persisted.
+    expect(getAccessToken()).toBe("fresh-token");
+    expect(localStorage.getItem("authToken")).toBeNull();
     const urls = seen.map((r) => r.url);
     expect(urls).toEqual(["/user/profile/", "/token/refresh/", "/user/profile/"]);
   });
@@ -163,16 +181,25 @@ describe("401 refresh flow", () => {
     expect(attempts).toHaveLength(2);   // original + exactly one retry
   });
 
-  it("clears storage and redirects when there is no refresh token", async () => {
+  it("still attempts a refresh when no readable token exists, then clears and redirects", async () => {
+    // CHANGED BY AUTH V2 (M5 Phase 4). This used to assert that a missing
+    // localStorage refresh token meant NO refresh attempt. Under Auth v2
+    // the refresh token is an httpOnly cookie the client cannot read, so
+    // "nothing in storage" no longer implies "no session" — the client
+    // must ask the server and let it decide. The failure behaviour is
+    // unchanged: storage cleared, redirect to /auth.
     localStorage.setItem("authToken", "expired");
-    responses = { "/user/profile/": [reply(401)] };
+    responses = {
+      "/user/profile/": [reply(401)],
+      "/token/refresh/": [reply(401)],
+    };
     const { userAPI } = await loadApi();
 
     await expect(userAPI.getProfile()).rejects.toBeTruthy();
 
     expect(localStorage.getItem("authToken")).toBeNull();
     expect(window.location.href).toBe("/auth");
-    expect(seen.filter((r) => r.url === "/token/refresh/")).toHaveLength(0);
+    expect(seen.filter((r) => r.url === "/token/refresh/")).toHaveLength(1);
   });
 
   it("clears storage and redirects when the refresh itself fails", async () => {
@@ -216,30 +243,55 @@ describe("401 refresh flow", () => {
 describe("authAPI token storage", () => {
   it("stores both tokens on successful login", async () => {
     responses = { "/token/": [reply(200, { access: "a-tok", refresh: "r-tok" })] };
-    const { authAPI } = await loadApi();
+    const { authAPI, getAccessToken } = await loadApi();
 
     await authAPI.login("sam", "correct");
 
-    expect(localStorage.getItem("authToken")).toBe("a-tok");
+    expect(getAccessToken()).toBe("a-tok");
+    expect(localStorage.getItem("authToken")).toBeNull();
+    // The refresh token is still stored on the LEGACY path (the backend
+    // returned one), which is what keeps a rollback working. Under Auth v2
+    // the body carries no refresh token at all.
     expect(localStorage.getItem("refreshToken")).toBe("r-tok");
   });
 
   it("stores both tokens on Google sign-in", async () => {
     responses = { "/auth/google/": [reply(200, { access: "g-tok", refresh: "gr-tok" })] };
-    const { authAPI } = await loadApi();
+    const { authAPI, getAccessToken } = await loadApi();
 
     await authAPI.googleLogin("google-credential");
 
-    expect(localStorage.getItem("authToken")).toBe("g-tok");
+    expect(getAccessToken()).toBe("g-tok");
+    expect(localStorage.getItem("authToken")).toBeNull();
     expect(localStorage.getItem("refreshToken")).toBe("gr-tok");
   });
 
-  it("clears both tokens on logout", async () => {
+  it("calls the server and clears both tokens on logout", async () => {
+    // CHANGED BY AUTH V2 (M5 Phase 4). Logout is now async and must reach
+    // the server: an httpOnly cookie cannot be removed by client script,
+    // so clearing localStorage alone would leave a live refresh token in
+    // the browser — a logout that logs nobody out.
     localStorage.setItem("authToken", "a");
     localStorage.setItem("refreshToken", "r");
+    responses = { "/auth/logout/": [reply(200, { detail: "Signed out." })] };
     const { authAPI } = await loadApi();
 
-    authAPI.logout();
+    await authAPI.logout();
+
+    expect(seen.filter((r) => r.url === "/auth/logout/")).toHaveLength(1);
+    expect(localStorage.getItem("authToken")).toBeNull();
+    expect(localStorage.getItem("refreshToken")).toBeNull();
+  });
+
+  it("still clears local state when the logout request fails", async () => {
+    // Offline or already signed out. Refusing to clear would strand the
+    // user in a half-authenticated UI.
+    localStorage.setItem("authToken", "a");
+    localStorage.setItem("refreshToken", "r");
+    responses = { "/auth/logout/": [reply(500)] };
+    const { authAPI } = await loadApi();
+
+    await authAPI.logout();
 
     expect(localStorage.getItem("authToken")).toBeNull();
     expect(localStorage.getItem("refreshToken")).toBeNull();

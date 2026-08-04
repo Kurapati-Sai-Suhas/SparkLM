@@ -25,6 +25,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from common.throttling import ClientIPScopedRateThrottle
+from common.storage import signed_url
 from common.authorization import (
     accessible_documents,
     accessible_groups as _accessible_groups,
@@ -282,9 +283,35 @@ class MaterialViewSet(viewsets.ModelViewSet):
         """
         return accessible_materials(self.request.user).order_by('-upload_date')
 
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """
+        A short-lived signed URL for one material (M5 Phase 3).
+
+        `self.get_object()` runs against `get_queryset()`, which is
+        `accessible_materials(...)` — so a non-member gets 404 here for the
+        same reason they get 404 from retrieve, and no separate
+        authorization path exists to drift out of sync.
+
+        Returns the URL rather than redirecting: the SPA fetches this with
+        its bearer token, and a 302 to a foreign origin inside an XHR would
+        be blocked by the frontend's `connect-src` policy. The client
+        assigns the returned URL to window.location, which CSP does not
+        govern.
+        """
+        material = self.get_object()
+        url = signed_url(material.file, filename=f"{material.title}")
+        if not url:
+            # The row survived a deploy but its bytes did not — the
+            # ephemeral-filesystem case this whole phase exists to end.
+            return Response(
+                {"error": "This file is no longer available."}, status=410
+            )
+        return Response({"url": url, "expires_in": settings.SIGNED_URL_TTL})
+
     def perform_create(self, serializer):
         group_id = self.request.data.get('study_group')
-        print(f"📦 Uploading file to library... Group ID: {group_id}")
+        logger.info("Uploading material to group=%s", group_id)
 
         # The caller must belong to the group they upload into. `study_group`
         # is read_only on the serializer, so this id was passed straight
@@ -538,11 +565,14 @@ class VisualSearchQueryView(APIView):
                     "document_id":      doc.id,
                     "title":            doc.title,
                     "similarity_score": round(score, 4),
-                    # `file_url` deliberately removed. MEDIA is served with no
-                    # authentication, so handing back a direct URL gave out a
-                    # permanent unauthenticated handle to the file bytes that
-                    # outlives group membership. document_id identifies the
-                    # match; serving the image needs an authenticated route.
+                    # Thumbnails restored (M5 Phase 3). M4 removed `file_url`
+                    # because MEDIA was unauthenticated, so any URL here was a
+                    # permanent unrevocable handle to the bytes. It is now a
+                    # signed URL that expires in minutes, minted only after
+                    # `group` has already been resolved through
+                    # accessible_groups — every document in this list is one
+                    # the caller may see.
+                    "thumbnail_url":    signed_url(doc.file),
                     "uploaded_by":      doc.uploaded_by.username if doc.uploaded_by else "Unknown",
                     "uploaded_at":      doc.uploaded_at,
                 }

@@ -142,7 +142,15 @@ export const groupsAPI = {
   },
 
   // We use 'study_group' to filter by ID exactly, bypassing the fuzzy text search
-   getMaterials: (groupId) => api.get(`/materials/?study_group=${groupId}`)
+   getMaterials: (groupId) => api.get(`/materials/?study_group=${groupId}`),
+
+  // Authorized download (M5 Phase 3). Two steps on purpose: this request
+  // carries the bearer token and the backend re-checks membership before
+  // minting a short-lived signed URL. The file itself is then fetched
+  // straight from object storage, so the bytes never transit the 0.1 vCPU
+  // instance. Returns { url, expires_in }; 404 if the caller may not read
+  // the material, 410 if the row outlived its file.
+  getDownloadUrl: (materialId) => api.get(`/materials/${materialId}/download/`),
 };
 
 // ==================== AI Features API ====================

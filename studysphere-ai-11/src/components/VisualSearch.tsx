@@ -13,11 +13,13 @@ interface SearchResult {
   title: string;
   similarity_score: number;
   uploaded_by: string;
+  // Short-lived signed URL (M5 Phase 3). M4 removed the old `file_url`
+  // because MEDIA was unauthenticated, making any link here a permanent
+  // unrevocable handle to the bytes. This one expires in minutes and is
+  // minted only for documents the caller may already see. Null when
+  // signing is unavailable — render the placeholder, not a broken image.
+  thumbnail_url: string | null;
 }
-// No file_url: MEDIA is served unauthenticated, so the backend no longer
-// returns a direct link to the image bytes. Results identify the match by
-// document_id and title; restoring thumbnails needs an authenticated
-// image route, not a URL in this payload.
 
 export default function VisualSearch({ groupId }: VisualSearchProps) {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -175,7 +177,23 @@ export default function VisualSearch({ groupId }: VisualSearchProps) {
                     className="bg-white border border-slate-200 rounded-lg p-3 hover:shadow-md transition-all group"
                   >
                     <div className="aspect-video bg-slate-100 rounded-md mb-3 overflow-hidden relative border border-slate-100 flex items-center justify-center">
-                      <ImageIcon className="w-10 h-10 text-slate-300" />
+                      {doc.thumbnail_url ? (
+                        <img
+                          src={doc.thumbnail_url}
+                          alt={doc.title}
+                          loading="lazy"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          // A signed URL expires, and the object may be gone
+                          // entirely for anything uploaded before object
+                          // storage. Fall back to the placeholder rather
+                          // than showing a broken image icon.
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <ImageIcon className="w-10 h-10 text-slate-300" />
+                      )}
                       <div className={`absolute top-2 right-2 ${scoreColor(doc.similarity_score)} text-white text-xs font-bold px-2 py-1 rounded shadow-sm`}>
                         {(doc.similarity_score * 100).toFixed(1)}% Match
                       </div>

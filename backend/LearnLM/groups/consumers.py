@@ -16,6 +16,11 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
     All members connected to that group receive every message instantly.
     """
 
+    # False until connect() has proved membership. Every inbound frame is
+    # gated on it — see receive(). A class attribute so the guard holds even
+    # for an instance whose connect() returned early.
+    authorized = False
+
     async def connect(self):
         self.group_id = self.scope['url_route']['kwargs']['group_id']
         self.room_group_name = f"chat_{self.group_id}"
@@ -31,6 +36,8 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
         if not is_member:
             await self.close(code=4003)
             return
+
+        self.authorized = True
 
         # Join the channel group (Redis pub/sub room)
         await self.channel_layer.group_add(
@@ -74,6 +81,15 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
 
     async def receive(self, text_data):
         """Called when a message arrives from the WebSocket client."""
+        # `room_group_name` is assigned before the membership check in
+        # connect(), so a refused instance still holds a valid room name and
+        # would broadcast into it if it were ever handed a frame. An ASGI
+        # server will not do that — a handshake closed before accept() never
+        # becomes a socket — but that is the server's behaviour, not ours,
+        # and authorization must not rest on it (M4 WP4).
+        if not self.authorized:
+            return
+
         try:
             data = json.loads(text_data)
         except json.JSONDecodeError:
@@ -160,11 +176,12 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def check_membership(self, user, group_id):
-        try:
-            group = StudyGroup.objects.get(id=group_id)
-            return group.members.filter(id=user.id).exists() or group.creator == user
-        except StudyGroup.DoesNotExist:
-            return False
+        # Delegates to common.authorization (M4 WP1) so the socket and the
+        # REST API share one definition of membership. Behaviour is
+        # unchanged: the old inline version was the same predicate written
+        # by hand, including the missing-group case.
+        from common.authorization import is_group_member
+        return is_group_member(user, group_id)
 
     @database_sync_to_async
     def save_message(self, user, group_id, content):
@@ -235,7 +252,24 @@ class CodeCollabConsumer(AsyncWebsocketConsumer):
     """
     WebSocket consumer for Real-Time Collaborative Coding (CRDT-ready).
     URL pattern: ws://host/ws/code/<group_id>/
+
+    Authorization is enforced ONLY at connect, deliberately. A WebSocket
+    room is a capability: `group_add` is what places this socket in the
+    broadcast set, so a socket that never joins can neither read the
+    broadcast stream nor write into it, and `receive` cannot be reached
+    without a completed handshake. Re-checking membership per frame would
+    be theatre on the read/write path and a database round-trip per
+    keystroke on a 0.1 vCPU instance.
+
+    The one case that gate does not cover is a membership revoked *during*
+    a live session; that socket keeps its room until it reconnects. Same
+    behaviour as GroupChatConsumer, and the same as a JWT outliving a
+    permission change — noted in the sprint's Remaining Risks rather than
+    papered over here.
     """
+    # See GroupChatConsumer.authorized — same guard, same reason.
+    authorized = False
+
     async def connect(self):
         self.group_id = self.scope['url_route']['kwargs']['group_id']
         self.room_group_name = f"code_collab_{self.group_id}"
@@ -245,11 +279,28 @@ class CodeCollabConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
 
+        # Membership check (M4 WP4). Without it, any authenticated user
+        # could join any group's live editor by id — reading the shared
+        # buffer and broadcasting arbitrary code into it. GroupChatConsumer,
+        # 200 lines above, has always done this; this consumer was written
+        # later and never got it.
+        if not await self.check_membership(self.user, self.group_id):
+            await self.close(code=4003)
+            return
+
+        self.authorized = True
         await self.channel_layer.group_add(
             self.room_group_name,
             self.channel_name
         )
         await self.accept()
+
+    @database_sync_to_async
+    def check_membership(self, user, group_id):
+        # Same predicate as every REST endpoint (common.authorization), so
+        # the socket and the API cannot disagree about who is a member.
+        from common.authorization import is_group_member
+        return is_group_member(user, group_id)
 
     async def disconnect(self, close_code):
         if hasattr(self, 'room_group_name'):
@@ -262,6 +313,12 @@ class CodeCollabConsumer(AsyncWebsocketConsumer):
         """
         Receives Yjs or generic sync payloads and broadcasts to all other clients.
         """
+        # Membership gate on every inbound frame — see
+        # GroupChatConsumer.receive for why the connect check alone is not
+        # sufficient to rely on (M4 WP4).
+        if not self.authorized:
+            return
+
         if bytes_data is not None:
             await self.channel_layer.group_send(
                 self.room_group_name,

@@ -1,9 +1,12 @@
 import os
 import json
 import io
+import logging
 import zipfile
 import fitz  # PyMuPDF
 import PyPDF2
+
+logger = logging.getLogger(__name__)
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -16,10 +19,18 @@ from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from django_filters.rest_framework import DjangoFilterBackend
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from common.throttling import ClientIPScopedRateThrottle
+from common.authorization import (
+    accessible_documents,
+    accessible_groups as _accessible_groups,
+    accessible_materials as _accessible_materials,
+    resolve_group,
+)
 
 # ── Single clean import block — no duplicates ────────────────
 from .ai_services import AIService, VectorSearchService, RAGService
@@ -31,7 +42,8 @@ from .models import (
 )
 from .serializers import (
     ConnectionSerializer, QuizResultSerializer, StudyGroupSerializer,
-    UserBasicSerializer, UserSerializer, StudyMaterialSerializer, AssignedQuizSerializer,
+    UserBasicSerializer, UserDisplaySerializer, UserSerializer,
+    StudyMaterialSerializer, AssignedQuizSerializer,
     HybridRouterSerializer
 )
 
@@ -54,6 +66,9 @@ class LargePagination(PageNumberPagination):
 
 class CreateUserView(generics.CreateAPIView):
     serializer_class = UserSerializer
+    # Explicit public opt-in (M4 WP0). Registration is one of six endpoints
+    # allowed to be reached without a token; see the authorization matrix in
+    # common/test_authorization_matrix.py, which fails if this set changes.
     permission_classes = [AllowAny]
 
 
@@ -113,6 +128,21 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         group = serializer.save(creator=self.request.user)
         group.members.add(self.request.user)
+
+    def get_throttles(self):
+        """
+        Dedicated bucket for `join` (M4 WP5) — see 'group-join' in settings.
+
+        Set here rather than via @action(throttle_classes=...) because
+        ClientIPScopedRateThrottle reads `self.throttle_scope` off the view,
+        and DRF resolves throttles in initial() — before the handler body
+        runs, so assigning the scope inside join() would be too late.
+        `self.action` is already populated by initialize_request().
+        """
+        if getattr(self, 'action', None) == 'join':
+            self.throttle_scope = 'group-join'
+            return [ClientIPScopedRateThrottle()]
+        return super().get_throttles()
 
     @action(detail=False, methods=['post'])
     def join(self, request):
@@ -179,8 +209,42 @@ def extract_images_from_document(file_obj, filename):
     return images
 
 
+# Authorization predicates now live in common/authorization.py — one
+# definition per resource for the whole repository (M4 security sprint, WP1).
+# Re-exported here because existing call sites and tests import them from
+# this module; the definitions themselves are unchanged.
+accessible_materials = _accessible_materials
+accessible_groups = _accessible_groups
+
+
+def cache_extracted_text(material):
+    """
+    Extract text from a material's file once and persist it (M4 Phase C).
+
+    Returns the text, or "" if the file is unreadable or gone. Never raises:
+    this runs inside an upload and inside a question, and neither should fail
+    because a PDF is malformed or its file has been swept away by a deploy.
+
+    Called from two places on purpose — at upload, while the file is
+    guaranteed to exist, and lazily on first question for anything uploaded
+    before this shipped. One function so the two paths cannot diverge in what
+    they consider "extracted".
+    """
+    try:
+        text = extract_text_from_file(material.file.path) or ""
+    except Exception:
+        logger.exception("Text extraction failed for material=%s", material.pk)
+        return ""
+
+    if text:
+        # update_fields so a concurrent edit to title or group is not
+        # clobbered by writing the whole row back.
+        material.extracted_text = text
+        material.save(update_fields=["extracted_text"])
+    return text
+
+
 class MaterialViewSet(viewsets.ModelViewSet):
-    queryset           = StudyMaterial.objects.all().order_by('-upload_date')
     serializer_class   = StudyMaterialSerializer
     permission_classes = [IsAuthenticated]
     parser_classes     = (parsers.MultiPartParser, parsers.FormParser)
@@ -188,13 +252,52 @@ class MaterialViewSet(viewsets.ModelViewSet):
     filterset_fields   = ['study_group', 'uploaded_by']
     search_fields      = ['title', 'study_group__name']
 
+    def get_queryset(self):
+        """
+        Scoped to the caller's groups (M4 security fix).
+
+        This replaced `queryset = StudyMaterial.objects.all()`, which was not
+        merely a metadata leak: DRF resolves list, retrieve, update AND
+        destroy through this method, so an unscoped queryset let any
+        authenticated user read, rename and DELETE any other user's material.
+        Measured before the fix — PATCH returned 200 with the title changed,
+        DELETE returned 204 and the row was gone.
+
+        Same helper and same model as RAGDoubtView, and the same shape as
+        StudyGroupViewSet.get_queryset — no new permission system. Ordering is
+        preserved from the attribute this replaces, so list responses are
+        unchanged for anyone who was entitled to see them.
+        """
+        return accessible_materials(self.request.user).order_by('-upload_date')
+
     def perform_create(self, serializer):
         group_id = self.request.data.get('study_group')
         print(f"📦 Uploading file to library... Group ID: {group_id}")
-        
+
+        # The caller must belong to the group they upload into. `study_group`
+        # is read_only on the serializer, so this id was passed straight
+        # through as `study_group_id` with nothing validating it — measured
+        # before this check: a non-member POSTed a file into another user's
+        # group and got 201, with the row landing in that group.
+        #
+        # 400 rather than 403: a group the caller cannot see is not
+        # meaningfully different from one that does not exist, and a bad id
+        # was already a client error (an unknown id raised IntegrityError
+        # from the FK, i.e. a 500 — this turns that into a 400 too).
+        group = resolve_group(self.request.user, group_id)
+        if group is None:
+            raise ValidationError({'study_group': 'Invalid study group.'})
+
         # 1. Save normally to the File Library
-        material = serializer.save(uploaded_by=self.request.user, study_group_id=group_id)
+        material = serializer.save(uploaded_by=self.request.user, study_group=group)
         file_name = material.file.name.lower()
+
+        # Extract text NOW, while the file is guaranteed to exist. Render's
+        # filesystem is ephemeral, so this is the only reliable window —
+        # after the next deploy the file is gone and RAG would have nothing
+        # to read. Best-effort: a malformed PDF must not fail the upload.
+        if file_name.endswith(('.pdf', '.docx', '.txt')):
+            cache_extracted_text(material)
 
         # 2. THE PIPELINE: Prepare images for MobileNetV2
         images_to_index = []
@@ -246,7 +349,10 @@ class AIFlashcardView(APIView):
         material_id = request.data.get('materialId')
         topic       = request.data.get('topic', 'General')
         try:
-            material = StudyMaterial.objects.get(id=material_id)
+            # Same scoping as RAGDoubtView. Unscoped, this generated
+            # flashcards from any user's document and returned them —
+            # bypassing the MaterialViewSet fix completely.
+            material = accessible_materials(request.user).get(id=material_id)
         except StudyMaterial.DoesNotExist:
             return Response({"error": "File not found"}, status=404)
 
@@ -265,7 +371,11 @@ class AIDoubtView(APIView):
         material_id = request.data.get('materialId')
         question    = request.data.get('question')
         try:
-            material = StudyMaterial.objects.get(id=material_id)
+            # The most direct bypass of the RAG fix: this is the same
+            # "ask a question about a document" feature without retrieval, so
+            # an unscoped lookup here handed back any user's document content
+            # in the answer. Measured: 200, content returned.
+            material = accessible_materials(request.user).get(id=material_id)
         except StudyMaterial.DoesNotExist:
             return Response({"error": "File not found"}, status=404)
 
@@ -286,7 +396,10 @@ class AIQuizView(APIView):
     def post(self, request):
         material_id = request.data.get('materialId')
         try:
-            material = StudyMaterial.objects.get(id=material_id)
+            # Same scoping as RAGDoubtView; a quiz generated from another
+            # user's document leaks that document's content through the
+            # questions and answers.
+            material = accessible_materials(request.user).get(id=material_id)
         except StudyMaterial.DoesNotExist:
             return Response({"error": "File not found"}, status=404)
 
@@ -317,9 +430,12 @@ class VisualSearchUploadView(APIView):
         if not group_id:
             return Response({"error": "group_id is required"}, status=400)
 
-        try:
-            group = StudyGroup.objects.get(id=group_id)
-        except StudyGroup.DoesNotExist:
+        # Membership check, same predicate and same 404-for-both as the query
+        # view below. Unscoped, this let any authenticated user index an image
+        # into any group — the write half of the same gap, and it would put
+        # attacker-controlled documents into a victim's search results.
+        group = resolve_group(request.user, group_id)
+        if group is None:
             return Response({"error": "Group not found"}, status=404)
 
         print(f"🖼️ Extracting MobileNetV2 vector for: {title}")
@@ -350,17 +466,39 @@ class VisualSearchQueryView(APIView):
     def post(self, request):
         group_id    = request.data.get('group_id')
         query_image = request.FILES.get('image')
-        top_k       = int(request.data.get('top_k', 5))
 
         if not query_image:
             return Response({"error": "No query image uploaded"}, status=400)
 
+        # Previously an absent group_id fell through to
+        # `Document.objects.filter(file_type='image')` — every image in the
+        # system, belonging to every user. There is no "search everything"
+        # scope for a group-scoped feature, so this is a client error rather
+        # than a silently narrowed search. Matches VisualSearchUploadView,
+        # which already required group_id.
+        if not group_id:
+            return Response({"error": "group_id is required"}, status=400)
+
+        # Authorization BEFORE the expensive work: extract_vector runs a CLIP
+        # forward pass, so checking access first also stops an unauthorized
+        # caller from burning inference CPU on a box with 0.1 vCPU.
+        #
+        # Same predicate as StudyGroupViewSet and accessible_materials. 404
+        # for both "no such group" and "not your group" — a 403 on the latter
+        # would confirm the group exists and turn this into an id-enumeration
+        # oracle, which is the whole reason the material endpoints use 404.
+        group = resolve_group(request.user, group_id)
+        if group is None:
+            return Response({"error": "Group not found"}, status=404)
+
+        try:
+            top_k = int(request.data.get('top_k', 5))
+        except (TypeError, ValueError):
+            return Response({"error": "top_k must be an integer"}, status=400)
+        top_k = max(1, min(top_k, 50))   # was an unguarded int(); 'abc' was a 500
+
         query_vector = VectorSearchService.extract_vector(query_image)
-        documents    = (
-            Document.objects.filter(group_id=group_id, file_type='image')
-            if group_id else
-            Document.objects.filter(file_type='image')
-        )
+        documents    = Document.objects.filter(group=group, file_type='image')
         results = VectorSearchService.find_similar(query_vector, documents, top_k=top_k)
 
         return Response({
@@ -369,7 +507,11 @@ class VisualSearchQueryView(APIView):
                     "document_id":      doc.id,
                     "title":            doc.title,
                     "similarity_score": round(score, 4),
-                    "file_url":         doc.file.url if doc.file else doc.file_url,
+                    # `file_url` deliberately removed. MEDIA is served with no
+                    # authentication, so handing back a direct URL gave out a
+                    # permanent unauthenticated handle to the file bytes that
+                    # outlives group membership. document_id identifies the
+                    # match; serving the image needs an authenticated route.
                     "uploaded_by":      doc.uploaded_by.username if doc.uploaded_by else "Unknown",
                     "uploaded_at":      doc.uploaded_at,
                 }
@@ -395,18 +537,34 @@ class RAGDoubtView(APIView):
             return Response({"error": "Question is required"}, status=400)
 
         try:
-            material = StudyMaterial.objects.get(id=material_id)
+            # Scoped to what the caller may read. Unscoped, any authenticated
+            # user could pass any material id and have its full text sent to
+            # the LLM and returned to them — proven in
+            # common/test_rag_authorization.py before this line existed.
+            #
+            # 404 rather than 403, deliberately: a 403 confirms the material
+            # exists, turning the endpoint into an id-enumeration oracle. An
+            # inaccessible material is now indistinguishable from a
+            # nonexistent one, and the status code is unchanged from before.
+            material = accessible_materials(request.user).get(id=material_id)
         except StudyMaterial.DoesNotExist:
             return Response({"error": "Material not found"}, status=404)
 
-        file_path = material.file.path
-        extension = os.path.splitext(file_path)[1].lower()
+        extension = os.path.splitext(material.file.name)[1].lower()
 
         if extension in ['.jpg', '.jpeg', '.png']:
-            answer = AIService.explain_image(load_image_for_ai(file_path), question)
+            # Vision path still needs the image bytes; nothing to cache.
+            answer = AIService.explain_image(load_image_for_ai(material.file.path), question)
             return Response({"answer": answer, "mode": "vision"})
 
-        raw_text = extract_text_from_file(file_path)
+        raw_text = material.extracted_text
+        if not raw_text:
+            # Uploaded before Phase C, or extraction failed at upload. Read
+            # the file and cache the result so this is paid at most once
+            # more — measured at 398 ms against 0.5 ms for chunking, so it
+            # is essentially the entire cost of preparing a RAG request.
+            raw_text = cache_extracted_text(material)
+
         if not raw_text or len(raw_text) < 50:
             return Response({"error": "Could not extract text from document"}, status=400)
 
@@ -518,13 +676,13 @@ class GroupMessageHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, group_id):
-        try:
-            group = StudyGroup.objects.get(id=group_id)
-        except StudyGroup.DoesNotExist:
+        # Membership was already enforced here, but as 403-if-not-a-member
+        # and 404-if-absent — which told an attacker exactly which group ids
+        # exist. One 404 for both (M4 WP2), matching every other
+        # group-scoped endpoint.
+        group = resolve_group(request.user, group_id)
+        if group is None:
             return Response({"error": "Group not found"}, status=404)
-
-        if not group.members.filter(id=request.user.id).exists() and group.creator != request.user:
-            return Response({"error": "Not a member of this group"}, status=403)
 
         messages = GroupMessage.objects.filter(
             group=group
@@ -594,19 +752,32 @@ def analytics_data(request):
 # ─────────────────────────────────────────────────────────────
 
 class AssignedQuizCreateView(generics.CreateAPIView):
-    queryset           = AssignedQuiz.objects.all()
+    # No `queryset` attribute: CreateAPIView never reads one (POST only),
+    # and leaving `AssignedQuiz.objects.all()` sitting here is the exact
+    # shape that made MaterialViewSet and ManageAssignedQuizView leak the
+    # moment either grew a read method.
     serializer_class   = AssignedQuizSerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
-        group_id = self.request.data.get('study_group')
-        try:
-            group = StudyGroup.objects.get(id=group_id)
-        except StudyGroup.DoesNotExist:
-            raise serializer.ValidationError("Study group not found")
+        """
+        Found by the sprint's own sweep, not by the audit (M4 WP2).
+
+        The group was resolved with an unscoped `StudyGroup.objects.get(...)`
+        — the same defect class as everywhere else. It was saved only by the
+        creator check below, and that check raised AttributeError:
+        `permissions.PermissionDenied` does not exist (it lives in
+        rest_framework.exceptions), as does `serializer.ValidationError`.
+        Both therefore returned 500 rather than 403/400. They failed CLOSED,
+        so this was never exploitable — but an authorization decision that
+        depends on an exception firing from a typo is not a control.
+        """
+        group = resolve_group(self.request.user, self.request.data.get('study_group'))
+        if group is None:
+            raise ValidationError({'study_group': 'Invalid study group.'})
         if self.request.user != group.creator:
-            raise permissions.PermissionDenied("Only the group creator can assign quizzes")
-        serializer.save(assigned_by=self.request.user)
+            raise PermissionDenied("Only the group creator can assign quizzes")
+        serializer.save(assigned_by=self.request.user, study_group=group)
 
 
 class ListAssignedQuizView(generics.ListAPIView):
@@ -614,16 +785,48 @@ class ListAssignedQuizView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        """
+        Scoped to the caller's groups (M4 WP2).
+
+        Was `AssignedQuiz.objects.filter(study_group_id=group_id)` on a
+        client-supplied id with no membership check. AssignedQuizSerializer
+        exposes `quiz_data`, which holds the answer key — so this handed any
+        authenticated user the answers to any group's quiz. Measured: 200,
+        with the answers in the body.
+
+        The `study_group` filter is preserved exactly; it now narrows within
+        what the caller may reach instead of selecting from everything.
+        """
         group_id = self.request.query_params.get('study_group')
-        if group_id:
-            return AssignedQuiz.objects.filter(study_group_id=group_id).order_by('deadline')
-        return AssignedQuiz.objects.none()
+        if not group_id:
+            return AssignedQuiz.objects.none()
+        group = resolve_group(self.request.user, group_id)
+        if group is None:
+            return AssignedQuiz.objects.none()
+        return AssignedQuiz.objects.filter(study_group=group).order_by('deadline')
 
 
 class ManageAssignedQuizView(generics.RetrieveUpdateDestroyAPIView):
-    queryset           = AssignedQuiz.objects.all()
     serializer_class   = AssignedQuizSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Scoped to the caller's groups (M4 WP2).
+
+        Was `queryset = AssignedQuiz.objects.all()`. Update and destroy were
+        guarded by the creator checks below, but RETRIEVE was not guarded at
+        all — the same shape as the original MaterialViewSet defect. Any
+        authenticated user could GET any quiz by id and read its answers.
+
+        Scoping here also hardens update/destroy: a non-member now gets 404
+        rather than 403, so the endpoint no longer confirms that an id
+        exists. The creator checks stay — they enforce a stricter rule
+        (owner-only writes) than membership.
+        """
+        return AssignedQuiz.objects.filter(
+            study_group__in=accessible_groups(self.request.user)
+        )
 
     def perform_update(self, serializer):
         if self.get_object().study_group.creator != self.request.user:
@@ -641,18 +844,32 @@ class ManageAssignedQuizView(generics.RetrieveUpdateDestroyAPIView):
 # ─────────────────────────────────────────────────────────────
 
 class getGroupMembers(generics.ListAPIView):
-    serializer_class   = UserSerializer
+    # UserDisplaySerializer, not UserSerializer (M4 WP3). The roster of a
+    # group is the one place a user's record is shown to OTHER people, and
+    # UserSerializer carries `email` — so this endpoint published every
+    # member's address to anyone who could reach it. Nothing in the UI reads
+    # the email from here; it renders username, university and role.
+    serializer_class   = UserDisplaySerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        group_id = self.kwargs['group_id']
-        try:
-            group = StudyGroup.objects.get(id=group_id)
-            return User.objects.filter(
-                Q(id__in=group.members.all()) | Q(id=group.creator.id)
-            ).distinct()
-        except StudyGroup.DoesNotExist:
+        """
+        Scoped to groups the caller belongs to (M4 WP2).
+
+        Was `StudyGroup.objects.get(id=group_id)` with no membership check,
+        so any authenticated user could enumerate any group's full roster —
+        measured, with email addresses in the payload.
+
+        An empty queryset for both "no such group" and "not your group":
+        distinguishing them would report count=1 vs count=0 and make this a
+        group-existence oracle.
+        """
+        group = resolve_group(self.request.user, self.kwargs['group_id'])
+        if group is None:
             return User.objects.none()
+        return User.objects.filter(
+            Q(id__in=group.members.all()) | Q(id=group.creator_id)
+        ).distinct()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -737,7 +954,13 @@ class FriendsListView(APIView):
 # ─────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def process_document(request):
+    # Was the one endpoint that had already fallen through the missing
+    # DEFAULT_PERMISSION_CLASSES (M4 WP0): unauthenticated callers could
+    # POST a PDF and have PyPDF2 parse it on a 512 MB / 0.1 vCPU instance.
+    # Explicit even though the new default would cover it — this endpoint
+    # is the reason the default exists.
     uploaded_file = request.FILES.get('document')
     if not uploaded_file:
         return Response({"error": "No document uploaded!"}, status=400)
@@ -766,7 +989,10 @@ class HealthCheckView(APIView):
     Public health check endpoint for Datadog / Load Balancers.
     Pings the DB to ensure full connectivity.
     """
-    permission_classes = [] # Publicly accessible for automated checkers
+    # Explicit AllowAny rather than an empty list (M4 WP0). `[]` meant "no
+    # permission checks", which read identically to "nobody set this" — the
+    # ambiguity the default-deny baseline exists to remove.
+    permission_classes = [AllowAny]
     throttle_classes = []
 
     def get(self, request):
@@ -775,5 +1001,10 @@ class HealthCheckView(APIView):
             from django.contrib.auth import get_user_model
             get_user_model().objects.exists()
             return Response({"status": "ok", "db": "connected"}, status=200)
-        except Exception as e:
-            return Response({"status": "error", "db": "disconnected", "message": str(e)}, status=503)
+        except Exception:
+            # Static payload (M4 WP5). This returned str(e) to an
+            # unauthenticated caller, which on a connection failure is the
+            # database host, port and user. Detail goes to the log, where
+            # the operator can read it; the public body says only "down".
+            logger.exception("Health check failed")
+            return Response({"status": "error", "db": "disconnected"}, status=503)

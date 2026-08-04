@@ -312,6 +312,21 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'common.authentication.VersionedJWTAuthentication',
     ),
+    # ── Default deny (M4 security sprint, WP0) ───────────────────────────
+    #
+    # This key was ABSENT, which does not mean "no opinion" — DRF's built-in
+    # default is AllowAny, so every view was public unless someone
+    # remembered to write permission_classes. One already had slipped
+    # through: /api/upload-pdf/ accepted unauthenticated PDF parsing on a
+    # 512 MB instance.
+    #
+    # The audit's other seven findings were missed manual checks; this is
+    # why manual checks were the only defence. Public endpoints now opt in
+    # explicitly with permission_classes = [AllowAny], which is greppable,
+    # reviewable, and enforced by common/test_authorization_matrix.py.
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 3,
     # Client-IP-aware variants: Render's LAST X-Forwarded-For hop is a
@@ -377,6 +392,13 @@ REST_FRAMEWORK = {
         # 5 attempts/min is still well above human behaviour.
         'auth': '5/minute',
         'auth-refresh': '30/minute',
+        # Joining by code is a guessing surface: one correct code grants
+        # full membership (materials, chat, quizzes). Codes are now
+        # server-generated from a 31-character alphabet at length 10, so
+        # brute force is already infeasible — this bounds the attempt rate
+        # as well, since defence in depth on a credential-shaped secret
+        # costs one line. 10/min is far above any human joining flow.
+        'group-join': '10/minute',
     }
 }
 

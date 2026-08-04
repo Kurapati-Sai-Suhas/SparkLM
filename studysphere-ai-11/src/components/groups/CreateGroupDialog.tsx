@@ -23,16 +23,10 @@ export function CreateGroupDialog({ onGroupCreated }) {
     try {
       console.log("Creating group...", { name, subject, description });
       // 1. Send data to Backend
-      // Note: We use a default join_code or generate one on the backend if not provided
-      // For now, let's assume backend handles unique join_code generation or we pass a random one
-      const randomCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-      
-      await groupsAPI.create({ 
-        name, 
-        subject, 
-        description,
-        join_code: randomCode 
-      });
+      // join_code is generated server-side (M4 WP5). This used to send a
+      // Math.random() code, which is not a CSPRNG and was the group's only
+      // access credential.
+      await groupsAPI.create({ name, subject, description });
       
       // 2. Success!
       toast.success("Group created successfully!");

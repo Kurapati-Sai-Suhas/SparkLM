@@ -163,16 +163,25 @@ describe("401 refresh flow", () => {
     expect(attempts).toHaveLength(2);   // original + exactly one retry
   });
 
-  it("clears storage and redirects when there is no refresh token", async () => {
+  it("still attempts a refresh when no readable token exists, then clears and redirects", async () => {
+    // CHANGED BY AUTH V2 (M5 Phase 4). This used to assert that a missing
+    // localStorage refresh token meant NO refresh attempt. Under Auth v2
+    // the refresh token is an httpOnly cookie the client cannot read, so
+    // "nothing in storage" no longer implies "no session" — the client
+    // must ask the server and let it decide. The failure behaviour is
+    // unchanged: storage cleared, redirect to /auth.
     localStorage.setItem("authToken", "expired");
-    responses = { "/user/profile/": [reply(401)] };
+    responses = {
+      "/user/profile/": [reply(401)],
+      "/token/refresh/": [reply(401)],
+    };
     const { userAPI } = await loadApi();
 
     await expect(userAPI.getProfile()).rejects.toBeTruthy();
 
     expect(localStorage.getItem("authToken")).toBeNull();
     expect(window.location.href).toBe("/auth");
-    expect(seen.filter((r) => r.url === "/token/refresh/")).toHaveLength(0);
+    expect(seen.filter((r) => r.url === "/token/refresh/")).toHaveLength(1);
   });
 
   it("clears storage and redirects when the refresh itself fails", async () => {
@@ -234,12 +243,32 @@ describe("authAPI token storage", () => {
     expect(localStorage.getItem("refreshToken")).toBe("gr-tok");
   });
 
-  it("clears both tokens on logout", async () => {
+  it("calls the server and clears both tokens on logout", async () => {
+    // CHANGED BY AUTH V2 (M5 Phase 4). Logout is now async and must reach
+    // the server: an httpOnly cookie cannot be removed by client script,
+    // so clearing localStorage alone would leave a live refresh token in
+    // the browser — a logout that logs nobody out.
     localStorage.setItem("authToken", "a");
     localStorage.setItem("refreshToken", "r");
+    responses = { "/auth/logout/": [reply(200, { detail: "Signed out." })] };
     const { authAPI } = await loadApi();
 
-    authAPI.logout();
+    await authAPI.logout();
+
+    expect(seen.filter((r) => r.url === "/auth/logout/")).toHaveLength(1);
+    expect(localStorage.getItem("authToken")).toBeNull();
+    expect(localStorage.getItem("refreshToken")).toBeNull();
+  });
+
+  it("still clears local state when the logout request fails", async () => {
+    // Offline or already signed out. Refusing to clear would strand the
+    // user in a half-authenticated UI.
+    localStorage.setItem("authToken", "a");
+    localStorage.setItem("refreshToken", "r");
+    responses = { "/auth/logout/": [reply(500)] };
+    const { authAPI } = await loadApi();
+
+    await authAPI.logout();
 
     expect(localStorage.getItem("authToken")).toBeNull();
     expect(localStorage.getItem("refreshToken")).toBeNull();

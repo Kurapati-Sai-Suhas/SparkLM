@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 
 from common.auth_views import (
     ThrottledTokenObtainPairView, ThrottledTokenRefreshView, LogoutAllView,
+    LogoutView,
 )
 from common.google_auth_views import GoogleAuthView
 from common.review_views import ReviewQueueView
@@ -55,6 +56,9 @@ urlpatterns = [
     path('register/',      CreateUserView.as_view(),      name='register'),
     path('auth/google/',   GoogleAuthView.as_view(),       name='auth-google'),
     path('auth/logout-all/', LogoutAllView.as_view(),      name='auth-logout-all'),
+    # Required by Auth v2: an httpOnly cookie cannot be cleared by client
+    # script, so ending one session needs a server endpoint (M5 Phase 4).
+    path('auth/logout/',     LogoutView.as_view(),         name='auth-logout'),
 
     # ── User & Dashboard ────────────────────────────────────
     path('dashboard/stats/', UserDashboardStats.as_view(), name='dashboard-stats'),

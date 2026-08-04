@@ -28,6 +28,7 @@ from google.oauth2 import id_token as google_id_token
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from common.throttling import ClientIPScopedRateThrottle
+from common.auth_cookies import auth_v2_enabled, set_refresh_cookie
 from common.tokens import issue_token_pair
 from rest_framework.views import APIView
 
@@ -114,8 +115,21 @@ class GoogleAuthView(APIView):
         # become unrevocable — pinned by
         # test_google_login_tokens_are_revocable.
         refresh = issue_token_pair(user)
-        return Response({
+        # Auth v2 (M5 Phase 4): SSO is just another way to obtain a token
+        # pair, so it must transport the refresh token exactly as password
+        # login does. If this path kept returning `refresh` in the body
+        # while login moved to a cookie, every Google user would keep a
+        # script-readable refresh token and the flag would be a no-op for
+        # them — a partial migration is a migration that did not happen.
+        body = {
             "access": str(refresh.access_token),
             "refresh": str(refresh),
             "created": created,
-        })
+        }
+
+        if auth_v2_enabled():
+            body.pop("refresh")
+            response = Response(body)
+            return set_refresh_cookie(response, str(refresh))
+
+        return Response(body)

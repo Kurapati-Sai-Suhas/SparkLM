@@ -37,7 +37,14 @@ async function loadApi() {
   const axios = (await import("axios")).default;
 
   const adapter = async (config: any) => {
-    seen.push({ url: config.url, headers: { ...config.headers } });
+    // `method` and `data` added for the Task 1 client-contract tests; the
+    // existing assertions read only `url`/`headers`, so this is additive.
+    seen.push({
+      url: config.url,
+      method: (config.method ?? "get").toLowerCase(),
+      data: config.data,
+      headers: { ...config.headers },
+    });
     const queue = responses[config.url] ?? [];
     const next = queue.length > 1 ? queue.shift() : queue[0];
     const res = next ?? reply(200, { ok: true });
@@ -149,7 +156,10 @@ describe("401 refresh flow", () => {
     responses = {
       "/user/profile/": [reply(401), reply(200, {})],
       "/dashboard/stats/": [reply(401), reply(200, {})],
-      "/user/stats/": [reply(401), reply(200, {})],
+      // Was userAPI.getStats() -> /user/stats/, a route the backend never
+      // served; removed in Task 1. Any third concurrent request proves the
+      // same property, so this now uses a real endpoint.
+      "/notifications/": [reply(401), reply(200, [])],
       "/token/refresh/": [reply(200, { access: "fresh-token" })],
     };
     const { userAPI } = await loadApi();
@@ -157,7 +167,7 @@ describe("401 refresh flow", () => {
     await Promise.all([
       userAPI.getProfile(),
       userAPI.getDashboardStats(),
-      userAPI.getStats(),
+      userAPI.getNotifications(),
     ]);
 
     const refreshes = seen.filter((r) => r.url === "/token/refresh/");
@@ -295,5 +305,152 @@ describe("authAPI token storage", () => {
 
     expect(localStorage.getItem("authToken")).toBeNull();
     expect(localStorage.getItem("refreshToken")).toBeNull();
+  });
+});
+
+// ── N3 Phase 1a, Task 1: the client's contract with the backend ─────────
+//
+// Three pages (/notifications, /schedule, /settings) were broken in
+// production because they hand-rolled fetches instead of using this client.
+// Migrating them (Tasks 2-4) is only safe if the client itself is correct —
+// and it was not: eight methods addressed routes the backend has never
+// served, and every one of them had zero call sites, so nothing ever failed
+// loudly enough to notice.
+//
+// The path-contract test below is the guard that would have caught the
+// whole class. It compares every path this client requests against the
+// routes actually registered in groups/urls.py.
+
+describe("client contract: settings + notifications (Task 1)", () => {
+  it("getSettings issues GET /settings/profile/", async () => {
+    const { userAPI } = await loadApi();
+
+    await userAPI.getSettings();
+
+    expect(seen[0].url).toBe("/settings/profile/");
+    expect(seen[0].method).toBe("get");
+  });
+
+  it("updateSettings issues PUT /settings/profile/ with the payload", async () => {
+    const { userAPI } = await loadApi();
+
+    await userAPI.updateSettings({ bio: "hello", email_alerts: false });
+
+    expect(seen[0].url).toBe("/settings/profile/");
+    expect(seen[0].method).toBe("put");
+    expect(JSON.parse(seen[0].data)).toEqual({ bio: "hello", email_alerts: false });
+  });
+
+  it("sendTestEmail issues POST /settings/email/", async () => {
+    const { userAPI } = await loadApi();
+
+    await userAPI.sendTestEmail();
+
+    expect(seen[0].url).toBe("/settings/email/");
+    expect(seen[0].method).toBe("post");
+  });
+
+  it("getNotifications issues GET /notifications/", async () => {
+    const { userAPI } = await loadApi();
+
+    await userAPI.getNotifications();
+
+    expect(seen[0].url).toBe("/notifications/");
+    expect(seen[0].method).toBe("get");
+  });
+
+  it("markAllNotificationsRead issues PUT /notifications/", async () => {
+    // Collection-level, not per-id: the backend marks every unread
+    // notification read in one call. The removed markNotificationRead
+    // assumed a per-id endpoint that does not exist.
+    const { userAPI } = await loadApi();
+
+    await userAPI.markAllNotificationsRead();
+
+    expect(seen[0].url).toBe("/notifications/");
+    expect(seen[0].method).toBe("put");
+  });
+
+  it("carries auth and the CSRF sentinel like every other call", async () => {
+    const { userAPI, setAccessToken } = await loadApi();
+    setAccessToken("tok-settings");
+
+    await userAPI.getSettings();
+
+    expect(seen[0].headers.Authorization).toBe("Bearer tok-settings");
+    expect(seen[0].headers["X-SparkLM-Client"]).toBe("web");
+  });
+
+  it("no longer exposes methods that addressed non-existent routes", async () => {
+    const { userAPI, aiAPI, scheduleAPI } = await loadApi();
+
+    // Each of these targeted a route the backend does not serve, and each
+    // had zero call sites. Re-adding one would reintroduce a silent 404.
+    expect(userAPI.getAchievements).toBeUndefined();
+    expect(userAPI.getStats).toBeUndefined();
+    expect(userAPI.markNotificationRead).toBeUndefined();
+    expect(userAPI.updateProfile).toBeUndefined(); // PATCH /user/profile/ -> 405
+    expect(aiAPI.submitQuiz).toBeUndefined();
+    expect(scheduleAPI.updateEvent).toBeUndefined();
+    expect(scheduleAPI.deleteEvent).toBeUndefined();
+  });
+
+  it("keeps the schedule methods Task 2 will use", async () => {
+    const { scheduleAPI } = await loadApi();
+
+    expect(typeof scheduleAPI.getSchedule).toBe("function");
+    expect(typeof scheduleAPI.createEvent).toBe("function");
+  });
+});
+
+// ── The guard that would have caught all eight ──────────────────────────
+//
+// Eight client methods addressed routes the backend has never served. None
+// had a call site, so nothing failed loudly enough to be noticed — and the
+// three production-broken pages hand-rolled their own fetches precisely
+// because the client had no correct method to call.
+//
+// This compares every path the client requests against the routes actually
+// registered in groups/urls.py. It reads the real URLconf rather than a
+// hand-maintained list, so it cannot drift from the backend.
+describe("client contract: every path exists in the backend URLconf", () => {
+  // __dirname is <repo>/studysphere-ai-11/src/services
+  const readSource = (rel: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readFileSync } = require("node:fs");
+    const { join } = require("node:path");
+    return readFileSync(join(__dirname, rel), "utf8");
+  };
+
+  const normalise = (p: string) =>
+    p.replace(/^\//, "").split("?")[0].replace(/\$\{[^}]*\}/g, "<id>");
+
+  it("no client path is missing from groups/urls.py", () => {
+    const client = readSource("api.js");
+    const urls = readSource("../../../backend/LearnLM/groups/urls.py");
+
+    const requested = [
+      ...new Set(
+        [...client.matchAll(/api\.(?:get|post|put|patch|delete)\(\s*[`'"]([^`'"]+)/g)].map(
+          (m) => m[1]
+        )
+      ),
+    ];
+
+    const routes = new Set(
+      [...urls.matchAll(/path\(\s*['"]([^'"]*)/g)].map((m) =>
+        m[1].replace(/<[^>]+>/g, "<id>")
+      )
+    );
+    // DefaultRouter registrations (groups, materials) are not `path()` calls.
+    [
+      "groups/", "groups/<id>/", "groups/join/", "groups/<id>/leave/",
+      "materials/", "materials/<id>/", "materials/<id>/download/",
+    ].forEach((r) => routes.add(r));
+
+    const missing = requested.filter((p) => !routes.has(normalise(p)));
+
+    expect(requested.length).toBeGreaterThan(15); // guards the guard
+    expect(missing).toEqual([]);
   });
 });

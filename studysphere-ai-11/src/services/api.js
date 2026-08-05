@@ -150,15 +150,44 @@ api.interceptors.response.use(
 );
 
 // ==================== User API ====================
+//
+// Every path here is relative to the instance baseURL, which already ends
+// in `/api` — so it is `/notifications/`, never `/api/notifications/`.
+// Repeating the prefix produces `/api/api/...` and a 404.
+//
+// N3 Phase 1a, Task 1. Five methods were removed because they addressed
+// routes the backend does not serve; each had ZERO call sites, so removing
+// them changes no behaviour:
+//
+//   getAchievements       GET   /user/achievements/        no such route
+//   getStats              GET   /user/stats/               no such route
+//   getNotifications      GET   /user/notifications/       no such route
+//   markNotificationRead  PATCH /user/notifications/{id}/read/  no such route
+//   updateProfile         PATCH /user/profile/             route exists, but
+//                                                          UserProfileView
+//                                                          implements only
+//                                                          get() -> 405
+//
+// The five below replace them with paths that exist in groups/urls.py.
+// They are the client surface Tasks 2-4 migrate the three broken pages
+// onto; nothing calls them yet, which is why this task is behaviour-neutral.
 export const userAPI = {
   getDashboardBootstrap: () => api.get('/dashboard/bootstrap/'),
   getDashboardStats: () => api.get('/dashboard/stats/'),
   getProfile: () => api.get('/user/profile/'),
-  updateProfile: (updates) => api.patch('/user/profile/', updates),
-  getAchievements: () => api.get('/user/achievements/'),
-  getStats: () => api.get('/user/stats/'),
-  getNotifications: () => api.get('/user/notifications/'),
-  markNotificationRead: (id) => api.patch(`/user/notifications/${id}/read/`),
+
+  // Settings page (/api/settings/...). Kept on userAPI rather than a new
+  // export: both endpoints are scoped to the current user, and the page
+  // reads them as one profile object.
+  getSettings: () => api.get('/settings/profile/'),
+  updateSettings: (settings) => api.put('/settings/profile/', settings),
+  sendTestEmail: () => api.post('/settings/email/'),
+
+  // Notifications page. The backend exposes a collection-level PUT that
+  // marks every unread notification read — there is no per-id endpoint,
+  // which is what the removed markNotificationRead wrongly assumed.
+  getNotifications: () => api.get('/notifications/'),
+  markAllNotificationsRead: () => api.put('/notifications/'),
 };
 
 // ==================== Authentication API ====================
@@ -251,19 +280,23 @@ export const aiAPI = {
   generateQuiz: (materialId, topic, questionCount = 10, difficulty = 'medium') => 
     api.post('/ai/quiz/', { materialId, topic, questionCount, difficulty }),
 
-  submitQuiz: (quizId, answers) => 
-    api.post(`/ai/quiz/${quizId}/submit/`, { answers }),
+  // submitQuiz removed (Task 1): posted to /ai/quiz/{id}/submit/, which the
+  // backend does not serve. Quiz results are saved via /quiz/save/ and
+  // assigned quizzes managed under /quizzes/assigned/{pk}/. Zero call sites.
 
-  askDoubt: (question, context = null, attachments = []) => 
+  askDoubt: (question, context = null, attachments = []) =>
     api.post('/ai/doubt/', { question, context, attachments }),
 };
 
 // ==================== Schedule API ====================
 export const scheduleAPI = {
+  // Correct and already matching the backend — Task 2 migrates Schedule.tsx
+  // onto these rather than adding anything new.
   getSchedule: () => api.get('/schedule/'),
   createEvent: (eventData) => api.post('/schedule/', eventData),
-  updateEvent: (eventId, updates) => api.patch(`/schedule/${eventId}/`, updates),
-  deleteEvent: (eventId) => api.delete(`/schedule/${eventId}/`),
+  // updateEvent / deleteEvent removed (Task 1): both addressed
+  // /schedule/{id}/, which the backend does not serve — ScheduleView exposes
+  // only collection-level GET and POST. Zero call sites.
 };
 
 export default api;

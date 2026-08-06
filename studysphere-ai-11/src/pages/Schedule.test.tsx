@@ -103,13 +103,23 @@ describe("Schedule — loading existing sessions", () => {
     expect(await screen.findByTestId("empty-schedule-cta")).toBeTruthy();
   });
 
-  it("still renders when loading fails", async () => {
+  it("handles a failed load instead of leaving the rejection unhandled", async () => {
+    // Two properties, and the second is the one that nearly went untested:
+    // the page must still render, AND the rejection must be CAUGHT.
+    // Mutation testing showed that deleting `.catch(console.error)` failed
+    // no assertion while emitting unhandled-rejection warnings — so a later
+    // "tidy up that console.error" would reintroduce them silently. In a
+    // browser those surface as console noise and, with Sentry wired up, as
+    // reported exceptions.
+    const onError = vi.spyOn(console, "error").mockImplementation(() => {});
     getSchedule.mockRejectedValue(new Error("network down"));
 
     render(<Schedule />);
 
     await waitFor(() => expect(getSchedule).toHaveBeenCalled());
     expect(await screen.findByTestId("empty-schedule-cta")).toBeTruthy();
+    await waitFor(() => expect(onError).toHaveBeenCalled());
+    onError.mockRestore();
   });
 });
 

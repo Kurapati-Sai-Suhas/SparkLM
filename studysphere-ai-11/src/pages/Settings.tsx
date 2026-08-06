@@ -26,34 +26,37 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
-import { getAccessToken } from "@/services/api";
+import { userAPI } from "@/services/api";
 
 export default function Settings() {
   const [profile, setProfile] = useState({ first_name: "", last_name: "", email: "", bio: "", email_alerts: true });
 
+  // Was a raw fetch to the RELATIVE path "/api/settings/profile/". On Vercel
+  // that resolved against the SPA's own origin, where the catch-all rewrite
+  // in vercel.json serves index.html with HTTP 200 — so this parsed the
+  // app's own HTML as JSON, threw, and was swallowed. This page has been
+  // broken in production for three independent reasons: that, `Bearer null`
+  // from a localStorage key nothing ever wrote, and a backend 500 on
+  // profile.bio. The first two are fixed; the third was fixed in M5 Phase 1.
   useEffect(() => {
-    fetch("/api/settings/profile/", {
-      headers: { Authorization: `Bearer ${getAccessToken()}` }
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.email !== undefined) setProfile(data);
-    })
-    .catch(console.error);
+    userAPI.getSettings()
+      .then(({ data }) => {
+        if (data.email !== undefined) setProfile(data);
+      })
+      .catch(console.error);
   }, []);
 
   const handleSaveProfile = async () => {
     try {
-      await fetch("/api/settings/profile/", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getAccessToken()}`,
-        },
-        body: JSON.stringify(profile),
-      });
+      await userAPI.updateSettings(profile);
       toast.success("Profile saved");
     } catch (e) {
+      // This catch was always here and always correct — it simply never
+      // fired. `fetch` resolves on any HTTP status, so a 400 (duplicate or
+      // malformed email) or a 500 still reached toast.success and told the
+      // user "Profile saved" when nothing had been saved. axios rejects on
+      // non-2xx, so the existing error path now actually runs. No new code:
+      // changing the transport is what fixed the lie.
       toast.error("Failed to save profile");
     }
   };
@@ -62,20 +65,26 @@ export default function Settings() {
     setProfile({ ...profile, email_alerts: checked });
     if (checked) {
       toast("Sending test email to verify connection...");
-      fetch("/api/settings/email/", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${getAccessToken()}`,
-        }
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "Email sent successfully!") {
-            toast.success(data.status);
-        } else {
-            toast.error(data.message || "Failed to send email. Check SMTP settings.");
-        }
-      });
+      userAPI.sendTestEmail()
+        .then(({ data }) => {
+          if (data.status === "Email sent successfully!") {
+              toast.success(data.status);
+          } else {
+              toast.error(data.message || "Failed to send email. Check SMTP settings.");
+          }
+        })
+        // TestEmailView returns 500 with {status:"error", message: <reason>}
+        // when SMTP fails. `fetch` resolved on that, so the else branch above
+        // read `data.message` and showed the real reason. axios REJECTS on
+        // 500, which would leave the else branch unreachable, the reason
+        // lost, and the rejection unhandled. Reading the same field off
+        // err.response.data keeps the user-visible behaviour identical.
+        .catch((err) => {
+          toast.error(
+            err?.response?.data?.message ||
+            "Failed to send email. Check SMTP settings."
+          );
+        });
     }
   };
 

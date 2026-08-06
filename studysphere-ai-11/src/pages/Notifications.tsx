@@ -5,35 +5,44 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bell, CheckCheck, Trash2, Sparkles, Settings2 } from "lucide-react";
 
 import { useState, useEffect } from "react";
-import { getAccessToken } from "@/services/api";
+import { userAPI } from "@/services/api";
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState<any[]>([]);
 
+  // Was a raw fetch to the RELATIVE path "/api/notifications/". On Vercel
+  // that resolved against the SPA's own origin, where the catch-all rewrite
+  // in vercel.json serves index.html with HTTP 200 — so this parsed the
+  // app's own HTML as JSON, threw, and was swallowed. The page has never
+  // shown a real notification in production.
+  //
+  // The shared client supplies the origin (baseURL) plus the auth header,
+  // the CSRF sentinel, and the 401 refresh-and-retry interceptor.
   useEffect(() => {
-    fetch("/api/notifications/", {
-      headers: { Authorization: `Bearer ${getAccessToken()}` }
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (Array.isArray(data)) {
-        setNotifications(data.map(n => ({
-          ...n,
-          icon: Bell,
-          read: n.is_read
-        })));
-      }
-    })
-    .catch(console.error);
+    userAPI.getNotifications()
+      .then(({ data }) => {
+        if (Array.isArray(data)) {
+          setNotifications(data.map(n => ({
+            ...n,
+            icon: Bell,
+            read: n.is_read
+          })));
+        }
+      })
+      .catch(console.error);
   }, []);
 
   const handleMarkAllRead = () => {
-    fetch("/api/notifications/", {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${getAccessToken()}` }
-    }).then(() => {
-      setNotifications(notifications.map(n => ({ ...n, read: true })));
-    });
+    userAPI.markAllNotificationsRead()
+      .then(() => {
+        setNotifications(notifications.map(n => ({ ...n, read: true })));
+      })
+      // A catch is REQUIRED, not defensive. `fetch` resolves on any HTTP
+      // status, so a failed PUT still ran the .then and marked everything
+      // read locally — the UI claimed a success the server never performed.
+      // axios rejects on non-2xx, so the list now correctly stays unread,
+      // and without this the rejection would be unhandled.
+      .catch(console.error);
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;

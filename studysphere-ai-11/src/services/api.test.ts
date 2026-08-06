@@ -438,9 +438,13 @@ describe("client contract: every path exists in the backend URLconf", () => {
     ];
 
     const routes = new Set(
-      [...urls.matchAll(/path\(\s*['"]([^'"]*)/g)].map((m) =>
-        m[1].replace(/<[^>]+>/g, "<id>")
-      )
+      [...urls.matchAll(/path\(\s*['"]([^'"]*)/g)]
+        .map((m) => m[1].replace(/<[^>]+>/g, "<id>"))
+        // `path('', include(router.urls))` parses to an EMPTY route, which
+        // would match any client path normalising to "" — verified: without
+        // this filter, a client path of "/" passes the check. The router's
+        // real routes are listed explicitly below.
+        .filter(Boolean)
     );
     // DefaultRouter registrations (groups, materials) are not `path()` calls.
     [
@@ -452,5 +456,22 @@ describe("client contract: every path exists in the backend URLconf", () => {
 
     expect(requested.length).toBeGreaterThan(15); // guards the guard
     expect(missing).toEqual([]);
+  });
+
+  it("sees every api.<verb>() call — no path is invisible to the guard", () => {
+    // The check above can only inspect paths written as string literals. A
+    // call like `api.get(url)` is skipped SILENTLY, so the contract would
+    // pass while covering less than it claims. Comparing call sites to
+    // captured paths turns that blind spot into a failure.
+    const client = readSource("api.js");
+
+    const callSites = [
+      ...client.matchAll(/api\.(?:get|post|put|patch|delete)\(/g),
+    ].length;
+    const captured = [
+      ...client.matchAll(/api\.(?:get|post|put|patch|delete)\(\s*[`'"][^`'"]+/g),
+    ].length;
+
+    expect(captured).toBe(callSites);
   });
 });

@@ -403,8 +403,48 @@ describe("Run Code — concurrency", () => {
     expect((await screen.findByTestId("run-stdout")).textContent).toContain("second");
   });
 
-  it("an older Run response cannot overwrite a newer one", async () => {
-    // Judge0 latency is unbounded, so out-of-order responses are real.
+  it("a Run and a Submit dispatched together start only ONE execution", async () => {
+    // Regression for a race this review found. Run and Submit originally kept
+    // separate guards — Run a ref, Submit the `submitting`/`running` state.
+    // Dispatched in the same batch, Run set its ref synchronously while
+    // Submit's closure still read a stale `running === false`, so BOTH fired
+    // and two Judge0 executions ran at once against a 10/min budget.
+    // Measured before the fix: [runCode 1, submit 1]. One shared gate now.
+    const pending = deferred<any>();
+    runCode.mockReturnValue(pending.promise);
+    await renderPortal();
+    const fetchBefore = (global.fetch as any).mock.calls.length;
+
+    await act(async () => {
+      screen.getByTestId("run-code-btn").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      screen.getByTestId("submit-code-btn").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const submitCalls = (global.fetch as any).mock.calls
+      .slice(fetchBefore)
+      .filter((c: any[]) => String(c[0]).includes("/api/code/submit/"));
+
+    expect(runCode).toHaveBeenCalledTimes(1);
+    expect(submitCalls).toHaveLength(0);
+
+    await act(async () => { pending.resolve({ data: OK_RUN }); });
+  });
+
+  it("the gate releases after a Submit, so a later Run is admitted", async () => {
+    await renderPortal();
+
+    fireEvent.click(screen.getByTestId("submit-code-btn"));
+    await screen.findByTestId("results-block");
+
+    fireEvent.click(screen.getByTestId("run-code-btn"));
+    await waitFor(() => expect(runCode).toHaveBeenCalledTimes(1));
+  });
+
+  it("a later Run replaces the earlier result", async () => {
+    // NOT a stale-response test. Runs are single-flight, so two cannot be in
+    // flight together and an out-of-order overwrite is unconstructible — the
+    // monotonic request id that used to guard it was removed as provably dead.
+    // What remains worth asserting is that a second run supersedes the first.
     let releaseFirst: (v: any) => void = () => {};
     runCode.mockReturnValueOnce(new Promise((r) => { releaseFirst = r; }));
     await renderPortal();

@@ -75,31 +75,26 @@ export default function AdaptiveCodingPortal() {
   const [runResult, setRunResult] = useState<any>(null);
   const [consoleMode, setConsoleMode] = useState<'idle' | 'run' | 'submit'>('idle');
 
-  // Monotonic id so a slow earlier Run cannot overwrite a newer one. Judge0
-  // latency is unbounded in practice (cold sandboxes, queueing), so responses
-  // genuinely can arrive out of order.
+  // SINGLE-FLIGHT EXECUTION GATE — one ref shared by Run and Submit.
   //
-  // ⚠ CURRENTLY UNREACHABLE, and provably so. runSeq is incremented at exactly
-  // one site, inside the critical section the in-flight ref below opens; that
-  // gate admits at most one handler body at a time; so no second increment can
-  // land between a run's own increment and its own check, and
-  // `seq !== runSeq.current` is never true. Mutation testing confirms it:
-  // replacing the check with `if (false)` fails nothing.
+  // A ref, not state: the handlers close over `running`/`submitting`, so two
+  // activations landing before React re-renders both read the old `false` and
+  // both dispatch. The buttons' `disabled` attribute hides that in a browser,
+  // which is why a state-based guard is unkillable by mutation testing —
+  // deleting it changes nothing observable through the UI.
   //
-  // Kept deliberately rather than deleted. It costs nothing and becomes load
-  // bearing the moment the in-flight gate is relaxed — e.g. if Run is ever
-  // allowed to restart mid-flight, or triggered from a keyboard shortcut that
-  // bypasses the button. Delete it only together with a decision that
-  // overlapping runs stay impossible.
-  const runSeq = useRef(0);
-
-  // In-flight flag as a REF, not state. `running` is captured by the handler's
-  // closure, so two clicks landing before React re-renders both read the old
-  // `false` and both dispatch — the classic stale-closure double submit. The
-  // button's `disabled` attribute hides this in practice, which is why
-  // mutation testing found the state-based guard unkillable: deleting it
-  // changed nothing observable. A ref is read at call time and cannot go stale.
-  const runInFlight = useRef(false);
+  // SHARED, not one ref per action: Run and Submit spend the same Judge0
+  // budget (scope 'judge0', 10/min). Guarding them separately let a Run and a
+  // Submit start together — the second handler read a stale flag from the
+  // first — and fire two executions at once. That race was real and is now
+  // pinned by "a Run and a Submit dispatched together start only one
+  // execution". One gate for one resource is the honest model.
+  //
+  // Because the gate admits at most ONE handler body at a time, two Run
+  // requests can never be in flight together, so an older Run response cannot
+  // arrive after a newer one. A monotonic request id used to sit here for that
+  // case; it was removed as provably dead rather than kept as decoration.
+  const execInFlight = useRef(false);
 
   const fetchNextProblem = useCallback(async () => {
     setLoading(true);
@@ -146,10 +141,9 @@ export default function AdaptiveCodingPortal() {
     // One execution at a time. Run and Submit share the same Judge0 budget
     // (10/min, scope 'judge0'), so overlapping them spends it twice as fast
     // for no benefit.
-    if (runInFlight.current || submitting) return;
-    runInFlight.current = true;
+    if (execInFlight.current) return;
+    execInFlight.current = true;
 
-    const seq = ++runSeq.current;
     setRunning(true);
     setConsoleMode('run');
     // The previous run's output deliberately stays on screen until the new one
@@ -165,10 +159,8 @@ export default function AdaptiveCodingPortal() {
         problemId: problem.id,
         stdin: sampleStdin ?? '',
       });
-      if (seq !== runSeq.current) return; // superseded by a newer Run
       setRunResult(data);
     } catch (error: any) {
-      if (seq !== runSeq.current) return;
       // Surface the failure as a failure. The legacy portal's shape allowed a
       // transport error to render beside a success glyph; here an error is its
       // own state and can never be mistaken for output.
@@ -179,13 +171,14 @@ export default function AdaptiveCodingPortal() {
           'Could not reach the execution service.',
       });
     } finally {
-      runInFlight.current = false;
-      if (seq === runSeq.current) setRunning(false);
+      execInFlight.current = false;
+      setRunning(false);
     }
   };
 
   const handleSubmit = async () => {
-    if (running || submitting) return;
+    if (execInFlight.current) return;
+    execInFlight.current = true;
     setSubmitting(true);
     setConsoleMode('submit');
     const token = getAccessToken();
@@ -208,6 +201,7 @@ export default function AdaptiveCodingPortal() {
     } catch (error) {
       console.error('Failed to submit:', error);
     } finally {
+      execInFlight.current = false;
       setSubmitting(false);
     }
   };

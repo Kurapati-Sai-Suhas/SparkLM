@@ -315,11 +315,18 @@ class HierarchicalEngine:
 def get_curriculum_graphs(subjects=("dsa", "os", "cn")) -> dict:
     """
     Lazy, DB-backed replacement for the old module-level DSA_GRAPH /
-    OS_GRAPH / CN_GRAPH constants (used by retrain_ai, export_onnx and
-    synthetic_data_generator). Unlike HierarchicalEngine._get_graph, this
-    does NOT fall back to "all topics" when a subject has no matching
-    portal — an unseeded subject yields an empty graph so ML pipelines
-    skip it instead of training on the wrong curriculum.
+    OS_GRAPH / CN_GRAPH constants. Unlike HierarchicalEngine._get_graph,
+    this does NOT fall back to "all topics" when a subject has no matching
+    portal — an unseeded subject yields an empty graph so a consumer skips
+    it instead of training on the wrong curriculum.
+
+    ⚠ Currently has NO callers. Its three consumers — retrain_ai's GCN
+    section, export_onnx and synthetic_data_generator — were removed in
+    M1/P1.1 as part of retiring the un-runnable deep-learning stack. Kept
+    rather than deleted because it is torch-free NetworkX code in the
+    production routing module, and removing it is a change to this
+    module's surface that P1.1 does not need to make. Delete it, or give
+    it a consumer, when M6 decides the routing-engine question.
     """
     from groups.models import Topic, TopicPrerequisite
 

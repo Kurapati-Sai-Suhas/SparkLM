@@ -36,15 +36,30 @@ P0.1**: a CSP block on `accounts.google.com/gsi/style` (from `style-src` in
 `vercel.json`, unchanged by this merge) and a Google Sign-In 400. Logged as
 debt, not a P0.1 regression.
 
-## M1 — Surface Reduction ⬜ *(5 ed)*
+## M1 — Surface Reduction 🔄 *(5 ed)* — P1.1 done, P1.2 open
 
-- [ ] **P1.1 Retire the un-runnable ML stack** — `m1-p1-retire-ml-stack`
-  - [ ] T1.1.1 Delete `gnn_engine`, `shap_explainer`, `export_onnx`, `mirt_engine`
-  - [ ] T1.1.2 Delete `retrain_ai`, `synthetic_data_generator`, `models_data/*`
-  - [ ] T1.1.3 Collapse `_compute_xai` to the heuristic branch (pin response schema)
-  - [ ] T1.1.4 Delete `requirements-ml.txt`; simplify CI install
-  - [ ] T1.1.5 Remove `ENABLE_SHAP_XAI` from `settings.py` and `render.yaml`
-  - [ ] T1.1.6 Record CI install-time before/after
+- [x] **P1.1 Retire the un-runnable ML stack** — merged `40b4ba5` (PR #7), 2026-08-09
+  - [x] T1.1.1 Deleted `gnn_engine`, `shap_explainer`, `export_onnx`, `mirt_engine`
+  - [x] T1.1.2 **CORRECTED** — deleted `synthetic_data_generator` + 9 GCN artifacts +
+        an orphaned `prerequisite_model.pth`. **`retrain_ai.py` KEPT**: preflight proved
+        it trains the *production* routing classifier (`joblib.dump` →
+        `routing_classifier_v2.pkl` → `joblib.load` in `hybrid_router`) and that six
+        tests exercise it. Its dead GCN + LSTM sections were excised instead.
+  - [x] T1.1.3 Collapsed `_compute_xai` to the heuristic branch; schema pinned
+  - [x] T1.1.4 **CORRECTED** — `requirements-ml.txt` reduced 5 → 2 packages, not deleted.
+        `torch`/`transformers` still serve Visual Search (P9.3). Measured 53 MB off CI.
+  - [x] T1.1.5 **CORRECTED** — `ENABLE_SHAP_XAI` was never in `settings.py`; removed from
+        `render.yaml`, `.env.example`, `README.md`, `FEATURE_FLAGS.md`, `DEPLOYMENT.md`
+        and the flag tests
+  - [x] T1.1.6 Measured: onnxruntime 38 MB + torch-geometric 11 MB + shap 2 MB
+
+**P1.1 evidence.** 679 backend tests (was 675) + 104 frontend; typecheck, build and
+Django check clean; CI green on all 3 jobs on `main`. Production `/healthz` → 200 after
+deploy, proving the backend boots without the deleted modules. Mutants killed: classifier
+training removed · artifact write removed · contract body dropped · evaluation dropped ·
+gate bypassed with fabricated metrics · torch reintroduced · XAI schema key renamed · flag
+restored to the register. Two tests were added *because* mutation testing exposed that
+deleting `joblib.dump` left all 675 tests green.
 - [ ] **P1.2 Collapse coding surfaces; remove Flashcards** — `m1-p2-collapse-surfaces`
   - [ ] T1.2.1 Redirect `/code` → `/coding-portal`; delete `CodingPortal.tsx`
   - [ ] T1.2.2 Remove Flashcards page, `AIFlashcardView`, URL, nav entry

@@ -10,10 +10,10 @@
 tracker is [`EXECUTION_CHECKLIST.md`](EXECUTION_CHECKLIST.md). Do not redesign
 either unless implementation proves an item impossible or technically incorrect.
 
-**Last completed:** M0 / P0.1 — N3 Phase 1a merged to `main` as `5a57565`,
+**Last completed:** M1 / P1.1 — un-runnable ML stack retired, merged `40b4ba5` (PR #7), CI green, deployed and verified.
 CI green on all three jobs, deployed and verified.
 
-**Phase:** M1 / **P1.1 — Retire the un-runnable ML stack.**
+**Phase:** M1 / **P1.2 — Collapse coding surfaces and remove Flashcards.**
 **Blocked on:** nothing.
 
 **Premise:** Track A (pre-launch). **Track B trigger:** >20 real users or any
@@ -22,35 +22,16 @@ accessibility work runs *before* remaining feature work.
 
 ---
 
-## Next task — P1.1: Retire the un-runnable ML stack
+## Next task — P1.2: Collapse coding surfaces; remove Flashcards
 
-- **Branch:** `m1-p1-retire-ml-stack`
-- **Effort:** 3 ed
-- **Risk:** LOW-MEDIUM
-- **Goal:** remove deep-learning code that cannot execute on the web tier,
-  plus its ~2 GB dependency tier.
+- **Branch:** `m1-p2-collapse-surfaces` · **Effort:** 2 ed · **Risk:** LOW
+- Redirect `/code` → `/coding-portal`, delete `components/CodingPortal.tsx`
+- Remove Flashcards page, `AIFlashcardView`, its URL and nav entry
+- Shrink the Phase 1b allowlist 6 → 5
 
-**Why this is safe to delete, and why it is independent of the M6 measurement:**
-the GCN feeds *explainability only* — it is reached solely through
-`_compute_shap_xai`, gated by `ENABLE_SHAP_XAI=false`, with a proven heuristic
-fallback. Routing uses sklearn (`RoutingClassifier`) and NetworkX
-(`HierarchicalEngine`), both core dependencies that stay. `requirements-ml.txt`
-is deliberately not installed by `render.yaml`, so none of this can run in
-production today.
-
-**Tasks** (detail in `EXECUTION_ROADMAP.md` §M1):
-1. T1.1.1 Delete `gnn_engine`, `shap_explainer`, `export_onnx`, `mirt_engine`
-2. T1.1.2 Delete `retrain_ai`, `synthetic_data_generator`, `models_data/*`
-3. T1.1.3 Collapse `_compute_xai` to the heuristic branch — **pin the response
-   schema first**; the frontend radar chart reads `shap_values`
-4. T1.1.4 Delete `requirements-ml.txt`; simplify CI install
-5. T1.1.5 Remove `ENABLE_SHAP_XAI` from `settings.py` and `render.yaml`
-6. T1.1.6 Record CI install-time before/after
-
-**Highest risk in this phase:** XAI response-schema drift. Write the
-schema-pinning test *before* deleting anything.
-
----
+**Carry forward from P1.1:** the roadmap's file lists have already proven
+unreliable once. Run the same repo-wide caller proof before deleting anything,
+and do not trust a filename to tell you what a module does.
 
 ## Open items from P0.1 (not P1.1 scope)
 

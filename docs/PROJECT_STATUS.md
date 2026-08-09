@@ -63,7 +63,7 @@ The entire torch-dependent ML surface cannot execute on the web tier.
 
 | Branch | State |
 |---|---|
-| `main` | production; **at `5a57565`** — N3 Phase 1a merged 2026-08-09 |
+| `main` | production; **at `40b4ba5`** — P1.1 merged 2026-08-09 (PR #7) |
 | `m6-phase1a-fix-broken-pages` | merged; retained for history |
 | `preserve/settings-email-2xx-test` | parked work (`d7b0e20`), awaiting a keep-or-drop decision |
 

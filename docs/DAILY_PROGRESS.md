@@ -14,6 +14,36 @@ Newest first. Append one entry per working session, **before the session ends**.
 
 ---
 
+## 2026-08-09 — P1.1: un-runnable ML stack retired (corrected scope)
+**Branch:** `m1-p1-remove-dead-ml-stack` · **Phase:** M1/P1.1 · **Status:** shipped (`40b4ba5`, PR #7)
+
+**Done:** Removed the deep-learning/XAI stack that could never execute in
+production, while preserving the sklearn routing classifier that does.
+
+**The correction.** The roadmap said delete `retrain_ai.py` because it "exists
+only to produce artifacts nothing can load." Preflight disproved it: the file
+writes `routing_classifier_v2.pkl`, which `hybrid_router` loads in production,
+and six tests exercise its sklearn half. It was split, not deleted — the dead
+GCN loop (body only printed) and DKT/LSTM block (built a loss object and threw
+it away) were excised. They were the sole reason the module imported torch.
+
+**Evidence:** 679 backend tests (was 675), 104 frontend, typecheck/build/Django
+check clean, CI green on all 3 jobs, `/healthz` 200 in production after deploy.
+Measured 53 MB off the CI install (onnxruntime 38, torch-geometric 11, shap 2);
+torch (503 MB) and transformers stay for Visual Search until P9.3.
+
+**Learned:** Two things worth carrying forward. First, a filename does not tell
+you what a module does — `retrain_ai` read as "the AI training thing" and was
+half production infrastructure. Second, mutation testing found that deleting
+`joblib.dump` — the single line that ships the production model — left all 675
+tests green; the ingredients were tested and the result was not. The test I
+then wrote passed for the wrong reason too, because `open(path,"w")` creates
+the file before anything is written to it.
+
+**Next:** P1.2 — collapse coding surfaces, remove Flashcards.
+
+---
+
 ## 2026-08-09 — P0.1 executed: N3 Phase 1a merged and deployed
 **Branch:** `main` · **Phase:** M0/P0.1 · **Status:** shipped (`5a57565`)
 

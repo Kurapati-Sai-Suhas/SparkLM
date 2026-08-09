@@ -439,38 +439,48 @@ Every served problem carries a four-axis explanation (time / space / logic / rec
                              │
               ┌──────────────┴──────────────┐
               ▼                              ▼
-     ENABLE_SHAP_XAI=false          ENABLE_SHAP_XAI=true
-              │                              │
-    dominant = max(scores)           trained GCN + SHAP explainer
-    (overridden to "Recency"           DeepExplainer ──fails──▶ GradientExplainer
-     if retention < 0.5)                     │
-              │                     any failure ──▶ fall back to heuristic
-              └──────────────┬──────────────┘
-                             ▼
+              dominant = max(scores)
+              (overridden to "Recency" if retention < 0.5)
+                             │
               identical JSON: {dominant_factor, shap_values,
                                 success_probability, ...}
 ```
 
-`TensorBuilder` converts recent submission telemetry into four normalized scores, torch-free by construction so the *default* path never needs PyTorch installed. The heuristic dominant factor is whichever score is highest, with one override: if predicted memory retention is below 0.5, "Topic Recency" is forced as the dominant factor regardless of the other three — telling a student they're "weak on logic" when they've simply forgotten the topic from disuse is the wrong message. When `ENABLE_SHAP_XAI` is on, `DeepExplainer` is tried first (fastest) but probed against a nonzero input first and silently falls back to `GradientExplainer` if the probe's attributions sum to zero, because `DeepExplainer` can fail *silently* against PyTorch-Geometric's message-passing operations. The SHAP background distribution is spread across `linspace(0.1, 0.9)` rather than zeros, because the trained network has dead-ReLU regions near the origin where gradients are exactly zero regardless of the real input.
+`TensorBuilder` converts recent submission telemetry into four normalized scores, torch-free by construction so the *default* path never needs PyTorch installed. The heuristic dominant factor is whichever score is highest, with one override: if predicted memory retention is below 0.5, "Topic Recency" is forced as the dominant factor regardless of the other three — telling a student they're "weak on logic" when they've simply forgotten the topic from disuse is the wrong message. A SHAP-over-GCN branch previously sat alongside this one behind `ENABLE_SHAP_XAI`; it was removed in M1/P1.1 because it could never execute on the web tier — `render.yaml` installs `requirements.txt` only, so torch, shap and the GCN artifacts were never present, and the flag shipped `false`. Every response the product has served came from the heuristic. The JSON schema is unchanged and pinned by `test_xai_payload_matches_frontend_schema`.
 
 #### Tech Stack & Why
 
-| Technology | Why here specifically |
+> **Retired in M1/P1.1 (2026-08-09).** The section below described a
+> SHAP-over-GCN attribution path that **never executed in production**:
+> `render.yaml` installs `requirements.txt` only, so torch, shap and the GCN
+> artifacts were absent from the web tier, and `ENABLE_SHAP_XAI` shipped
+> `false`. Every explainability response the product has served came from the
+> heuristic. The implementation, the flag, the GCN engine, the ONNX export
+> path and the synthetic data generator were deleted; the **response schema
+> is unchanged** and pinned by `test_xai_payload_matches_frontend_schema`.
+> Kept as a design record of what was tried and why it was retired — not as a
+> description of the running system.
+
+<details>
+<summary>Design record: the retired SHAP attribution path</summary>
+
+| Technology | Why it was chosen |
 |---|---|
-| SHAP | Formal game-theoretic guarantee (attributions sum to the actual prediction) — an axiom most simpler "feature importance" heuristics don't satisfy |
-| `DeepExplainer` / `GradientExplainer` | Approximation methods for differentiable models specifically — chosen over raw gradient saliency for the sum-consistency guarantee |
+| SHAP | Formal game-theoretic guarantee — attributions sum to the actual prediction, an axiom simpler "feature importance" heuristics do not satisfy. |
+| `DeepExplainer` / `GradientExplainer` | Approximation methods for differentiable models; chosen over raw gradient saliency. `DeepExplainer` can fail *silently* against PyTorch-Geometric message passing, so the implementation probed it against a nonzero input and fell back to `GradientExplainer` when attributions summed to zero. |
 
-#### Research References
+Reference: Lundberg, S. M., & Lee, S. I. (2017). "A Unified Approach to
+Interpreting Model Predictions." *NeurIPS 30*.
 
-1. Lundberg, S. M., & Lee, S. I. (2017). "A Unified Approach to Interpreting Model Predictions." *Advances in Neural Information Processing Systems 30* (NeurIPS 2017). [arXiv:1705.07874](https://arxiv.org/abs/1705.07874)
-
-This paper unifies several prior attribution methods (including LIME) under one Shapley-value-consistent framework. `DeepExplainer` and `GradientExplainer` are both approximation methods described in follow-on SHAP literature for differentiable models specifically, not the original paper's exact algorithm (which targets arbitrary black-box models via sampling).
-
-#### Observations
-
-The original implementation of this feature built a *fresh, untrained* GCN per request and handed it to `shap.DeepExplainer` directly — which crashed immediately (`DeepExplainer` expects a 1-argument `forward(x)`; the GCN's real signature is `forward(x, edge_index)`), and even without that crash, explanations of literally random weights would have been meaningless. The rewrite builds a process-wide, thread-safe, *trained*-weights explainer once, with an adapter module that binds an empty edge-index so each feature row is treated as an isolated node for SHAP's purposes.
+An earlier iteration built a *fresh, untrained* GCN per request and handed it
+to `shap.DeepExplainer`, which produced attributions for a randomly
+initialised network — confident-looking output with no relationship to the
+learner. That bug is the reason the trained-artifact loader existed at all.
 
 </details>
+
+</details>
+
 
 <details>
 <summary><strong>8. Agentic AI Coach</strong></summary>
@@ -945,7 +955,6 @@ npm run dev                   # http://localhost:5173
 | `JUDGE0_API_KEY`, `JUDGE0_API_HOST` | yes | Code execution (RapidAPI) |
 | `GROQ_API_KEY`, `GEMINI_API_KEY` | yes | Content generation and AI study tools |
 | `N8N_WEBHOOK_URL` | optional | LLM coach hints (fallback hints without it) |
-| `ENABLE_SHAP_XAI` | optional | Real SHAP attributions (needs `requirements-ml.txt`) |
 | `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | prod | SPA origin(s); API origin for admin-over-HTTPS |
 | `GOOGLE_CLIENT_ID` (+ `VITE_GOOGLE_CLIENT_ID` on the frontend) | optional | Google Sign-In; button hidden and endpoint 503s without it |
 | `VITE_API_URL`, `VITE_WS_URL` | frontend | Backend origins at build time |

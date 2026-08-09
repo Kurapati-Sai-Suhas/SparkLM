@@ -108,7 +108,7 @@ def test_the_register_lists_no_ghosts():
     )
 
 
-@pytest.mark.parametrize("flag", ["CURRICULUM_GATE_ENFORCE", "ENABLE_SHAP_XAI"])
+@pytest.mark.parametrize("flag", ["CURRICULUM_GATE_ENFORCE"])
 def test_behaviour_flags_carry_a_resolution(flag):
     """
     A flag without a stated resolution is a flag that becomes permanent by

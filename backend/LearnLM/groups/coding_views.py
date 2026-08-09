@@ -29,7 +29,6 @@ from .hybrid_router import (
 from .services import GradingService, GradingUnavailable, ProgressionService, wrapper_for
 from .ai_services import generate_test_cases
 from .engines.tensor_builder import TensorBuilder
-USE_REAL_SHAP = os.environ.get('ENABLE_SHAP_XAI', 'false') == 'true'
 
 
 logger = logging.getLogger(__name__)
@@ -555,42 +554,53 @@ class NextProblemView(APIView):
         return weak_topics, " ".join(parts)
 
     def _compute_xai(self, user, topic_name, hlr_state):
+        """
+        The explainability payload behind /api/code/next/.
+
+        Single path since M1/P1.1. A SHAP-over-GCN branch used to sit in
+        front of this one, selected by ENABLE_SHAP_XAI. It could never run
+        in production: `render.yaml` installs requirements.txt only, so
+        torch, shap and the GCN artifacts were absent from the web tier,
+        and the flag shipped `false`. Every response the frontend has ever
+        rendered came from the heuristic below.
+
+        The RESPONSE SCHEMA is the contract and is unchanged — the key set
+        the SPA reads (`dominant_factor`, `success_probability`,
+        `shap_values`, plus `weak_topics` / `recommendation` added below)
+        is byte-identical to before. `shap_values` keeps its name despite
+        no longer having anything to do with SHAP: renaming it would break
+        AdaptiveCodingPortal's radar chart for no gain. `source` stays too,
+        so a client can still tell which engine answered.
+        """
         features = TensorBuilder.build_user_feature_tensor(user, topic_name)
 
-        payload = None
-        if USE_REAL_SHAP:
-            # None means SHAP unavailable/failed — fall through to the
-            # heuristic so the endpoint never 500s over explainability.
-            payload = self._compute_shap_xai(features, hlr_state)
+        time_score = round(features[0] * 100, 1)
+        space_score = round(features[1] * 100, 1)
+        logic_score = round(features[2] * 100, 1)
+        recency_score = round(features[3] * 100, 1)
 
-        if payload is None:
-            time_score = round(features[0] * 100, 1)
-            space_score = round(features[1] * 100, 1)
-            logic_score = round(features[2] * 100, 1)
-            recency_score = round(features[3] * 100, 1)
-
-            if hlr_state < 0.50:
-                dominant = 'Topic Recency'
-            else:
-                scores = {
-                    'Time Complexity': time_score,
-                    'Space Complexity': space_score,
-                    'Logic Accuracy': logic_score,
-                    'Topic Recency': recency_score,
-                }
-                dominant = max(scores, key=scores.get)
-
-            payload = {
-                'source': 'heuristic',
-                'dominant_factor': dominant,
-                'success_probability': round(logic_score * hlr_state, 1),
-                'shap_values': [
-                    {'subject': 'Time Complexity', 'A': time_score, 'fullMark': 100},
-                    {'subject': 'Space Complexity', 'A': space_score, 'fullMark': 100},
-                    {'subject': 'Logic Accuracy', 'A': logic_score, 'fullMark': 100},
-                    {'subject': 'Topic Recency', 'A': recency_score, 'fullMark': 100},
-                ],
+        if hlr_state < 0.50:
+            dominant = 'Topic Recency'
+        else:
+            scores = {
+                'Time Complexity': time_score,
+                'Space Complexity': space_score,
+                'Logic Accuracy': logic_score,
+                'Topic Recency': recency_score,
             }
+            dominant = max(scores, key=scores.get)
+
+        payload = {
+            'source': 'heuristic',
+            'dominant_factor': dominant,
+            'success_probability': round(logic_score * hlr_state, 1),
+            'shap_values': [
+                {'subject': 'Time Complexity', 'A': time_score, 'fullMark': 100},
+                {'subject': 'Space Complexity', 'A': space_score, 'fullMark': 100},
+                {'subject': 'Logic Accuracy', 'A': logic_score, 'fullMark': 100},
+                {'subject': 'Topic Recency', 'A': recency_score, 'fullMark': 100},
+            ],
+        }
 
         # Actionable layer, on top of whichever engine produced the payload
         weak_topics, recommendation = self._build_recommendation(user, payload['dominant_factor'])
@@ -606,40 +616,6 @@ class NextProblemView(APIView):
         if isinstance(cases, list) and cases and isinstance(cases[0], dict):
             return {"stdin": cases[0].get("stdin", "")}
         return None
-
-    def _compute_shap_xai(self, features, hlr_state):
-        """
-        Real SHAP attributions over the trained GCN, normalized to the SAME
-        schema the frontend reads for the heuristic path (shap_values /
-        dominant_factor / success_probability). Returns None on any failure.
-        """
-        try:
-            import torch
-            from .engines.shap_explainer import get_xai_engine
-
-            engine = get_xai_engine()
-            if engine is None:
-                return None
-
-            user_tensor = torch.tensor(features, dtype=torch.float32)
-            result = engine.generate_radar_data(user_tensor)
-            if result is None:
-                return None  # degenerate attributions — use heuristic
-            success_prob = engine.predict_success(user_tensor)
-
-            # Same memory-atrophy override as the heuristic path.
-            dominant = 'Topic Recency' if hlr_state < 0.50 else result['dominant_factor']
-
-            return {
-                'source': 'shap',
-                'dominant_factor': dominant,
-                'success_probability': round(success_prob * 100, 1),
-                'shap_values': result['radar_data'],
-                'insight_text': result['insight_text'],
-            }
-        except Exception:
-            logger.exception("SHAP XAI computation failed; using heuristic payload")
-            return None
 
 class CodingOnboardingView(APIView):
     """

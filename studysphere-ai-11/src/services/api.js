@@ -288,6 +288,30 @@ export const aiAPI = {
     api.post('/ai/doubt/', { question, context, attachments }),
 };
 
+// ==================== Coding API ====================
+export const codeAPI = {
+  /**
+   * Execute the learner's current source against the question's PUBLIC
+   * sample input (M1/P1.2-A "Run before Submit").
+   *
+   * `problemId` is required, not optional. The backend builds what actually
+   * executes from the question — per-question wrapper first, generic harness
+   * otherwise — so omitting the id makes a `class Solution` stub run as bare
+   * source that defines a class, calls nothing and prints nothing. The old
+   * portal omitted it, which is why its Run button looked like it worked.
+   *
+   * Judged output is NOT returned here: this runs one public case and never
+   * touches Elo, mastery or the hidden tests. Use codeAPI.submit for that.
+   */
+  runCode: ({ code, language, problemId, stdin = '' }) =>
+    api.post('/code/run/', {
+      code,
+      language,
+      problem_id: problemId,
+      stdin,
+    }),
+};
+
 // ==================== Schedule API ====================
 export const scheduleAPI = {
   // Correct and already matching the backend — Task 2 migrates Schedule.tsx

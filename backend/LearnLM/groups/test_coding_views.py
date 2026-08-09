@@ -540,3 +540,254 @@ def test_onboarding_calibrates_profile_and_skips_topics(api_client, user, questi
     # Re-onboarding must not duplicate the synthetic submission
     api_client.post(reverse("code-onboard"), {"known_topics": ["Array"]}, format="json")
     assert CodeSubmission.objects.filter(user=user, question=question).count() == 1
+
+
+# ── Run/Submit executable parity (M1/P1.2-A) ─────────────────────────────
+#
+# CodeRunView used to apply ONLY a per-question hidden_wrapper_code entry and
+# fall through to the raw source otherwise. Question.hidden_wrapper_code
+# defaults to {}, so for most questions Run executed a bare `class Solution`:
+# it defined a class, called nothing, and printed nothing. The learner saw a
+# green status with empty output while Submit — which falls back to the
+# generic harness — graded the identical source correctly.
+#
+# These tests pin the fix at the strongest available point: the exact source
+# string handed to Judge0. Asserting "Run produced some output" would pass
+# against the old behaviour too.
+
+
+def _capturing_judge0(sink, stdout="1", status_id=3, status="Accepted",
+                      stderr="", compile_output="", error=None):
+    """A _run_on_judge0 stand-in that records the source it was given."""
+    def _mock(source_code, language, stdin=""):
+        sink["source_code"] = source_code
+        sink["language"] = language
+        sink["stdin"] = stdin
+        if error:
+            return {"error": error}
+        return {
+            "status": status,
+            "status_id": status_id,
+            "stdout": stdout,
+            "stderr": stderr,
+            "compile_output": compile_output,
+            "time": "0.05",
+            "memory": 25000,
+        }
+    return _mock
+
+
+def run_code(api_client, question=None, code=SOLUTION_CODE, language="python",
+             stdin="1", include_problem_id=True):
+    payload = {"code": code, "language": language, "stdin": stdin}
+    if include_problem_id and question is not None:
+        payload["problem_id"] = question.id
+    return api_client.post(reverse("code-run"), payload, format="json")
+
+
+@pytest.mark.django_db
+def test_run_requires_authentication(api_client, question):
+    # No force_authenticate: an anonymous caller must not reach Judge0 at all.
+    response = run_code(api_client, question)
+    assert response.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_run_rejects_an_unsupported_language(api_client, user, question):
+    api_client.force_authenticate(user=user)
+    # Real runner: the language whitelist lives in _run_on_judge0 via
+    # LANGUAGE_IDS, and this asserts it is still consulted.
+    response = run_code(api_client, question, language="brainfuck")
+    assert response.status_code == 400
+    assert "Unsupported language" in response.data.get("error", "")
+
+
+@pytest.mark.django_db
+def test_run_builds_the_same_executable_as_submit(api_client, user, question, monkeypatch):
+    """
+    THE parity assertion, made by comparing the two endpoints directly.
+
+    Deliberately NOT written as "Run equals GradingService._build_executable(...)"
+    — the first draft was, and it failed on a trailing newline because Run
+    strips the body while Submit's CharField trims it via DRF. That test was
+    encoding MY assumption about whitespace rather than the property that
+    matters. Capturing both endpoints' output for identical input asserts the
+    real invariant and cannot drift with either one's input handling.
+    """
+    api_client.force_authenticate(user=user)
+
+    submit_sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(submit_sink))
+    submit(api_client, question, code=SOLUTION_CODE, language="python")
+
+    run_sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(run_sink))
+    response = run_code(api_client, question, code=SOLUTION_CODE, language="python")
+    assert response.status_code == 200
+
+    assert run_sink["source_code"] == submit_sink["source_code"], (
+        "Run and Submit executed different source for identical input — the "
+        "exact divergence P1.2-A exists to close."
+    )
+
+
+@pytest.mark.django_db
+def test_run_applies_the_generic_harness_when_no_per_question_wrapper(
+    api_client, user, question, monkeypatch
+):
+    # The fixture has hidden_wrapper_code={} — the common case, and precisely
+    # where the old behaviour silently produced nothing.
+    assert question.hidden_wrapper_code == {}
+
+    sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(sink))
+    api_client.force_authenticate(user=user)
+    run_code(api_client, question, code=SOLUTION_CODE, language="python")
+
+    # The harness is what actually invokes the learner's method and prints.
+    assert "class Solution" in sink["source_code"]
+    assert "sys.stdin" in sink["source_code"], (
+        "Run sent bare source: a class definition that calls nothing and "
+        "prints nothing. This is the P1.2-A defect."
+    )
+
+
+@pytest.mark.django_db
+def test_run_prefers_a_per_question_wrapper_over_the_generic_harness(
+    api_client, user, question, monkeypatch
+):
+    question.hidden_wrapper_code = {"python": "# CUSTOM\n{user_code}\nprint(1)"}
+    question.save(update_fields=["hidden_wrapper_code"])
+
+    sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(sink))
+    api_client.force_authenticate(user=user)
+    run_code(api_client, question, code=SOLUTION_CODE, language="python")
+
+    assert "# CUSTOM" in sink["source_code"]
+    assert "sys.stdin" not in sink["source_code"]
+
+
+@pytest.mark.django_db
+def test_run_strips_java_imports_exactly_as_submit_does(
+    api_client, user, question, monkeypatch
+):
+    java = "import java.util.*;\nclass Solution { public int solve(int n){return n;} }"
+    api_client.force_authenticate(user=user)
+
+    submit_sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(submit_sink))
+    submit(api_client, question, code=java, language="java")
+
+    sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(sink))
+    run_code(api_client, question, code=java, language="java")
+
+    assert sink["source_code"] == submit_sink["source_code"]
+    # The learner's import must be gone, but GENERIC_JAVA_WRAPPER opens with
+    # its OWN `import java.util.*;` — so "not in" is the wrong assertion and a
+    # first draft of this test failed on it. Exactly one occurrence means the
+    # wrapper's survived and the duplicate was stripped; two would be the
+    # compile error this strip exists to prevent.
+    assert sink["source_code"].count("import java.util.*;") == 1
+
+
+@pytest.mark.django_db
+def test_run_without_a_problem_id_still_executes_raw_source(
+    api_client, user, question, monkeypatch
+):
+    # Backward compatibility: a caller that omits the id gets the previous
+    # behaviour rather than a 404. Run is a scratchpad.
+    sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(sink))
+    api_client.force_authenticate(user=user)
+    response = run_code(api_client, question, include_problem_id=False)
+
+    assert response.status_code == 200
+    # CodeRunView strips the body; Submit trims via DRF's CharField. Same net
+    # effect, asserted explicitly rather than assumed.
+    assert sink["source_code"] == SOLUTION_CODE.strip()
+
+
+@pytest.mark.django_db
+def test_run_with_an_unknown_problem_id_does_not_500(api_client, user, monkeypatch):
+    sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(sink))
+    api_client.force_authenticate(user=user)
+    response = api_client.post(reverse("code-run"), {
+        "code": SOLUTION_CODE, "language": "python", "stdin": "1",
+        "problem_id": 10000001,
+    }, format="json")
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_run_forwards_the_sample_stdin_unchanged(api_client, user, question, monkeypatch):
+    sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(sink))
+    api_client.force_authenticate(user=user)
+    run_code(api_client, question, stdin="7\n8")
+    assert sink["stdin"] == "7\n8"
+
+
+@pytest.mark.django_db
+def test_run_returns_the_documented_response_contract(api_client, user, question, monkeypatch):
+    sink = {}
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(sink, stdout="42"))
+    api_client.force_authenticate(user=user)
+    response = run_code(api_client, question)
+
+    assert response.status_code == 200
+    # The exact key set the SPA reads. Losing one blanks a panel in production.
+    for field in ("status", "status_id", "stdout", "stderr", "compile_output", "time", "memory"):
+        assert field in response.data, "Run response lost the %r field" % field
+    assert response.data["stdout"] == "42"
+
+
+@pytest.mark.django_db
+def test_run_surfaces_a_compile_error(api_client, user, question, monkeypatch):
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(
+        {}, stdout="", status_id=6, status="Compilation Error",
+        compile_output="SyntaxError: bad",
+    ))
+    api_client.force_authenticate(user=user)
+    response = run_code(api_client, question)
+    assert response.status_code == 200
+    assert response.data["compile_output"] == "SyntaxError: bad"
+
+
+@pytest.mark.django_db
+def test_run_surfaces_a_runtime_error(api_client, user, question, monkeypatch):
+    monkeypatch.setattr(coding_views, "_run_on_judge0", _capturing_judge0(
+        {}, stdout="", status_id=11, status="Runtime Error",
+        stderr="IndexError: list index out of range",
+    ))
+    api_client.force_authenticate(user=user)
+    response = run_code(api_client, question)
+    assert response.status_code == 200
+    assert "IndexError" in response.data["stderr"]
+
+
+@pytest.mark.django_db
+def test_run_reports_judge0_unavailability_as_an_error(api_client, user, question, monkeypatch):
+    monkeypatch.setattr(coding_views, "_run_on_judge0",
+                        _capturing_judge0({}, error="Judge0 timed out. Try again."))
+    api_client.force_authenticate(user=user)
+    response = run_code(api_client, question)
+    assert response.status_code == 400
+    assert "timed out" in response.data["error"]
+
+
+@pytest.mark.django_db
+def test_run_requires_a_code_body(api_client, user, question):
+    api_client.force_authenticate(user=user)
+    response = run_code(api_client, question, code="   ")
+    assert response.status_code == 400
+    assert response.data["error"] == "code is required"
+
+
+def test_run_keeps_its_judge0_rate_limit():
+    # The execution budget is shared with Submit. Losing the scope here would
+    # let Run spend it without limit.
+    assert coding_views.CodeRunView.throttle_scope == "judge0"
+    assert coding_views.CodeRunView.throttle_scope == coding_views.CodeSubmitView.throttle_scope

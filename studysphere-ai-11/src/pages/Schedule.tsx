@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
-import { getAccessToken } from "@/services/api";
+import { scheduleAPI } from "@/services/api";
 
 export default function Schedule() {
   const [date, setDate] = useState<Date | undefined>(new Date());
@@ -15,15 +15,21 @@ export default function Schedule() {
   const [newTitle, setNewTitle] = useState("");
   const [newTime, setNewTime] = useState("");
 
+  // Was a raw fetch to the RELATIVE path "/api/schedule/". On Vercel that
+  // resolved against the SPA's own origin, where the catch-all rewrite in
+  // vercel.json serves index.html with HTTP 200 — so this parsed the app's
+  // own HTML as JSON, threw, and was swallowed. The page has never loaded
+  // real data in production.
+  //
+  // Going through the shared client fixes the origin (baseURL) and adds the
+  // auth header, the CSRF sentinel, and the 401 refresh-and-retry
+  // interceptor, none of which a raw fetch received.
   useEffect(() => {
-    fetch("/api/schedule/", {
-      headers: { Authorization: `Bearer ${getAccessToken()}` }
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (Array.isArray(data)) setEvents(data);
-    })
-    .catch(console.error);
+    scheduleAPI.getSchedule()
+      .then(({ data }) => {
+        if (Array.isArray(data)) setEvents(data);
+      })
+      .catch(console.error);
   }, []);
 
   const handleAddSession = () => {
@@ -34,22 +40,20 @@ export default function Schedule() {
     const dateStr = format(date, "yyyy-MM-dd");
     const start_time = `${dateStr}T${newTime}:00`;
 
-    fetch("/api/schedule/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${getAccessToken()}`
-      },
-      body: JSON.stringify({ title: newTitle, start_time })
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.status === "success") {
-        toast.success("Session scheduled!");
-        setEvents([...events, { id: data.id, title: newTitle, start_time }]);
-        setShowForm(false);
-      }
-    });
+    scheduleAPI.createEvent({ title: newTitle, start_time })
+      .then(({ data }) => {
+        if (data.status === "success") {
+          toast.success("Session scheduled!");
+          setEvents([...events, { id: data.id, title: newTitle, start_time }]);
+          setShowForm(false);
+        }
+      })
+      // A catch is REQUIRED here, not optional. `fetch` resolves on any HTTP
+      // status, so the old code silently did nothing on a failure; axios
+      // rejects on non-2xx, and without this the rejection would be
+      // unhandled. The user now learns the session was not saved instead of
+      // watching the form sit there.
+      .catch(() => toast.error("Could not schedule that session."));
   };
 
   return (

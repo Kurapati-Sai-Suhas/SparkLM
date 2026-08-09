@@ -257,7 +257,7 @@ export default function AdaptiveCodingPortal() {
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-400 shadow-[0_0_10px_rgba(129,140,248,1)]" />
                   </span>
                   <Brain className="h-3.5 w-3.5" />
-                  Explainable AI · SHAP
+                  Explainable AI
                 </CardTitle>
                 <span className="font-mono text-[10px] text-slate-500 tracking-[0.18em]">
                   v.adv-xai

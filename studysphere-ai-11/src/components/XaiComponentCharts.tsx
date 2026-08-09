@@ -19,13 +19,11 @@ interface RadarDataPoint {
 interface XaiRadarChartProps {
   radarData?: RadarDataPoint[];
   dominantFactor?: string;
-  insightText?: string;
 }
 
 const XaiComponentCharts: React.FC<XaiRadarChartProps> = ({
   radarData,
   dominantFactor,
-  insightText,
 }) => {
   const data: RadarDataPoint[] = radarData || [
     { subject: 'Time Complexity', A: 0, fullMark: 100 },
@@ -52,11 +50,11 @@ const XaiComponentCharts: React.FC<XaiRadarChartProps> = ({
             <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.9)]" />
           </span>
           <Brain className="h-3.5 w-3.5" />
-          SHAP Explainable AI
+          Skill Factor Analysis
         </h3>
         <p className="relative text-sm leading-relaxed text-muted-foreground pl-4">
           <span className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-primary via-indigo-400 to-transparent shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
-          {insightText || 'Analyzing your coding patterns…'}
+          Relative weight of each factor in this recommendation.
         </p>
       </div>
 

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -358,6 +360,208 @@ class OutcomeClassifierTests(TestCase):
         self.assertIsNone(evaluate_holdout([[0.5, 0.0, 0.6, 0.0]] * 6, [1, 0, 1, 0, 1, 0]))
         # Single-class labels: AUC is undefined; nothing may ship.
         self.assertIsNone(evaluate_holdout([[0.5, 0.0, 0.6, 0.0]] * 20, [1] * 20))
+
+
+class RoutingArtifactGenerationTests(TestCase):
+    """
+    End-to-end cover for `retrain_ai`'s reason to exist: it must actually
+    WRITE the artifact production loads.
+
+    Added by M1/P1.1 after mutation testing exposed a hole. Deleting
+    `joblib.dump(clf, artifact_path)` outright — the single line that
+    produces routing_classifier_v2.pkl — left all 675 backend tests green.
+    The unit tests around build_outcome_dataset / train_outcome_classifier
+    / evaluate_holdout covered the ingredients and nothing covered the
+    result, so the command could silently stop shipping a model and only a
+    human reading logs would notice.
+
+    BASE_DIR is redirected into a nested temp directory so both writes the
+    command performs — the artifact under BASE_DIR/models_data and the
+    evaluation under BASE_DIR/../../docs/evals — land inside the sandbox
+    and never touch the repository.
+    """
+
+    def _make_logs(self, n=120):
+        from django.contrib.auth import get_user_model
+        from .models import (
+            CodingPortal, RecommendationLog, Topic, UserCodingProfile,
+        )
+
+        User = get_user_model()
+        portal = CodingPortal.objects.create(name="DSA Masterclass")
+        topic = Topic.objects.create(name="Array", structure_type="flat", portal=portal)
+
+        for i in range(n):
+            user = User.objects.create_user(
+                username=f"retrain_u{i}", email=f"retrain_u{i}@example.com",
+                password="x",
+            )
+            UserCodingProfile.objects.create(user=user, elo_rating=1200 + i)
+            RecommendationLog.objects.create(
+                user=user,
+                recommended_topic=topic,
+                engine_used="hierarchical" if i % 2 else "flat",
+                # Both classes present, correlated with the engine so the
+                # forest has real signal and the holdout is not single-class.
+                actual_result_correct=bool(i % 2),
+            )
+
+    def test_command_writes_artifact_contract_and_evaluation(self):
+        import os
+        import tempfile
+        from django.core.management import call_command
+        from django.test import override_settings
+
+        self._make_logs()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Nested so the command's "../../docs/evals" stays inside tmp.
+            base = os.path.join(tmp, "app", "backend")
+            os.makedirs(base, exist_ok=True)
+
+            with override_settings(BASE_DIR=base):
+                call_command("retrain_ai")
+
+                artifact = os.path.join(base, "models_data", "routing_classifier_v2.pkl")
+                contract = artifact.replace(".pkl", ".contract.json")
+
+                self.assertTrue(
+                    os.path.exists(artifact),
+                    "retrain_ai must write routing_classifier_v2.pkl — this is the "
+                    "artifact RoutingClassifier loads in production.",
+                )
+                self.assertTrue(
+                    os.path.exists(contract),
+                    "the feature contract must ship alongside the artifact (§5)",
+                )
+
+                evals_dir = os.path.join(tmp, "docs", "evals")
+                self.assertTrue(
+                    os.path.isdir(evals_dir) and os.listdir(evals_dir),
+                    "the §5 gate must write a holdout evaluation — no artifact "
+                    "ships unevaluated",
+                )
+
+                # CONTENT, not just existence. `open(path, "w")` creates the
+                # file before anything is written to it, so an existence
+                # check alone passes even when the dump is gone — mutation
+                # testing caught exactly that.
+                import json as _json
+
+                with open(contract, encoding="utf-8") as fh:
+                    contract_body = _json.load(fh)
+                self.assertEqual(contract_body["artifact"], "routing_classifier_v2.pkl")
+                self.assertEqual(
+                    list(contract_body["features"]),
+                    ["avg_acc", "runs_z", "avg_elo", "engine_flag"],
+                )
+
+                eval_file = os.path.join(evals_dir, sorted(os.listdir(evals_dir))[0])
+                with open(eval_file, encoding="utf-8") as fh:
+                    eval_body = _json.load(fh)
+                self.assertIn("holdout", eval_body)
+                holdout = eval_body["holdout"]
+                self.assertIn("auc", holdout)
+                self.assertIn("brier", holdout)
+
+                # The metrics must DESCRIBE THIS RUN, not merely be present.
+                # Key-presence alone is satisfied by fabricated constants —
+                # mutation testing showed that replacing the evaluate_holdout
+                # call with a hardcoded {"auc": 1.0, ...} went undetected.
+                # Tying the split sizes back to the dataset makes the gate's
+                # output falsifiable.
+                self.assertEqual(
+                    holdout["n_train"] + holdout["n_test"], eval_body["n_rows"],
+                    "holdout split must account for every row the artifact was "
+                    "trained on — a gate whose numbers are unrelated to the data "
+                    "is not a gate",
+                )
+                self.assertGreater(holdout["n_test"], 1)
+
+    def test_artifact_is_loadable_and_scores_the_serving_features(self):
+        # Proves the written artifact is usable, not merely present: a
+        # corrupt or wrongly-shaped dump would pass an existence check.
+        import os
+        import tempfile
+        import joblib
+        from django.core.management import call_command
+        from django.test import override_settings
+
+        self._make_logs()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "app", "backend")
+            os.makedirs(base, exist_ok=True)
+            with override_settings(BASE_DIR=base):
+                call_command("retrain_ai")
+                clf = joblib.load(
+                    os.path.join(base, "models_data", "routing_classifier_v2.pkl")
+                )
+
+        # FEATURES_V2 = [avg_acc, runs_z, avg_elo, engine_flag]
+        prob = clf.predict_proba([[0.8, 0.0, 0.65, 1.0]])[0]
+        self.assertEqual(len(prob), 2)
+
+
+class RetrainingPathIsTorchFreeTests(TestCase):
+    """
+    Architectural invariant (M1/P1.1): the production retraining path must
+    never import torch.
+
+    This is not style. `render.yaml` installs `requirements.txt` only, so
+    torch is absent from the web tier by design. A module-level torch
+    import anywhere on the path
+    retrain_ai -> RoutingClassifier -> hybrid_router
+    makes the routing model untrainable in any environment that mirrors
+    production, and the failure surfaces as an ImportError at the moment
+    someone tries to retrain — long after the commit that caused it.
+
+    That is exactly what P1.1 found: retrain_ai carried
+    `import torch.nn as nn` for two dead sections (a GCN loop whose body
+    only printed, and an LSTM block that built a loss object and discarded
+    it). Asserted over the AST rather than by importing, so the test states
+    the invariant even in an environment that happens to have torch
+    installed — CI does install it, for visual search.
+    """
+
+    PATH_MODULES = [
+        "groups/management/commands/retrain_ai.py",
+        "groups/hybrid_router.py",
+        "learning/router.py",
+    ]
+
+    def _imports(self, relpath):
+        import ast
+        from django.conf import settings
+        source = (Path(settings.BASE_DIR) / relpath).read_text(encoding="utf-8")
+        names = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                names.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names.add(node.module)
+        return names
+
+    def test_no_module_on_the_retraining_path_imports_torch(self):
+        offenders = {}
+        for relpath in self.PATH_MODULES:
+            torchy = sorted(
+                n for n in self._imports(relpath)
+                if n == "torch" or n.startswith("torch.")
+            )
+            if torchy:
+                offenders[relpath] = torchy
+
+        self.assertEqual(
+            offenders, {},
+            "The retraining path must stay torch-free — the web tier does not "
+            f"install it. Offending imports: {offenders}",
+        )
+
+    def test_the_guard_reads_real_files(self):
+        # Guards the guard: a broken path resolver would find no imports
+        # anywhere and pass everything.
+        self.assertIn("joblib", self._imports(self.PATH_MODULES[0]))
 
 
 class RoutingArtifactRegistryTests(TestCase):

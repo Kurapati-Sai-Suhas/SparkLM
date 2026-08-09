@@ -25,7 +25,6 @@ times (dead password validators, an inert throttle, a non-persisting cache).
 | Variable | Prod | Purpose | Added | Expiry | Decision |
 |---|---|---|---|---|---|
 | `CURRICULUM_GATE_ENFORCE` | `false` | Server-side enforcement of DAG prerequisites on `/api/code/next/`. When off, the gate is computed and returned but not enforced. | M7 (2026-07) | **2026-11-01** | **Stays off.** See below. |
-| `ENABLE_SHAP_XAI` | `false` | Per-recommendation SHAP attribution via `XAIEngine`. | M5 (2026-07) | **None — permanent** | **Reclassified as `tuning`.** See below. |
 
 ### `CURRICULUM_GATE_ENFORCE` — resolved, stays off
 
@@ -45,18 +44,22 @@ confidence threshold replaces the point estimate (roadmap M11, belief layer). Wh
 lands first. Re-dated to 2026-11-01 with that condition attached, rather than left
 open-ended.
 
-### `ENABLE_SHAP_XAI` — reclassified, not expiring
+### ENABLE_SHAP_XAI — RETIRED (M1/P1.1, 2026-08-09)
 
-This was listed as a flag needing an expiry. On inspection it is not a staged rollout: it
-is off because **the web tier is deliberately torch-free**. `requirements.txt` excludes
-PyTorch, so `XAIEngine` cannot import on the production instance regardless of this
-value, and the 512 MB limit is what makes that permanent rather than temporary. Even with
-memory, per-request SHAP is far too slow at 0.1 vCPU.
+Removed, along with the code it gated. The earlier entry argued it was a permanent
+deployment switch rather than a staged rollout, because the web tier is deliberately
+torch-free and `XAIEngine` could not import on the production instance regardless of the
+value. That reasoning was right, and P1.1 followed it to its conclusion: a switch that can
+only ever hold one value is not a flag, it is dead configuration.
 
-Giving it an expiry would imply someone will turn it on, which is false while the tier is
-torch-free. It is reclassified as a permanent deployment switch and stays. Enabling it
-requires the worker tier and an ONNX inference path (`export_onnx.py`), which is Milestone
-5 or later.
+The SHAP-over-GCN implementation, the GCN engine, the ONNX export path and the synthetic
+data generator were deleted in the same phase. `NextProblemView._compute_xai` now has a
+single heuristic path. **The response schema did not change** — `dominant_factor`,
+`success_probability`, `shap_values`, `weak_topics` and `recommendation` are all still
+present and are pinned by `test_xai_payload_matches_frontend_schema`.
+
+Re-enabling real attribution is no longer a flag flip; it is a worker-tier project, and it
+belongs to M6's decision about whether the routing engine earns further ML investment.
 
 ---
 

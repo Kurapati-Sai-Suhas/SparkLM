@@ -75,8 +75,6 @@ services:
         sync: false
       - key: N8N_WEBHOOK_URL
         sync: false
-      - key: ENABLE_SHAP_XAI
-        value: "false"
       - key: CURRICULUM_GATE_ENFORCE
         value: "false"
       - key: SENTRY_DSN

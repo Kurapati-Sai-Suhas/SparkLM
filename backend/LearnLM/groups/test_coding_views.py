@@ -402,24 +402,63 @@ def test_failed_generation_is_never_persisted(api_client, user, question, monkey
 
 
 @pytest.mark.django_db
-def test_shap_xai_payload_matches_frontend_schema(user, monkeypatch):
-    # With ENABLE_SHAP_XAI on, the payload must keep the exact schema the
-    # frontend reads — whether real SHAP succeeds or the heuristic
-    # fallback kicks in, the caller can't tell the difference.
-    monkeypatch.setattr(coding_views, "USE_REAL_SHAP", True)
+def test_xai_payload_matches_frontend_schema(user):
+    """
+    The XAI response is a frontend CONTRACT, pinned key by key.
 
+    AdaptiveCodingPortal.tsx reads advanced_xai.xai.{dominant_factor,
+    success_probability, shap_values, recommendation} and
+    advanced_xai.decay_info.decay_percent. Any of those going missing
+    blanks a panel in production, and no other test would notice.
+
+    M1/P1.1 removed the SHAP-over-GCN branch this test used to force on
+    with `monkeypatch.setattr(coding_views, "USE_REAL_SHAP", True)`. That
+    branch could never execute in production — the web tier installs
+    requirements.txt only, so torch/shap were absent, and the flag shipped
+    false. The assertions below are deliberately UNCHANGED: the whole
+    point of the removal was that the payload the frontend receives does
+    not move. `shap_values` keeps its name for the same reason.
+    """
     view = coding_views.NextProblemView()
     payload = view._compute_xai(user, "Array", hlr_state=1.0)
 
     assert {"source", "dominant_factor", "success_probability", "shap_values"} <= set(payload)
-    assert payload["source"] in ("shap", "heuristic")
+    assert payload["source"] == "heuristic"
     assert 0 <= payload["success_probability"] <= 100
     assert {v["subject"] for v in payload["shap_values"]} == {
         "Time Complexity", "Space Complexity", "Logic Accuracy", "Topic Recency",
     }
-    # Actionable layer: always present, whichever engine produced the payload
+    # Every radar entry carries the keys Recharts indexes on.
+    for entry in payload["shap_values"]:
+        assert set(entry) == {"subject", "A", "fullMark"}
+        assert entry["fullMark"] == 100
+    # Actionable layer: always present.
     assert isinstance(payload["weak_topics"], list)
     assert payload["recommendation"]
+
+
+@pytest.mark.django_db
+def test_xai_has_no_torch_dependency(user):
+    """
+    The XAI path must stay importable and correct without the ML extras.
+
+    Production has never had torch installed (render.yaml installs
+    requirements.txt only), so this pins the property the deployment
+    already relied on rather than introducing a new one.
+    """
+    import sys
+
+    blocked = {name for name in sys.modules if name == "torch" or name.startswith("torch.")}
+    for name in blocked:
+        sys.modules[name] = None  # any import inside the call now raises
+
+    try:
+        payload = coding_views.NextProblemView()._compute_xai(user, "Array", hlr_state=1.0)
+        assert payload["source"] == "heuristic"
+        assert payload["shap_values"]
+    finally:
+        for name in blocked:
+            del sys.modules[name]
 
 
 # ─────────────────────────────────────────────────────────────

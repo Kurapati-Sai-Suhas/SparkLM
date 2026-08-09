@@ -1,12 +1,23 @@
-# SparkLM heavy ML extras (GNN + SHAP XAI + visual search) — ~2GB.
-# The web tier deploys WITHOUT this file (frozen architecture §5: torch
-# lives in workers/offline only; serving falls back to the heuristic
-# explainer with the identical response schema, and visual search
-# degrades cleanly). Install alongside the core file for local dev, CI,
-# and offline/worker environments:
+# SparkLM optional ML extras — visual search only.
+#
+# The web tier deploys WITHOUT this file (frozen architecture §5: render.yaml
+# installs requirements.txt only). CI installs it so the visual-search path
+# stays covered. Everything here is imported LAZILY inside a try/except
+# ImportError, so a slim install degrades cleanly rather than failing to boot.
+#
 #     pip install -r requirements.txt -r requirements-ml.txt
+#
+# ── M1/P1.1 removed three packages ───────────────────────────────────────
+# torch-geometric, onnxruntime and shap had ZERO importers left once the
+# GCN engine, SHAP explainer, ONNX export path, MIRT engine and synthetic
+# data generator were deleted. Verified by repo-wide scan, not assumed.
+#
+# torch and transformers REMAIN, and the roadmap's expectation that this
+# file could be deleted outright in P1.1 was wrong: both are still imported
+# by VectorSearchService (groups/ai_services.py) for CLIP. Visual Search is
+# scheduled for removal in P9.3 — deleting these now would reach into that
+# phase's scope. When P9.3 lands, this whole file goes with it, and that is
+# where the large (~2 GB torch) install saving actually arrives.
+
 torch==2.12.0
-torch-geometric==2.8.0
-onnxruntime==1.27.0
-shap==0.52.0
 transformers==5.9.0

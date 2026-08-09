@@ -14,6 +14,42 @@ Newest first. Append one entry per working session, **before the session ends**.
 
 ---
 
+## 2026-08-09 — P1.1 closed: authenticated production verification
+**Branch:** `docs/p1-1-closure` · **Phase:** M1/P1.1 · **Status:** closed ✅
+
+**Done:** Recorded the authenticated production verification that closes P1.1.
+Signed-in on `/coding-portal`, the XAI panel renders end to end — four radar
+axes with a live Recharts tooltip, PREDICTED (`success_probability`), DECAY
+(`decay_info.decay_percent`), DOMINANT (`dominant_factor` = Topic Recency, the
+`hlr < 0.50` override) and the coach `recommendation`. No P1.1 console error, no
+request for a deleted GCN/SHAP module, no stale flag dependency. **The schema
+P1.1 preserved works in production.**
+
+**Latency reported during verification — investigated, not a P1.1 defect.** Warm
+backend measures 0.25–0.38 s and P1.1 touched no frontend file. The dominant
+cause is cold start: `keepalive.yml` already records ping gaps of mean 104.5 min
+against Render's ~15 min idle timeout — a ~14% warm duty cycle, i.e. the API is
+cold ~86% of the time. Owners in the locked plan: Track B (hosting tier), P3.3
+(`/api/code/next/` hotspot), P9.2 (4 uncached serialised calls), P9.3 (2,591 KB
+dead chunk). Logged as observations, not tasks.
+
+**Deferred by owner decision:** the misleading "SHAP" UI label goes to M2 /
+Product Truth. The fix was already written and CI-green on
+`p1-1-followup-xai-labels` (`4f89c3e`); PR #8 was **closed rather than merged**
+so it cannot land ahead of its phase. It also covers three further false ML
+claims found in the same sweep, including "Calibrating PyTorch tensor state…" —
+the message displayed during exactly the latency being reported.
+
+**Learned:** a phase can be functionally complete and still leave the product
+telling lies about itself. P1.1 deleted SHAP and PyTorch from the backend, but
+because it deliberately touched no frontend file, four UI strings kept
+advertising them. Deleting an implementation and retiring its claims are two
+different jobs, and only the first was in scope.
+
+**Next:** P1.2 — collapse coding surfaces, remove Flashcards.
+
+---
+
 ## 2026-08-09 — P1.1: un-runnable ML stack retired (corrected scope)
 **Branch:** `m1-p1-remove-dead-ml-stack` · **Phase:** M1/P1.1 · **Status:** shipped (`40b4ba5`, PR #7)
 

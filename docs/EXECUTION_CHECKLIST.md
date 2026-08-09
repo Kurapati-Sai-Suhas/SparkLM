@@ -36,9 +36,10 @@ P0.1**: a CSP block on `accounts.google.com/gsi/style` (from `style-src` in
 `vercel.json`, unchanged by this merge) and a Google Sign-In 400. Logged as
 debt, not a P0.1 regression.
 
-## M1 — Surface Reduction 🔄 *(5 ed)* — P1.1 done, P1.2 open
+## M1 — Surface Reduction 🔄 *(5 ed)* — P1.1 ✅ complete + fully verified, P1.2 open
 
 - [x] **P1.1 Retire the un-runnable ML stack** — merged `40b4ba5` (PR #7), 2026-08-09
+      · **COMPLETE + FULLY VERIFIED IN PRODUCTION**
   - [x] T1.1.1 Deleted `gnn_engine`, `shap_explainer`, `export_onnx`, `mirt_engine`
   - [x] T1.1.2 **CORRECTED** — deleted `synthetic_data_generator` + 9 GCN artifacts +
         an orphaned `prerequisite_model.pth`. **`retrain_ai.py` KEPT**: preflight proved
@@ -60,6 +61,36 @@ training removed · artifact write removed · contract body dropped · evaluatio
 gate bypassed with fabricated metrics · torch reintroduced · XAI schema key renamed · flag
 restored to the register. Two tests were added *because* mutation testing exposed that
 deleting `joblib.dump` left all 675 tests green.
+
+**P1.1 authenticated production verification — 2026-08-09.** Performed signed-in on
+`/coding-portal` against the live deployment. The XAI panel renders end to end: all four
+radar axes (Time Complexity, Space Complexity, Logic Accuracy, Topic Recency) with a live
+Recharts tooltip, `success_probability` (PREDICTED), `decay_info.decay_percent` (DECAY),
+`dominant_factor` (Topic Recency — the `hlr < 0.50` override) and the coach
+`recommendation`. No P1.1-related console error; no request for any deleted GCN/SHAP
+module; no stale `ENABLE_SHAP_XAI` runtime dependency. **The preserved response schema
+works in production.** P1.1 is closed.
+
+> **Observations recorded during that verification — NOT P1.1 defects, NOT active tasks.**
+> Page-load latency was reported on Coding Hub and the Adaptive Portal. Measured: the warm
+> backend answers in 0.25–0.38 s, and P1.1 touched no frontend file, so it is not a P1.1
+> regression. Causes and their existing owners, per the locked plan:
+>
+> | Observation | Owner |
+> |---|---|
+> | Cold start dominates — `keepalive.yml` records ping gaps of mean 104.5 min vs Render's ~15 min idle timeout, i.e. a ~14% warm duty cycle. **Primarily a hosting-tier issue.** | Track B (if its trigger is reached) |
+> | `/api/code/next/` is the warm-path hotspot (materialises every solved id; D11/D12) | P3.3 |
+> | The portal fires 4 uncached API calls that serialise on one worker | P9.2 |
+> | `LiveCollaborativeWorkspace` ships a 2,591 KB dead chunk | P9.3 |
+> | UI still labels the panel "SHAP" though SHAP is deleted and the backend returns `source: "heuristic"` | **M2 / Product Truth** |
+>
+> The SHAP-label fix exists on branch `p1-1-followup-xai-labels` (commit `4f89c3e`, CI
+> green) as **closed PR #8**, deferred to M2 by owner decision. Reopen with
+> `gh pr reopen 8` when M2 starts. That branch also covers three further false ML claims
+> found in the same sweep — "Calibrating PyTorch tensor state…" (the message shown during
+> the reported latency), "optimized by the PyTorch GNN engine" in Coding Hub, and "GNN
+> tensor calibration" in the onboarding modal.
+
 - [ ] **P1.2 Collapse coding surfaces; remove Flashcards** — `m1-p2-collapse-surfaces`
   - [ ] T1.2.1 Redirect `/code` → `/coding-portal`; delete `CodingPortal.tsx`
   - [ ] T1.2.2 Remove Flashcards page, `AIFlashcardView`, URL, nav entry

@@ -63,9 +63,10 @@ The entire torch-dependent ML surface cannot execute on the web tier.
 
 | Branch | State |
 |---|---|
-| `main` | production; **at `40b4ba5`** — P1.1 merged 2026-08-09 (PR #7) |
+| `main` | production; **at `40b4ba5`** — P1.1 merged 2026-08-09 (PR #7), **fully verified** |
 | `m6-phase1a-fix-broken-pages` | merged; retained for history |
 | `preserve/settings-email-2xx-test` | parked work (`d7b0e20`), awaiting a keep-or-drop decision |
+| `p1-1-followup-xai-labels` | SHAP-label fix (`4f89c3e`), **closed PR #8** — deferred to M2 / Product Truth |
 
 Phase 1a is **merged, pushed, CI-green and deployed.**
 

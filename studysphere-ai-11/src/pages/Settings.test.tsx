@@ -211,6 +211,32 @@ describe("Settings — email alerts toggle", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("SMTP auth failed"));
   });
 
+  it("reports a 2xx response that is not the success string as a failure", async () => {
+    // The `else` inside .then(): reached only if the server answers 2xx with
+    // something other than "Email sent successfully!". TestEmailView cannot
+    // do that today — it returns either that exact string with 200, or 500,
+    // and axios routes 500 to .catch — so this branch is unreachable against
+    // the current backend and exists as insurance against it changing.
+    //
+    // Pinned anyway, because mutation testing flagged it: replacing the
+    // toast.error with a toast.success failed nothing. An unreachable branch
+    // that is also unverified is indistinguishable from a broken one, and the
+    // next person running mutants should not have to re-derive why it lived.
+    getSettings.mockResolvedValue({ data: { ...PROFILE, email_alerts: false } });
+    sendTestEmail.mockResolvedValue({
+      data: { status: "error", message: "SMTP relay refused" },
+    });
+
+    render(<Settings />);
+    await waitFor(() => expect(getSettings).toHaveBeenCalled());
+
+    openNotificationsTab();
+    fireEvent.click(screen.getByTestId("switch-email-alerts"));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("SMTP relay refused"));
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
   it("falls back to a generic message when the server gives no reason", async () => {
     getSettings.mockResolvedValue({ data: { ...PROFILE, email_alerts: false } });
     sendTestEmail.mockRejectedValue(new Error("network down"));

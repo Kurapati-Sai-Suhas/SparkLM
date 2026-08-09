@@ -78,6 +78,19 @@ export default function AdaptiveCodingPortal() {
   // Monotonic id so a slow earlier Run cannot overwrite a newer one. Judge0
   // latency is unbounded in practice (cold sandboxes, queueing), so responses
   // genuinely can arrive out of order.
+  //
+  // ⚠ CURRENTLY UNREACHABLE, and provably so. runSeq is incremented at exactly
+  // one site, inside the critical section the in-flight ref below opens; that
+  // gate admits at most one handler body at a time; so no second increment can
+  // land between a run's own increment and its own check, and
+  // `seq !== runSeq.current` is never true. Mutation testing confirms it:
+  // replacing the check with `if (false)` fails nothing.
+  //
+  // Kept deliberately rather than deleted. It costs nothing and becomes load
+  // bearing the moment the in-flight gate is relaxed — e.g. if Run is ever
+  // allowed to restart mid-flight, or triggered from a keyboard shortcut that
+  // bypasses the button. Delete it only together with a decision that
+  // overlapping runs stay impossible.
   const runSeq = useRef(0);
 
   // In-flight flag as a REF, not state. `running` is captured by the handler's
@@ -139,7 +152,11 @@ export default function AdaptiveCodingPortal() {
     const seq = ++runSeq.current;
     setRunning(true);
     setConsoleMode('run');
-    setRunResult(null);
+    // The previous run's output deliberately stays on screen until the new one
+    // returns, alongside the "executing…" line — terminal scrollback rather
+    // than a flash of empty panel. It also means `runResult` is observable
+    // across a Submit, which is how the "Submit never touches run state"
+    // invariant is asserted rather than merely asserted about the display.
 
     try {
       const { data } = await codeAPI.runCode({
@@ -609,7 +626,7 @@ export default function AdaptiveCodingPortal() {
                 )}
 
                 {/* An absent sample is stated, never papered over with "". */}
-                {!running && sampleStdin === null && (
+                {sampleStdin === null && (
                   <div
                     data-testid="run-no-sample"
                     className="text-amber-300/90 text-xs"
@@ -619,13 +636,13 @@ export default function AdaptiveCodingPortal() {
                   </div>
                 )}
 
-                {!running && runResult?.clientError && (
+                {runResult?.clientError && (
                   <div data-testid="run-client-error" className="text-rose-400 whitespace-pre-wrap">
                     ✕ {runResult.clientError}
                   </div>
                 )}
 
-                {!running && runResult && !runResult.clientError && (
+                {runResult && !runResult.clientError && (
                   <>
                     {runResult.compile_output ? (
                       <div data-testid="run-compile-error" className="text-amber-400 whitespace-pre-wrap">

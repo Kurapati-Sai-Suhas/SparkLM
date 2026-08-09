@@ -13,7 +13,33 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+/**
+ * Dispatch N clicks inside ONE act() so React batches them.
+ *
+ * `fireEvent` flushes state between calls, so by the second click React has
+ * re-rendered and marked the button disabled — and React consults `disabled`
+ * from its own fiber props, not the DOM, so no amount of DOM manipulation
+ * reaches the handler. Batching the dispatches delivers the second one while
+ * the props still say enabled, which is the only way to exercise the
+ * production concurrency guard rather than the UI layer in front of it.
+ */
+async function burstClick(node: Element, times: number) {
+  await act(async () => {
+    for (let i = 0; i < times; i++) {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }
+  });
+}
+
+/** A promise whose settlement the test controls explicitly — no timers. */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: any) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
 
 // Recharts' ResponsiveContainer constructs a ResizeObserver on mount and jsdom
 // ships none. Polyfilled here rather than in the shared setup so this phase
@@ -273,6 +299,43 @@ describe("Run and Submit are separate states", () => {
     onError.mockRestore();
   });
 
+  it("Submit leaves run STATE untouched, not merely hidden", async () => {
+    // The invariant is about state, not display: after a Submit, runResult must
+    // still hold the Run response. Observed by starting a new Run and holding
+    // it pending — the console then shows run mode with the PREVIOUS result
+    // still present. If Submit had nulled runResult, there would be nothing to
+    // show. "No run block after a Submit" cannot catch this, which is why the
+    // earlier version of this test could not kill the mutation.
+    await renderPortal();
+
+    fireEvent.click(screen.getByTestId("run-code-btn"));
+    expect((await screen.findByTestId("run-stdout")).textContent).toContain("6");
+
+    fireEvent.click(screen.getByTestId("submit-code-btn"));
+    await screen.findByTestId("results-block");
+
+    const pending = deferred<any>();
+    runCode.mockReturnValueOnce(pending.promise);
+    fireEvent.click(screen.getByTestId("run-code-btn"));
+
+    // Still "6": Submit did not write to runResult.
+    expect((await screen.findByTestId("run-stdout")).textContent).toContain("6");
+    await act(async () => { pending.resolve({ data: OK_RUN }); });
+  });
+
+  it("Run leaves submission STATE untouched across the reverse order", async () => {
+    await renderPortal();
+
+    fireEvent.click(screen.getByTestId("submit-code-btn"));
+    const before = (await screen.findByTestId("results-block")).textContent;
+
+    fireEvent.click(screen.getByTestId("run-code-btn"));
+    await screen.findByTestId("run-stdout");
+
+    fireEvent.click(screen.getByTestId("submit-code-btn"));
+    expect((await screen.findByTestId("results-block")).textContent).toBe(before);
+  });
+
   it("keeps the submission result after a later Run, and vice versa", async () => {
     await renderPortal();
 
@@ -318,28 +381,26 @@ describe("Run Code — concurrency", () => {
     release({ data: OK_RUN });
   });
 
-  it("refuses a second run even if the button is clickable", async () => {
-    // Two layers protect against a double execution: the button's `disabled`
-    // attribute, and an early return inside the handler. The attribute alone
-    // satisfies the click-twice test, which left the early return unverified —
-    // mutation testing caught exactly that. Stripping `disabled` off the node
-    // reaches the handler directly, so the guard is now pinned on its own.
-    let release: (v: any) => void = () => {};
-    runCode.mockReturnValue(new Promise((r) => { release = r; }));
+  it("the in-flight guard itself blocks a second execution, and then resets", async () => {
+    // Exercises the PRODUCTION guard, not the disabled attribute in front of
+    // it. Both clicks are delivered before React can re-render, so the handler
+    // runs twice and only the ref stops the second request.
+    const first = deferred<any>();
+    runCode.mockReturnValueOnce(first.promise);
     await renderPortal();
+    const btn = screen.getByTestId("run-code-btn");
 
-    const btn = screen.getByTestId("run-code-btn") as HTMLButtonElement;
-    fireEvent.click(btn);
-    await waitFor(() => expect(runCode).toHaveBeenCalledTimes(1));
-
-    // React sets `disabled` as a PROPERTY; jsdom consults the property when
-    // deciding whether to dispatch. removeAttribute alone left it true, which
-    // is why an earlier version of this test could not reach the handler.
-    btn.disabled = false;
-    fireEvent.click(btn);
-
+    await burstClick(btn, 3);
     expect(runCode).toHaveBeenCalledTimes(1);
-    release({ data: OK_RUN });
+
+    // Guard releases on settle…
+    runCode.mockResolvedValue({ data: { ...OK_RUN, stdout: "second" } });
+    await act(async () => { first.resolve({ data: OK_RUN }); });
+
+    // …so a later run is allowed through.
+    fireEvent.click(screen.getByTestId("run-code-btn"));
+    await waitFor(() => expect(runCode).toHaveBeenCalledTimes(2));
+    expect((await screen.findByTestId("run-stdout")).textContent).toContain("second");
   });
 
   it("an older Run response cannot overwrite a newer one", async () => {

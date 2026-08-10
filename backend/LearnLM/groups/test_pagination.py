@@ -244,20 +244,45 @@ def test_shared_pagination_class_is_configured_for_real_groups():
 # ─────────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
-def test_envelope_shape_is_unchanged():
+@pytest.mark.parametrize("label", ["groups", "materials", "quizzes", "members"])
+def test_envelope_shape_is_unchanged(label):
     """
     StudyGroups, GroupDetail, FileLibrary, AIQuiz and DoubtSolver all do
     `res.data.results || res.data`. Renaming or dropping `results` would make
-    every one of them silently fall back to rendering the envelope object.
+    every one of them silently fall back to rendering the envelope object
+    itself — five broken pages, no error.
+
+    Asserted on ALL FOUR endpoints, not one: the pages read four different
+    URLs, so pinning a single response would leave three unpinned. Checked on
+    a real response rather than by reading the pagination class, because the
+    class is not what the frontend consumes.
+
+    StudyGroups additionally reads `next` and `previous` to drive its prev/next
+    buttons, so those keys are load-bearing too, not decoration.
     """
-    owner = user("ownerenv")
+    owner = user(f"ownerenv{label}")
     g = group_with_members(owner, 4)
+    StudyMaterial.objects.create(
+        title="f", study_group=g, uploaded_by=owner, file="m/f.pdf"
+    )
+    AssignedQuiz.objects.create(study_group=g, topic="t", quiz_data={})
 
-    r = auth(owner).get(reverse("group-members", args=[g.id]))
+    url, params = {
+        "groups": (reverse("studygroup-list"), {}),
+        "materials": (reverse("studymaterial-list"), {}),
+        "quizzes": (reverse("list-assigned-quizzes"), {"study_group": g.id}),
+        "members": (reverse("group-members", args=[g.id]), {}),
+    }[label]
 
-    assert set(r.data.keys()) == {"count", "next", "previous", "results"}
+    r = auth(owner).get(url, params)
+
+    assert r.status_code == 200
+    assert set(r.data.keys()) == {"count", "next", "previous", "results"}, (
+        f"{label}: envelope is {sorted(r.data.keys())}"
+    )
     assert isinstance(r.data["results"], list)
     assert isinstance(r.data["count"], int)
+    assert r.data["results"], f"{label}: fixture produced no rows to check"
 
 
 @pytest.mark.django_db
@@ -341,6 +366,50 @@ def test_every_paginated_queryset_has_a_total_order(label):
         f"{label}: sorts on {order} — the last term is not unique, so tied "
         f"rows have no defined page"
     )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "label,expected",
+    [
+        # Primary term = the ordering that shipped on main, unchanged. Only the
+        # tiebreak is new, and its DIRECTION matches the primary term so ties
+        # read the same way as the sort around them: newest-first lists break
+        # ties newest-first, the soonest-deadline list breaks ties oldest-first.
+        # '-created_at, id' would be deterministic but would order tied rows
+        # backwards relative to everything else on the page.
+        ("groups", ["-created_at", "-id"]),
+        ("materials", ["-upload_date", "-id"]),
+        ("quizzes", ["deadline", "id"]),
+        # members had NO ordering at all before P2.1, so there is no prior
+        # semantic to preserve. `id` is join order — the closest stable order
+        # to what the unordered query already returned in practice, and a
+        # smaller visible change than re-sorting the roster alphabetically.
+        ("members", ["id"]),
+    ],
+)
+def test_ordering_semantics_are_exactly_as_intended(label, expected):
+    """
+    Guards the *primary* sort, not just totality. A regression that changed
+    `-upload_date` to `upload_date` would still be deterministic and would
+    still pass the total-order test above, while silently inverting the file
+    library for every user.
+    """
+    owner = user(f"ownersem{label}")
+    g = group_with_members(owner, 3)
+
+    qs = {
+        "groups": lambda: queryset_of(StudyGroupViewSet, owner),
+        "materials": lambda: queryset_of(MaterialViewSet, owner),
+        "quizzes": lambda: queryset_of(
+            ListAssignedQuizView, owner, query={"study_group": g.id}
+        ),
+        "members": lambda: queryset_of(
+            getGroupMembers, owner, kwargs={"group_id": g.id}
+        ),
+    }[label]()
+
+    assert [str(t) for t in qs.query.order_by] == expected
 
 
 @pytest.mark.django_db
@@ -589,6 +658,103 @@ def test_paging_past_the_end_does_not_bypass_the_authorization_filter():
     )
 
     assert r.data["results"] == []
+
+
+@pytest.mark.django_db
+def test_two_users_paging_the_same_endpoint_never_see_each_others_rows():
+    """
+    The adversarial case pagination makes possible: authorization is applied
+    in get_queryset(), so it is correct only if EVERY page is drawn from the
+    filtered queryset. A page-2 request that re-derived its window from an
+    unfiltered queryset would leak — and would be invisible on page 1, which
+    is the page every casual test checks.
+
+    Both users hold data here, so a filter that returned nothing for everyone
+    would fail the completeness half of the assertion.
+    """
+    alice, bob = user("alicepg"), user("bobpg")
+    rows = {}
+    for owner, tag in ((alice, "A"), (bob, "B")):
+        g = StudyGroup.objects.create(
+            name=f"{tag}", description="d", creator=owner, join_code=f"x{tag}1"
+        )
+        rows[tag] = {
+            StudyMaterial.objects.create(
+                title=f"{tag}{i}", study_group=g, uploaded_by=owner,
+                file=f"m/{tag}{i}.pdf",
+            ).id
+            for i in range(12)
+        }
+
+    url = reverse("studymaterial-list")
+    seen = {}
+    for owner, tag in ((alice, "A"), (bob, "B")):
+        c = auth(owner)
+        page1 = c.get(url, {"page_size": 5, "page": 1})
+        page2 = c.get(url, {"page_size": 5, "page": 2})
+        page3 = c.get(url, {"page_size": 5, "page": 3})
+        seen[tag] = {
+            m["id"] for r in (page1, page2, page3) for m in r.data["results"]
+        }
+        assert page1.data["count"] == 12, f"{tag}: count leaks other rows"
+
+    assert seen["A"] == rows["A"]
+    assert seen["B"] == rows["B"]
+    assert seen["A"].isdisjoint(seen["B"]), "a page leaked another user's rows"
+
+
+@pytest.mark.django_db
+def test_deep_paging_as_a_non_member_returns_nothing_on_every_page():
+    """
+    Paging past the end must not fall out of the authorization filter — the
+    404 for an out-of-range page has to come from an EMPTY authorized
+    queryset, not from a populated one the caller should not see.
+    """
+    owner, stranger = user("victimdeep"), user("strangerdeep")
+    g = group_with_members(owner, 12)
+    for i in range(12):
+        StudyMaterial.objects.create(
+            title=f"secret{i}", study_group=g, uploaded_by=owner, file=f"m/{i}.pdf"
+        )
+    c = auth(stranger)
+
+    for page in (1, 2, 3, 99):
+        members = c.get(reverse("group-members", args=[g.id]),
+                        {"page": page, "page_size": 5})
+        files = c.get(reverse("studymaterial-list"), {"page": page, "page_size": 5})
+        for r in (members, files):
+            assert r.status_code in (200, 404), f"page={page} -> {r.status_code}"
+            if r.status_code == 200:
+                assert r.data["results"] == [], f"page={page} leaked rows"
+                assert r.data["count"] == 0
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("total", [0, 1, 2, 49, 50, 51, 101])
+def test_every_row_is_reachable_at_page_boundaries(total):
+    """
+    Off-by-one at a page boundary is the classic pagination defect, and the
+    sizes that expose it are the ones either side of the page size — 49/50/51
+    against the default of 50. A client that walks `next` must end up with
+    exactly `total` distinct rows, no duplicates and none missing.
+    """
+    owner = user(f"ownerbound{total}")
+    g = StudyGroup.objects.create(
+        name="G", description="d", creator=owner, join_code=f"bd{total}"
+    )
+    created = {
+        StudyMaterial.objects.create(
+            title=f"f{i}", study_group=g, uploaded_by=owner, file=f"m/{i}.pdf"
+        ).id
+        for i in range(total)
+    }
+
+    walked = collect_all_pages(auth(owner), reverse("studymaterial-list"))
+
+    ids = [m["id"] for m in walked]
+    assert len(ids) == total, f"{total} rows -> walked {len(ids)}"
+    assert len(set(ids)) == total, "a row appeared on two pages"
+    assert set(ids) == created, "walked set differs from what was created"
 
 
 @pytest.mark.django_db

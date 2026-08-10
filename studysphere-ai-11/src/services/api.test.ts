@@ -589,11 +589,64 @@ describe("fetchAllPages — paginated list reads (M2 P2.1)", () => {
       count: 999, next: "http://api.example/x?page=2", previous: null, results: [{ id: 1 }],
     })];
 
-    const res = await fetchAllPages("/loop/");
+    await expect(fetchAllPages("/loop/")).rejects.toThrow(/more pages after 50/);
 
-    const calls = seen.filter((s) => s.url === "/loop/").length;
-    expect(calls).toBe(50);
-    expect(res.data.results).toHaveLength(50);
+    expect(seen.filter((s) => s.url === "/loop/")).toHaveLength(50);
+  });
+
+  it("THROWS rather than silently returning a partial list at the cap", async () => {
+    // The defect this helper exists to prevent, reappearing at a larger scale.
+    // Before this was enforced: a server holding 3000 rows returned 2500 with
+    // `count: 2500` and `next: null` — an envelope asserting completeness
+    // about a list missing 500 rows, undetectable by any caller.
+    //
+    // Returning the partial rows is NOT an acceptable fallback. Callers read
+    // `res.data.results` and render it; there is no field they check that
+    // would tell them the list is short. A thrown error reaches their existing
+    // catch blocks and is visible; a truncated list is not.
+    const { fetchAllPages } = await loadApi();
+    responses["/materials/"] = [reply(200, {
+      count: 3000,
+      next: "http://api.example/x?page=2",
+      previous: null,
+      results: Array.from({ length: 50 }, (_, i) => ({ id: i })),
+    })];
+
+    await expect(fetchAllPages("/materials/")).rejects.toThrow(
+      /collected 2500 of 3000/
+    );
+  });
+
+  it("does not throw when the last page lands exactly on the cap", async () => {
+    // Off-by-one guard: 50 pages is allowed, 51 is not. Without this, the
+    // fix above would reject a dataset it can serve perfectly well.
+    const { fetchAllPages } = await loadApi();
+    responses["/materials/"] = Array.from({ length: 50 }, (_, i) => reply(200, {
+      count: 500,
+      next: i === 49 ? null : `http://api.example/x?page=${i + 2}`,
+      previous: i === 0 ? null : "http://api.example/x",
+      results: Array.from({ length: 10 }, (_, j) => ({ id: i * 10 + j })),
+    }));
+
+    const res = await fetchAllPages("/materials/");
+
+    expect(res.data.results).toHaveLength(500);
+    expect(seen.filter((s) => s.url === "/materials/")).toHaveLength(50);
+  });
+
+  it("returns an empty envelope for an empty list, not a throw", async () => {
+    // Empty states must survive: callers do `res.data.results || res.data || []`
+    // and render an empty-state panel.
+    const { fetchAllPages } = await loadApi();
+    responses["/materials/"] = [reply(200, {
+      count: 0, next: null, previous: null, results: [],
+    })];
+
+    const res = await fetchAllPages("/materials/");
+
+    expect(res.data.results).toEqual([]);
+    expect(res.data.count).toBe(0);
+    expect(seen.filter((s) => s.url === "/materials/")).toHaveLength(1);
   });
 
   it("propagates errors instead of returning a partial list as if complete", async () => {

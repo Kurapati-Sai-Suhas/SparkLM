@@ -1,12 +1,30 @@
 import csv
 import os
 from django.core.management.base import BaseCommand
+from common.environment import require_disposable_environment
 from groups.models import Topic, Question
 
 class Command(BaseCommand):
-    help = 'Seeds the database with LeetCode questions and cleans old data'
+    help = (
+        'DESTRUCTIVE. Deletes EVERY Question and reseeds from the LeetCode CSV. '
+        'Question deletion cascades into CodeSubmission and AgenticCoachLog, so '
+        'this destroys learner submission history. Refused unless SPARKLM_ENV is '
+        'a disposable environment AND --wipe-all-questions is passed.'
+    )
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--wipe-all-questions', action='store_true',
+            help='Acknowledge that every Question — and every submission that '
+                 'references one — will be deleted.',
+        )
 
     def handle(self, *args, **kwargs):
+        # Gate BEFORE any work: this used to delete unconditionally (M2 P2.5).
+        require_disposable_environment(
+            'seed_data (wipes all questions)',
+            acknowledged=kwargs.get('wipe_all_questions', False),
+        )
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         csv_path = os.path.join(base_dir, 'data', 'LeetCode_Questions_updated (2024-11-02).csv')
 

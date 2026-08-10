@@ -1,67 +1,103 @@
 """
-Hidden-test validator (M2 P2.5, Phase 8).
+Hidden-test and oracle validator (M2 P2.5, Phases 6 + 8).
 
-Read-only by design: it opens no write transaction and is safe to point at
-production, which is the only place the real answer to "how many problems are
-actually gradable?" lives. The P2.5 audit could not answer that question
-because the development database is empty.
+Read-only. It opens no write transaction, so it is safe to point at
+production — which is the only place the real coverage numbers live, since the
+development database is empty.
 
-Exit codes are meaningful so CI and cron can gate on them:
+    python manage.py validate_question_bank
+    python manage.py validate_question_bank --json
+    python manage.py validate_question_bank --database replica
 
-    0  every problem meets the contract
-    1  at least one problem FAILS or is BLOCKED
-    2  the bank is empty (nothing to validate — treated as a failure, because
-       a silent zero is how "all green" gets reported about nothing)
+Exit codes are the contract for CI and cron:
 
-`--json` emits a machine-readable report for the scheduled job to archive.
+    0  every problem passed every check that could be RUN
+    1  at least one problem FAILED or is BLOCKED
+    2  the census could not be established at all — empty bank, or the
+       requested database is unreachable
 
-Checks that depend on the oracle architecture (Phase 5) are reported as
-UNKNOWN rather than silently passing — there is no reference-solution storage
-in the schema yet, so no expected output in this system has ever been verified
-by executing a trusted implementation. That is the single most important fact
-this report can surface, and rounding it to PASS would defeat the purpose.
+2 is not "no news". Zero problems means zero failures, which a naive tool
+reports as success; that is exactly how "all green" gets announced about
+nothing, and it is the state the development database is in right now.
+
+Three-state reporting, never rounded:
+
+    VERIFIED   checked against an executed oracle and agreed
+    UNKNOWN    could not be checked — no active reference solution, or
+               oracle execution was not requested
+    BLOCKED    cannot be graded at all
+
+`UNKNOWN` is deliberately not `PASS`. Every expected output in this bank was
+produced by a language model and has never been confirmed by executing a
+trusted implementation; reporting that as passing would launder the precise
+defect P2.5 exists to fix.
 """
 
 import json
 
 from django.core.management.base import BaseCommand
+from django.db import OperationalError, connections
 
-from groups.models import Question
+from common import languages
+from groups.hidden_tests import MIN_HIDDEN_TESTS, is_gradable, validate_suite
+from groups.models import Question, ReferenceSolution
 
-#: Minimum coverage floor from the P2.5 contract. A floor, not a target.
-MIN_HIDDEN_TESTS = 12
-
-# Verdicts, worst first — a problem takes the worst that applies.
-BLOCKED = "BLOCKED"   # cannot be graded at all
-FAIL = "FAIL"         # gradable, but below the contract
+BLOCKED = "BLOCKED"
+FAIL = "FAIL"
 PASS = "PASS"
+
+VERIFIED = "VERIFIED"
+UNKNOWN = "UNKNOWN"
 
 
 class Command(BaseCommand):
     help = (
-        "Read-only audit of hidden-test coverage. Reports problems with zero "
-        "or too few hidden tests, malformed cases, duplicate inputs and "
-        "missing expected outputs. Exit 1 if any problem fails."
+        "Read-only audit of hidden-test coverage and reference-solution "
+        "availability. Exit 1 on validation failure, 2 if the census cannot "
+        "be established."
     )
 
     def add_arguments(self, parser):
         parser.add_argument("--json", action="store_true",
-                            help="Emit the machine-readable report instead of a table.")
+                            help="Machine-readable report instead of a table.")
+        parser.add_argument("--database", default="default",
+                            help="Django database alias to audit (default: 'default').")
         parser.add_argument("--min", type=int, default=MIN_HIDDEN_TESTS,
                             help=f"Coverage floor (default {MIN_HIDDEN_TESTS}).")
         parser.add_argument("--limit", type=int, default=0,
-                            help="Only list the first N non-passing problems in table mode.")
+                            help="List only the first N non-passing problems.")
 
     def handle(self, *args, **options):
+        alias = options["database"]
         floor = options["min"]
-        rows = [self._inspect(q, floor) for q in Question.objects.all().only(
-            "id", "title", "hidden_test_cases"
-        ).order_by("id")]
+        emit_json = options["json"]
 
-        if options["json"]:
-            self.stdout.write(json.dumps(self._report(rows, floor), indent=2))
+        # A database we cannot reach is UNKNOWN, never an implicit zero.
+        # Without this the command reports "0 problems" against a bad DSN and
+        # a scheduled job would treat that as a clean bank.
+        if alias not in connections:
+            return self._unavailable(
+                emit_json, alias, f"no database alias {alias!r} is configured")
+        try:
+            connections[alias].ensure_connection()
+        except OperationalError as exc:
+            return self._unavailable(
+                emit_json, alias, f"database {alias!r} is unreachable: {exc}")
+
+        rows = [
+            self._inspect(question, floor)
+            for question in Question.objects.using(alias)
+                                    .only("id", "title", "hidden_test_cases")
+                                    .prefetch_related("reference_solutions")
+                                    .order_by("id")
+        ]
+
+        report = self._report(rows, floor, alias, census="VERIFIED" if rows else "BLOCKED")
+
+        if emit_json:
+            self.stdout.write(json.dumps(report, indent=2))
         else:
-            self._print_table(rows, floor, options["limit"])
+            self._print_table(report, options["limit"])
 
         if not rows:
             raise SystemExit(2)
@@ -71,66 +107,48 @@ class Command(BaseCommand):
 
     def _inspect(self, question, floor):
         cases = question.hidden_test_cases
-        problems = []
+        problems = [str(p) for p in validate_suite(cases, floor)]
 
-        if not isinstance(cases, list):
-            return self._row(question, 0, BLOCKED,
-                             ["hidden_test_cases is not a list"])
-        if not cases:
-            return self._row(question, 0, BLOCKED, ["no hidden tests"])
-
-        well_formed = [c for c in cases if isinstance(c, dict)]
-        if len(well_formed) != len(cases):
-            problems.append(f"{len(cases) - len(well_formed)} case(s) are not objects")
-
-        missing_expected = [
-            c for c in well_formed
-            if "expected_output" not in c or c.get("expected_output") is None
+        active = [
+            s for s in question.reference_solutions.all() if s.is_active
         ]
-        if missing_expected:
-            problems.append(f"{len(missing_expected)} case(s) missing expected_output")
+        oracle_languages = sorted(s.language for s in active)
 
-        # stdin is REQUIRED to be non-empty by the generation contract in
-        # ai_services: "stdin must NEVER be empty".
-        blank_stdin = [c for c in well_formed if not str(c.get("stdin", "")).strip()]
-        if blank_stdin:
-            problems.append(f"{len(blank_stdin)} case(s) have empty stdin")
+        for language in oracle_languages:
+            if language not in languages.ACCEPTED_SPELLINGS:
+                problems.append(
+                    f"reference solution language {language!r} is not a "
+                    f"supported Judge0 language"
+                )
 
-        stdins = [str(c.get("stdin", "")) for c in well_formed]
-        duplicates = len(stdins) - len(set(stdins))
-        if duplicates:
-            # A duplicate input is not merely redundant: it inflates the count
-            # toward the floor while testing nothing new.
-            problems.append(f"{duplicates} duplicate stdin value(s)")
+        if not active:
+            # Not a FAIL on its own — no problem in the bank has one yet, and
+            # flagging all of them as failures says nothing useful. It is what
+            # makes the outputs UNVERIFIED, which the summary reports loudly.
+            problems.append("no active reference solution (outputs unverified)")
 
-        count = len(cases)
-        if count < floor:
-            problems.append(f"{count} hidden test(s), floor is {floor}")
+        gradable = is_gradable(cases)
+        status = BLOCKED if not gradable else (PASS if not problems else FAIL)
 
-        # Cannot be graded at all: every case unusable.
-        if len(missing_expected) == len(well_formed) or not well_formed:
-            return self._row(question, count, BLOCKED, problems)
-
-        return self._row(question, count, PASS if not problems else FAIL, problems)
-
-    @staticmethod
-    def _row(question, count, status, problems):
         return {
             "id": question.id,
             "title": question.title,
-            "hidden": count,
-            # No reference-solution storage exists yet (Phase 5), so no
-            # expected output in this system has been verified by execution.
-            "oracle": "NO",
-            "verified": "UNKNOWN",
+            "hidden": len(cases) if isinstance(cases, list) else 0,
+            "oracle": "YES" if active else "NO",
+            "oracle_languages": oracle_languages,
+            # Oracle EXECUTION is Phase 7 and is not run here, so agreement
+            # between stored outputs and a trusted run is not yet knowable.
+            "verified": UNKNOWN,
             "status": status,
             "problems": problems,
         }
 
-    # ── output ───────────────────────────────────────────────
+    # ── reporting ────────────────────────────────────────────
 
-    def _report(self, rows, floor):
+    def _report(self, rows, floor, alias, census):
         return {
+            "database": alias,
+            "census": census,
             "floor": floor,
             "total_problems": len(rows),
             "passing": sum(r["status"] == PASS for r in rows),
@@ -138,51 +156,65 @@ class Command(BaseCommand):
             "blocked": sum(r["status"] == BLOCKED for r in rows),
             "zero_hidden_tests": sum(r["hidden"] == 0 for r in rows),
             "below_floor": sum(r["hidden"] < floor for r in rows),
-            "with_verified_oracle": sum(r["verified"] == "YES" for r in rows),
+            "with_active_oracle": sum(r["oracle"] == "YES" for r in rows),
+            "verified_outputs": sum(r["verified"] == VERIFIED for r in rows),
             "problems": rows,
         }
 
-    def _print_table(self, rows, floor, limit):
-        if not rows:
-            # ASCII only: this runs on a Windows console and in CI logs, and a
-            # non-ASCII dash renders as a replacement character in cp1252.
+    def _unavailable(self, emit_json, alias, reason):
+        payload = {
+            "database": alias, "census": "BLOCKED", "reason": reason,
+            "total_problems": None, "problems": [],
+        }
+        if emit_json:
+            self.stdout.write(json.dumps(payload, indent=2))
+        else:
+            self.stdout.write(self.style.ERROR(f"CENSUS BLOCKED: {reason}"))
+        raise SystemExit(2)
+
+    def _print_table(self, report, limit):
+        if not report["total_problems"]:
             self.stdout.write(self.style.ERROR(
-                "Question bank is EMPTY - nothing to validate."
+                f"CENSUS BLOCKED: database {report['database']!r} holds no "
+                f"questions - nothing to validate."
             ))
             return
 
-        failing = [r for r in rows if r["status"] != PASS]
+        failing = [r for r in report["problems"] if r["status"] != PASS]
         shown = failing[:limit] if limit else failing
 
         self.stdout.write(
-            f"{'ID':>6}  {'Problem':<44} {'Hidden':>6}  {'Oracle':<7}"
-            f"{'Verified':<10}{'Status':<8} Issues"
+            f"{'ID':>6}  {'Problem':<40} {'Hidden':>6}  {'Oracle':<7}"
+            f"{'Verified':<10}{'Status':<9} Issues"
         )
-        self.stdout.write("-" * 118)
+        self.stdout.write("-" * 120)
         for r in shown:
-            title = (r["title"][:41] + "...") if len(r["title"]) > 44 else r["title"]
+            title = (r["title"][:37] + "...") if len(r["title"]) > 40 else r["title"]
             style = self.style.ERROR if r["status"] == BLOCKED else self.style.WARNING
             self.stdout.write(style(
-                f"{r['id']:>6}  {title:<44} {r['hidden']:>6}  {r['oracle']:<7}"
-                f"{r['verified']:<10}{r['status']:<8} {'; '.join(r['problems'])}"
+                f"{r['id']:>6}  {title:<40} {r['hidden']:>6}  {r['oracle']:<7}"
+                f"{r['verified']:<10}{r['status']:<9} {'; '.join(r['problems'])}"
             ))
         if limit and len(failing) > limit:
             self.stdout.write(f"... and {len(failing) - limit} more non-passing problem(s)")
 
-        summary = self._report(rows, floor)
         self.stdout.write("")
         self.stdout.write(
-            f"  {summary['total_problems']} problems | "
-            f"PASS {summary['passing']} | FAIL {summary['failing']} | "
-            f"BLOCKED {summary['blocked']}"
+            f"  database {report['database']!r} | census {report['census']} | "
+            f"{report['total_problems']} problems"
         )
         self.stdout.write(
-            f"  zero hidden tests: {summary['zero_hidden_tests']} | "
-            f"below floor of {floor}: {summary['below_floor']} | "
-            f"with a verified oracle: {summary['with_verified_oracle']}"
+            f"  PASS {report['passing']} | FAIL {report['failing']} | "
+            f"BLOCKED {report['blocked']}"
         )
-        if summary["with_verified_oracle"] == 0 and summary["total_problems"]:
+        self.stdout.write(
+            f"  zero hidden tests: {report['zero_hidden_tests']} | "
+            f"below floor of {report['floor']}: {report['below_floor']} | "
+            f"with an active oracle: {report['with_active_oracle']}"
+        )
+        if report["verified_outputs"] == 0:
             self.stdout.write(self.style.ERROR(
-                "  No problem has a trusted reference solution: every expected "
-                "output in the bank is unverified (P2.5 Phase 5 pending)."
+                "  0 problems have outputs verified against an executed "
+                "oracle. Every expected output in this bank is unverified "
+                "(P2.5 Phase 7 pending)."
             ))

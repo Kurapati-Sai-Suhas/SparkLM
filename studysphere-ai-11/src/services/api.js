@@ -149,6 +149,76 @@ api.interceptors.response.use(
   }
 );
 
+// ==================== Paginated list reads ====================
+//
+// Every DRF list endpoint answers with { count, next, previous, results }.
+// The pages that read those endpoints render a complete list — a group's
+// roster, a file library, a group picker — and none of them has a "next page"
+// control, so they were showing `results` and dropping the rest. With
+// PAGE_SIZE at 3 that meant a 12-member group displayed 3 members, silently:
+// no error, no empty state, just a short list that looked correct (M2 P2.1).
+//
+// This walks the pages and returns ONE response in the same envelope shape,
+// so callers keep reading `res.data.results` exactly as before.
+//
+// It re-requests `path` with an incrementing `page` rather than following the
+// absolute URL in `next`. DRF builds that URL from the request host, which
+// behind a proxy can come back as http:// — following it would issue a
+// mixed-content request from an https page. Paging by number stays on the
+// client's own baseURL and inherits its auth interceptors.
+//
+// MAX_PAGES is a REQUEST BUDGET, not a record limit. It bounds the load one
+// page-load can put on a 0.1 vCPU instance and keeps a single list read well
+// inside the 120/min per-user throttle. Exhausting it means either a dataset
+// far larger than any screen here is built to render, or a backend returning
+// `next` forever — both are faults, so it THROWS.
+//
+// It must never return the rows it did manage to collect: this helper's whole
+// purpose is to stop lists lying about being complete, and a partial result
+// carrying `next: null` and a shortened `count` is that same lie at a larger
+// scale. Measured before this was enforced: 3000 rows on the server came back
+// as 2500 with `next: null`, and no caller could tell.
+const MAX_PAGES = 50;
+
+export const fetchAllPages = async (path, config = {}) => {
+  const results = [];
+  let firstResponse = null;
+  let reportedTotal = null;
+
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const response = await api.get(path, {
+      ...config,
+      params: { ...(config.params || {}), page },
+    });
+    if (firstResponse === null) firstResponse = response;
+
+    const body = response.data;
+    // Not a paginated endpoint (or an error shape) — hand it back untouched
+    // rather than inventing an envelope the caller did not ask for.
+    if (!body || !Array.isArray(body.results)) return response;
+
+    if (reportedTotal === null && typeof body.count === "number") {
+      reportedTotal = body.count;
+    }
+    results.push(...body.results);
+    if (!body.next) break;
+
+    if (page === MAX_PAGES) {
+      throw new Error(
+        `fetchAllPages: ${path} still had more pages after ${MAX_PAGES} ` +
+        `requests (collected ${results.length}` +
+        (reportedTotal === null ? "" : ` of ${reportedTotal}`) +
+        `). Refusing to return a partial list as if it were complete.`
+      );
+    }
+  }
+
+  return {
+    ...firstResponse,
+    data: { count: results.length, next: null, previous: null, results },
+  };
+};
+
 // ==================== User API ====================
 //
 // Every path here is relative to the instance baseURL, which already ends
@@ -233,7 +303,9 @@ export const authAPI = {
 
 // ==================== Study Groups API ====================
 export const groupsAPI = {
-  getAll: () => api.get('/groups/'),
+  // fetchAllPages, not api.get: every caller renders the full group list and
+  // none pages (M2 P2.1).
+  getAll: () => fetchAllPages('/groups/'),
   
   create: (groupData) => api.post('/groups/', groupData),
   
@@ -261,7 +333,15 @@ export const groupsAPI = {
   },
 
   // We use 'study_group' to filter by ID exactly, bypassing the fuzzy text search
-   getMaterials: (groupId) => api.get(`/materials/?study_group=${groupId}`),
+   getMaterials: (groupId) => fetchAllPages(`/materials/?study_group=${groupId}`),
+
+  // The roster and the assigned-quiz list were fetched with hand-written
+  // api.get paths in GroupDetail and AIQuiz. Both are paginated, so both
+  // truncated; naming them here keeps the paging in one place (M2 P2.1).
+  getMembers: (groupId) => fetchAllPages(`/groups/${groupId}/members/`),
+
+  getAssignedQuizzes: (groupId) =>
+    fetchAllPages(`/quizzes/assigned/?study_group=${groupId}`),
 
   // Authorized download (M5 Phase 3). Two steps on purpose: this request
   // carries the bearer token and the backend re-checks membership before

@@ -56,7 +56,11 @@ User = get_user_model()
 # ─────────────────────────────────────────────────────────────
 
 class LargePagination(PageNumberPagination):
-    page_size = 8
+    # 8 was still below the size of a real group (StudyGroup.capacity defaults
+    # to 50), so the roster and the file library both truncated. 50 covers a
+    # full-capacity group in one page; `page_size` lets a caller ask for less,
+    # and clients follow `next` for the rest (M2 P2.1).
+    page_size = 50
     page_size_query_param = 'page_size'
     max_page_size = 1000
 
@@ -122,9 +126,18 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        # select_related/prefetch_related are load-bearing now that a page
+        # holds 50 rows instead of 8: StudyGroupSerializer nests `creator`,
+        # `members` and `active_portals`, so without them each group costs
+        # three extra queries and a full page costs 150 (P2.1).
+        #
+        # '-id' breaks ties: created_at is auto_now_add, so groups made in the
+        # same instant sort arbitrarily and could shuffle between pages (P2.1).
         return StudyGroup.objects.filter(
             Q(members=user) | Q(creator=user)
-        ).distinct().order_by('-created_at')
+        ).distinct().select_related('creator').prefetch_related(
+            'members', 'active_portals'
+        ).order_by('-created_at', '-id')
 
     def perform_create(self, serializer):
         group = serializer.save(creator=self.request.user)
@@ -260,6 +273,7 @@ def cache_extracted_text(material):
 class MaterialViewSet(viewsets.ModelViewSet):
     serializer_class   = StudyMaterialSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = LargePagination
     parser_classes     = (parsers.MultiPartParser, parsers.FormParser)
     filter_backends    = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields   = ['study_group', 'uploaded_by']
@@ -281,7 +295,16 @@ class MaterialViewSet(viewsets.ModelViewSet):
         preserved from the attribute this replaces, so list responses are
         unchanged for anyone who was entitled to see them.
         """
-        return accessible_materials(self.request.user).order_by('-upload_date')
+        # select_related is load-bearing now that a page holds 50 rows instead
+        # of 3: StudyMaterialSerializer nests `uploaded_by` and `study_group`,
+        # so without it each row costs two extra queries. Measured on a
+        # 50-row page: 103 queries before, 5 after (P2.1).
+        #
+        # '-id' breaks ties: upload_date is auto_now_add, so a batch upload
+        # sorts arbitrarily and could shuffle between pages (P2.1).
+        return accessible_materials(self.request.user).select_related(
+            'uploaded_by', 'study_group'
+        ).order_by('-upload_date', '-id')
 
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
@@ -822,6 +845,7 @@ class AssignedQuizCreateView(generics.CreateAPIView):
 class ListAssignedQuizView(generics.ListAPIView):
     serializer_class   = AssignedQuizSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = LargePagination
 
     def get_queryset(self):
         """
@@ -842,7 +866,15 @@ class ListAssignedQuizView(generics.ListAPIView):
         group = resolve_group(self.request.user, group_id)
         if group is None:
             return AssignedQuiz.objects.none()
-        return AssignedQuiz.objects.filter(study_group=group).order_by('deadline')
+        # 'id' breaks ties: deadline is a client-supplied field, and a creator
+        # setting several quizzes to the same due date is ordinary use. Tied
+        # rows sort arbitrarily, so without this a quiz can appear on two pages
+        # while another appears on none (P2.1).
+        # select_related: AssignedQuizSerializer exposes `creator_name` from
+        # assigned_by.username, one extra query per row without it (P2.1).
+        return AssignedQuiz.objects.filter(study_group=group).select_related(
+            'assigned_by'
+        ).order_by('deadline', 'id')
 
 
 class ManageAssignedQuizView(generics.RetrieveUpdateDestroyAPIView):
@@ -890,6 +922,7 @@ class getGroupMembers(generics.ListAPIView):
     # the email from here; it renders username, university and role.
     serializer_class   = UserDisplaySerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = LargePagination
 
     def get_queryset(self):
         """
@@ -906,9 +939,15 @@ class getGroupMembers(generics.ListAPIView):
         group = resolve_group(self.request.user, self.kwargs['group_id'])
         if group is None:
             return User.objects.none()
+        # order_by is required, not cosmetic: an unordered queryset makes
+        # Postgres free to return rows in any order per query, so the same
+        # member could appear on page 1 and page 2 while another never appears
+        # at all. DRF warns about exactly this (UnorderedObjectListWarning).
+        # `id` is insertion order — the closest stable order to what the
+        # unordered query already returned in practice (M2 P2.1).
         return User.objects.filter(
             Q(id__in=group.members.all()) | Q(id=group.creator_id)
-        ).distinct()
+        ).distinct().order_by('id')
 
 
 # ─────────────────────────────────────────────────────────────

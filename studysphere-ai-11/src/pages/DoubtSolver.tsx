@@ -37,7 +37,7 @@ export default function DoubtSolver() {
   useEffect(() => {
     const fetchAllGroups = async () => {
         try {
-            const res = await api.get("/groups/?page_size=100"); 
+            const res = await groupsAPI.getAll();
             setGroups(res.data.results || res.data || []);
         } catch (err) {
             console.error("Failed to load groups", err);

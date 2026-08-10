@@ -61,7 +61,7 @@ export default function AIQuiz() {
         const res = await groupsAPI.getMaterials(groupId);
         setFiles(res.data.results || res.data || []);
 
-        const quizRes = await api.get(`/quizzes/assigned/?study_group=${groupId}`);
+        const quizRes = await groupsAPI.getAssignedQuizzes(groupId);
         setAssignedQuizzes(quizRes.data.results || quizRes.data || []);
     } catch (error) {
         console.error("Failed to load group data", error);

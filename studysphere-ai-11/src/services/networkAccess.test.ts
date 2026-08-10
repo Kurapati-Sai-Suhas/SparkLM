@@ -61,7 +61,6 @@ const CLIENT = join("services", "api.js");
  */
 const PHASE_1B_ALLOWLIST = [
   join("components", "CodingOnboardingModal.tsx"),
-  join("components", "CodingPortal.tsx"),
   join("components", "LearningPathVisualizer.tsx"),
   join("components", "ReviewQueueCard.tsx"),
   join("pages", "AdaptiveCodingPortal.tsx"),

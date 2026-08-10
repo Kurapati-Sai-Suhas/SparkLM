@@ -22,7 +22,6 @@ const GroupDetail = lazy(() => import("./pages/GroupDetail"));
 const AIQuiz = lazy(() => import("./pages/AIQuiz"));
 const QuizTaking = lazy(() => import("./pages/QuizTaking"));
 const DoubtSolver = lazy(() => import("./pages/DoubtSolver"));
-const CodingPortal = lazy(() => import("./components/CodingPortal"));
 const AdaptiveCodingPortal = lazy(() => import("./pages/AdaptiveCodingPortal"));
 const Schedule = lazy(() => import("./pages/Schedule"));
 const FileLibrary = lazy(() => import("./pages/FileLibrary"));
@@ -125,7 +124,10 @@ const App = () => (
                           <Route path="/quiz/take/:quizId" element={<QuizTaking />} />
                           <Route path="/doubt-solver" element={<DoubtSolver />} />
                           <Route path="/coding-hub" element={<CodingHub />} />
-                          <Route path="/code" element={<CodingPortal />} />
+                          {/* Retired in M1/P1.2-C once /coding-portal gained Run Code parity.
+                              Redirect rather than 404: the route was linked from
+                              nowhere in-app, so only bookmarks reach it. */}
+                          <Route path="/code" element={<Navigate to="/coding-portal" replace />} />
                           <Route path="/coding-portal" element={<AdaptiveCodingPortal />} />
                           <Route path="/schedule" element={<Schedule />} />
                           <Route path="/files" element={<FileLibrary />} />

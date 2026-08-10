@@ -22,9 +22,9 @@ export default function ProblemDescription({
   content: string;
   htmlClassName?: string;
   textClassName?: string;
-  /** Inline style applied in both branches — for callers (like the
-   *  legacy CodingPortal) that style via inline objects rather than
-   *  Tailwind classes. Merged with the plaintext-branch's required
+  /** Inline style applied in both branches — for callers that style via
+   *  inline objects rather than Tailwind classes. The legacy /code portal
+   *  was the original such caller and was retired in M1/P1.2-C. Merged with the plaintext-branch's required
    *  whiteSpace: 'pre-wrap' (never overridden, or newlines collapse again). */
   style?: React.CSSProperties;
 }) {

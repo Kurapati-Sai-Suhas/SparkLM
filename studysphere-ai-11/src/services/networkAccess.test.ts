@@ -25,15 +25,16 @@
  *      an already-migrated page may never be added back.
  *
  * Checking BOTH transports is the correction the Phase 1a audit forced. The
- * original guard looked for `fetch(` alone, so CodingPortal — a routed page
- * (/code) issuing three calls through a directly imported axios — passed
+ * original guard looked for `fetch(` alone, so the legacy /code portal — a
+ * routed page issuing three calls through a directly imported axios — passed
  * while doing precisely what this file exists to forbid. A guard blind to
  * half the transports is worse than none: it certifies what it cannot see.
+ * That portal was retired in M1/P1.2-C, so NO file is permitted a direct
+ * axios import any more; the allowlist below covers raw `fetch` only.
  *
- * Why an allowlist rather than a blanket ban: seven fetch calls and three
- * axios calls remain in components Phase 1b owns. A rule that cannot pass
- * today is not a guard, it is a broken build — and it would be disabled
- * within the week.
+ * Why an allowlist rather than a blanket ban: fetch calls remain in
+ * components Phase 1b owns. A rule that cannot pass today is not a guard, it
+ * is a broken build — and it would be disabled within the week.
  *
  * Deliberately NOT asserted: that getAccessToken() is unused outside the
  * client. The WebSocket consumers (GroupChat, useGroupChat,
@@ -53,11 +54,9 @@ const CLIENT = join("services", "api.js");
  * Files still permitted to reach the API directly — Phase 1b's remaining
  * work. DELETE an entry when its file is migrated. Never add one.
  *
- * CodingPortal was added by the Phase 1a audit. It was missing because the
- * original guard only looked for `fetch(`, and CodingPortal uses a directly
- * imported axios — a whole transport the guard could not see. It is a routed
- * page (/code) making three API calls outside the shared instance, so
- * Phase 1b would have missed it entirely.
+ * The Phase 1a audit added CodingPortal here after finding the guard blind to
+ * its directly imported axios. M1/P1.2-C then deleted that component, so the
+ * entry is gone and every remaining entry is a raw-`fetch` consumer.
  */
 const PHASE_1B_ALLOWLIST = [
   join("components", "CodingOnboardingModal.tsx"),
@@ -264,8 +263,10 @@ describe("network access: raw fetch is confined to the allowlist", () => {
 
   it("only allowlisted files import axios directly", () => {
     // The gap the Phase 1a audit found. The guard checked `fetch(` only, so
-    // CodingPortal — a routed page making three API calls through a directly
-    // imported axios — passed while doing exactly what this file forbids.
+    // the legacy /code portal — a routed page making three API calls through a
+    // directly imported axios — passed while doing exactly what this file
+    // forbids. That component is gone (M1/P1.2-C); this rule now has no
+    // permitted exception.
     const unexpected = FILES.filter((f) => importsAxios(readFileSync(f, "utf8")))
       .map(rel)
       .filter((f) => !PHASE_1B_ALLOWLIST.includes(f));

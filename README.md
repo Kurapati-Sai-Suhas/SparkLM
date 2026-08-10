@@ -26,7 +26,7 @@ Platforms like LeetCode treat every user identically. SparkLM makes three bets:
 | **Grading pipeline** | Judge0 sandbox, per-language harnesses (Python/Java/JavaScript generic + per-question wrappers), normalized output comparison, honest status mapping (TLE/compile/runtime) |
 | **AI coach** | Escalating hints on consecutive failures: Socratic nudge (3) → pseudocode (5) → worked example (7+), via n8n/LLM webhook with resilient fallbacks |
 | **Content pipeline** | 2,900+ problem bank maintained by quota-aware, idempotent LLM batch commands (generation, validation gates, multi-language starter code, backfill, restore) |
-| **Collaboration** | JWT-authenticated WebSocket group chat, CRDT (Yjs) collaborative editor, study groups, quizzes, flashcards, document RAG, visual search |
+| **Collaboration** | JWT-authenticated WebSocket group chat, CRDT (Yjs) collaborative editor, study groups, quizzes, document RAG, visual search |
 | **Auth** | Google Sign-In (server-verified ID token, account linked by email) alongside password auth with enforced complexity (length + uppercase + number + symbol), case-insensitive unique username/email |
 | **Ops discipline** | 104-test offline suite (all third parties mocked, incl. threaded race tests), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), Sentry error tracking + per-request access log, environment-driven config, tested backup/restore |
 
@@ -71,7 +71,7 @@ Every choice below was made against a real alternative, not by default. The shor
 | **PyTorch + PyTorch-Geometric** *(optional, `requirements-ml.txt`)* | The GCN knowledge-graph engine, SHAP explanations | Deliberately isolated from the web tier — production runs `requirements.txt` alone (torch-free), ~2 GB lighter and no PyTorch cold-start tax on a free-tier instance. The heuristic explainer covers the same response schema when this isn't installed |
 | **ONNX Runtime** | Serving the trained GCN without PyTorch | Export once, then infer without the ~2 GB PyTorch dependency in the request path |
 | **Judge0 (RapidAPI)** | Sandboxed code execution | Untrusted student code must never run in-process — Judge0 isolates it completely, in 4 languages |
-| **Groq (Llama 3.3 70B)** | Quiz/flashcard/question-content generation | Fast, cheap, strong structured-JSON output — the right tool for "generate 4 test cases as JSON," not the right tool for open-ended reasoning |
+| **Groq (Llama 3.3 70B)** | Quiz and question-content generation | Fast, cheap, strong structured-JSON output — the right tool for "generate 4 test cases as JSON," not the right tool for open-ended reasoning |
 | **Google Gemini** | Vision (image explanation), text embeddings | Groq doesn't do multimodal; Gemini's `gemini-2.5-flash` and `text-embedding-004` cover the vision and embedding gaps |
 | **Google Identity Services + google-auth** | OAuth sign-in | Token verified server-side against Google's public keys — the frontend's claim of identity is never trusted on its own |
 
@@ -687,15 +687,15 @@ The chat consumer went through a real interoperability fix: the frontend and bac
 </details>
 
 <details>
-<summary><strong>12. AI Study Tools — Flashcards, Quizzes, and RAG Doubt-Solving</strong></summary>
+<summary><strong>12. AI Study Tools — Quizzes and RAG Doubt-Solving</strong></summary>
 
 #### Problem Statement
 
-Turning an uploaded PDF into a useful flashcard deck or quiz needs the LLM's output to be *structurally* trustworthy (a malformed card breaks the UI), and answering questions about a specific uploaded document needs the model grounded in that document, not just its general training knowledge — while never letting document or user content be interpreted as instructions to the model itself.
+Turning an uploaded PDF into a useful quiz needs the LLM's output to be *structurally* trustworthy (a malformed item breaks the UI), and answering questions about a specific uploaded document needs the model grounded in that document, not just its general training knowledge — while never letting document or user content be interpreted as instructions to the model itself.
 
 #### Solution
 
-Groq's structured-JSON generation mode for flashcards/quizzes, with strict schema validation before anything is persisted; a direct-context-stuffing RAG variant for document Q&A; and a consistent prompt-injection defense applied to every AI-touching feature, not bolted onto just one.
+Groq's structured-JSON generation mode for quizzes, with strict schema validation before anything is persisted; a direct-context-stuffing RAG variant for document Q&A; and a consistent prompt-injection defense applied to every AI-touching feature, not bolted onto just one.
 
 #### Methodology & Architecture
 
@@ -705,7 +705,7 @@ uploaded PDF/DOCX ──▶ text extraction (PyPDF2 / PyMuPDF)
                 ┌─────────────┴─────────────┐
                 ▼                             ▼
     Groq structured-JSON mode          RecursiveCharacterTextSplitter
-    (flashcards / quiz)                (500-char chunks, 50 overlap)
+    (quiz)                             (500-char chunks, 50 overlap)
                 │                             │
       schema validation                doubt question + chunks
       (required keys +                 routed directly into LLM
@@ -733,7 +733,7 @@ The paper that established retrieve-then-generate as a pattern for grounding LLM
 
 #### Observations
 
-The prompt-injection defense (explicitly fencing untrusted content and instructing the model to treat it as data) is applied identically across quiz generation, flashcard generation, and doubt-answering — checked directly against the actual prompts, this is a real, consistent pattern rather than being present in one feature and forgotten in the others.
+The prompt-injection defense (explicitly fencing untrusted content and instructing the model to treat it as data) is applied identically across quiz generation and doubt-answering — checked directly against the actual prompts, this is a real, consistent pattern rather than being present in one feature and forgotten in the others.
 
 </details>
 

@@ -32,6 +32,7 @@ import re
 from dataclasses import dataclass, field
 
 from django.db import transaction
+from django.utils import timezone
 
 from common import languages
 from .engines.agentic_coach import trigger_agentic_coach
@@ -496,6 +497,25 @@ class ProgressionService:
                 )
 
             profile.elo_rating = elo_result["new_rating"]
+
+            # Streak, still under Lock 1 (M2 P2.2). `current_streak`,
+            # `highest_streak` and `last_active_date` live on the profile row
+            # that is already locked above, so this needs no second lock and
+            # adds no lock ordering — the concern §2.2 exists to control.
+            #
+            # It is also race-free for the same reason the Elo farming guard
+            # is: a concurrent submission has either committed (and its
+            # `last_active_date` is visible to the re-read that
+            # select_for_update performs after acquiring the lock) or is
+            # blocked behind us. Two accepted submissions in the same second
+            # therefore increment the streak once, not twice.
+            #
+            # Assigned before `profile.save()` deliberately: that one write
+            # already persists every field, so streaks cost zero extra
+            # queries and cannot half-commit relative to the rating.
+            if all_passed:
+                ProgressionService._apply_streak(profile)
+
             profile.save()
 
             # Lock 2..n: every mastery row this submission touches — the
@@ -533,6 +553,54 @@ class ProgressionService:
                     )
 
         return submission, elo_result, profile
+
+    @staticmethod
+    def _apply_streak(profile):
+        """
+        Advance the daily solving streak on an already-locked profile row.
+
+        Mutates in memory only — the caller's existing `profile.save()`
+        persists it, so this adds no query to the transaction.
+
+        Semantics (M2 P2.2), each one forced by the roadmap's success
+        criterion "solving on consecutive days increments the streak" or by
+        the shape of the fields that already exist:
+
+          * Only ACCEPTED submissions reach here. The criterion says
+            *solving*, and the caller gates on `all_passed`. A failed attempt
+            neither extends nor breaks a streak — it is simply not a solve.
+          * Same day twice  -> no change. `last_active_date` is a DateField,
+            so a day is the unit; the second solve of a day has already been
+            counted. This is what makes the update idempotent per day.
+          * Yesterday       -> +1. The definition of consecutive.
+          * Any older gap,
+            or no history    -> reset to 1. Today is a solve, so the streak is
+            1 rather than 0 — a learner who solves today has a one-day streak.
+          * A date in the future (only reachable if a row was written under a
+            different clock) is treated as a gap and resets, rather than
+            producing a negative delta.
+
+        `highest_streak` is a running maximum, never decreased.
+
+        The day boundary is the project timezone via `localdate()`, which is
+        UTC here (settings.TIME_ZONE). There is no per-user timezone field in
+        the system, so UTC is the only day definition available — not a
+        choice made here. A learner solving at 23:59 and again at 00:01 UTC
+        gets two days; that is inherent to any fixed boundary.
+        """
+        today = timezone.localdate()
+        last = profile.last_active_date
+
+        if last == today:
+            return
+
+        profile.current_streak = (
+            profile.current_streak + 1
+            if last is not None and (today - last).days == 1
+            else 1
+        )
+        profile.last_active_date = today
+        profile.highest_streak = max(profile.highest_streak, profile.current_streak)
 
     @staticmethod
     def _resolve_gdcp_penalties(user, question):

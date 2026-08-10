@@ -39,7 +39,7 @@ tracks known divergences.
 SparkLM is an **adaptive coding-practice platform**. A student solves programming problems;
 the system observes each outcome and continuously re-estimates two things — *how strong the
 student is* and *how hard each problem is* — then uses those estimates to choose what to
-serve next. Around that core sit study-group collaboration, an AI tutor, quiz/flashcard
+serve next. Around that core sit study-group collaboration, an AI tutor, quiz
 generation, and a document-search feature.
 
 The engineering interest is concentrated in three places:
@@ -305,7 +305,7 @@ studysphere-ai-11/src/
 │   ├── Dashboard.tsx                # single bootstrap call (see §4.4)
 │   ├── AdaptiveCodingPortal.tsx     # the core product surface
 │   ├── CodingHub.tsx
-│   ├── AITutor.tsx  AIQuiz.tsx  AIFlashcards.tsx  DoubtSolver.tsx
+│   ├── AITutor.tsx  AIQuiz.tsx  DoubtSolver.tsx
 │   ├── StudyGroups.tsx  GroupDetail.tsx  DirectChat.tsx  Friends.tsx
 │   ├── LiveCollaborativeWorkspace.tsx
 │   ├── FileLibrary.tsx  Schedule.tsx  Notifications.tsx  Settings.tsx

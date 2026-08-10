@@ -184,9 +184,6 @@ class TestSiblingAiEndpointsAreScopedToo:
         """Every generator echoes the text it was given, so a leak is visible."""
         monkeypatch.setattr("groups.views.extract_text_from_file", lambda p: SECRET)
         monkeypatch.setattr(
-            "groups.views.AIService.generate_flashcards",
-            lambda text, num_cards=10: [{"question": text[:40], "answer": "a"}])
-        monkeypatch.setattr(
             "groups.views.AIService.get_answer", lambda q, text: f"From: {text[:40]}")
         monkeypatch.setattr(
             "groups.views.AIService.generate_quiz",

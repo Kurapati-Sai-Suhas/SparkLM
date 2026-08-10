@@ -260,7 +260,6 @@ Application level (`groups/urls.py`) — 44 routes plus two router-generated Vie
 | 9 | * | `/api/materials/` | `MaterialViewSet` | 🔒 | user |
 | 10 | GET | `/api/groups/<id>/members/` | `getGroupMembers` | 🔒 | user |
 | 11 | GET | `/api/groups/<id>/messages/` | `GroupMessageHistoryView` | 🔒 | user |
-| 12 | POST | `/api/ai/flashcards/` | `AIFlashcardView` | 🔒 🌐 | user |
 | 13 | POST | `/api/ai/quiz/` | `AIQuizView` | 🔒 🌐 | user |
 | 14 | POST | `/api/ai/doubt/` | `AIDoubtView` | 🔒 🌐 | user |
 | 15 | POST | `/api/ai/doubt/rag/` | `RAGDoubtView` | 🔒 🌐 | user |
@@ -866,7 +865,6 @@ else's infrastructure.
 
 ```mermaid
 graph TD
-    A["/api/ai/flashcards/"] --> G["AIService → Groq<br/>llama-3.3-70b-versatile"]
     B["/api/ai/quiz/"] --> G
     C["/api/ai/doubt/"] --> G
     D["/api/ai/doubt/rag/"] --> R["RAGService"]

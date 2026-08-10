@@ -26,7 +26,7 @@ from .hybrid_router import (
     HierarchicalEngine,
     compute_routing_telemetry, get_mastered_topic_names,
 )
-from .services import GradingService, GradingUnavailable, ProgressionService, wrapper_for
+from .services import GradingService, GradingUnavailable, ProgressionService
 from .ai_services import generate_test_cases
 from .engines.tensor_builder import TensorBuilder
 
@@ -176,21 +176,36 @@ class CodeRunView(APIView):
         
         if not raw_code:
             return Response({"error": "code is required"}, status=400)
-            
-        executable_code = raw_code
-        lang_key = language.lower()
 
-        # Dynamic Wrapper Injection for Code Run
+        # Build exactly what Submit would build (M1/P1.2-A).
+        #
+        # This used to apply ONLY a per-question hidden_wrapper_code entry and
+        # fall through to the raw source otherwise. Question.hidden_wrapper_code
+        # defaults to {}, so for most questions Run executed a bare
+        # `class Solution: ...` — which defines a class, calls nothing, and
+        # prints nothing. The learner saw a green status with empty output while
+        # Submit, which falls back to the generic harness, graded the same code
+        # correctly. Java diverged further: Submit strips imports before
+        # wrapping, Run did not, so identical source could compile under Submit
+        # and fail under Run.
+        #
+        # Delegating to GradingService keeps ONE implementation of "what does
+        # this source actually execute as". Divergence between Run and Submit is
+        # a correctness bug by construction, not something to keep in sync by
+        # hand — which is how the two drifted in the first place.
+        executable_code = raw_code
         if problem_id:
             try:
                 question = Question.objects.get(id=problem_id)
-                # Same alias-aware lookup the submit path uses, so Run and
-                # Submit cannot disagree about which wrapper applies.
-                wrapper_template = wrapper_for(question, lang_key)
-                if wrapper_template is not None:
-                    executable_code = wrapper_template.replace("{user_code}", raw_code)
-            except Question.DoesNotExist:
-                pass
+            except (Question.DoesNotExist, ValueError, TypeError):
+                # Unknown or malformed id: run the source as written rather
+                # than 404. Run is a scratchpad; refusing to execute would be a
+                # behaviour regression for callers that omit a valid id.
+                question = None
+            if question is not None:
+                executable_code, _ = GradingService._build_executable(
+                    question, language, raw_code
+                )
 
         result = _run_on_judge0(executable_code, language, stdin)
         

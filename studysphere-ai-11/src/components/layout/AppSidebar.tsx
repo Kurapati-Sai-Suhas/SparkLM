@@ -13,7 +13,6 @@ const menuItems = [
   { title: "Study Groups", url: "/groups", icon: Users },
   { title: "Coding Hub", url: "/coding-hub", icon: Terminal },
   { title: "Friends", url: "/friends", icon: UserPlus },
-  { title: "Flashcards", url: "/flashcards", icon: Layers },
   { title: "Quizzes", url: "/quiz", icon: ListChecks },
   { title: "Doubt Solver", url: "/doubt-solver", icon: MessageSquare },
   { title: "Schedule", url: "/schedule", icon: Calendar },

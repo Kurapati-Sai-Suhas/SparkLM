@@ -16,7 +16,7 @@ from .views import (
     # Groups & Materials
     StudyGroupViewSet, MaterialViewSet, getGroupMembers,
     # AI
-    AIFlashcardView, AIDoubtView, AIQuizView, RAGDoubtView,
+    AIDoubtView, AIQuizView, RAGDoubtView,
     analytics_data,
     # Module B: Visual Search
     VisualSearchUploadView, VisualSearchQueryView,
@@ -70,7 +70,6 @@ urlpatterns = [
     path('groups/<int:group_id>/messages/', GroupMessageHistoryView.as_view(), name='group-messages'),
 
     # ── AI Features ─────────────────────────────────────────
-    path('ai/flashcards/',  AIFlashcardView.as_view(), name='ai-flashcards'),
     path('ai/quiz/',        AIQuizView.as_view(),       name='ai-quiz'),
     path('ai/doubt/',       AIDoubtView.as_view(),      name='ai-doubt'),
     path('ai/doubt/rag/',   RAGDoubtView.as_view(),     name='ai-doubt-rag'),

@@ -400,28 +400,6 @@ class MaterialViewSet(viewsets.ModelViewSet):
 # AI Features
 # ─────────────────────────────────────────────────────────────
 
-class AIFlashcardView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        material_id = request.data.get('materialId')
-        topic       = request.data.get('topic', 'General')
-        try:
-            # Same scoping as RAGDoubtView. Unscoped, this generated
-            # flashcards from any user's document and returned them —
-            # bypassing the MaterialViewSet fix completely.
-            material = accessible_materials(request.user).get(id=material_id)
-        except StudyMaterial.DoesNotExist:
-            return Response({"error": "File not found"}, status=404)
-
-        extracted_text = extract_text_from_file(material.file.path)
-        if not extracted_text:
-            return Response({"error": "PDF is empty or unreadable"}, status=400)
-
-        flashcards = AIService.generate_flashcards(extracted_text, num_cards=10)
-        return Response({"flashcards": flashcards}, status=200)
-
-
 class AIDoubtView(APIView):
     permission_classes = [IsAuthenticated]
 

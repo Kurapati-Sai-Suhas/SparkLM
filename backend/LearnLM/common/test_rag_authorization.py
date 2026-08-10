@@ -169,7 +169,8 @@ def test_the_uploader_keeps_access_after_leaving_the_group(_stub_llm):
 # ── the sibling AI endpoints ─────────────────────────────────────────────
 #
 # Found by trying to bypass the RAG fix rather than by reading the diff.
-# AIFlashcardView, AIDoubtView and AIQuizView each carried the identical
+# AIFlashcardView (retired in M1/P1.2-B), AIDoubtView and AIQuizView each
+# carried the identical
 # unscoped `StudyMaterial.objects.get(id=material_id)`, and each returns
 # something derived from the document. /api/ai/doubt/ is the same "ask a
 # question about a document" feature without retrieval, so scoping only the
@@ -183,9 +184,6 @@ class TestSiblingAiEndpointsAreScopedToo:
         """Every generator echoes the text it was given, so a leak is visible."""
         monkeypatch.setattr("groups.views.extract_text_from_file", lambda p: SECRET)
         monkeypatch.setattr(
-            "groups.views.AIService.generate_flashcards",
-            lambda text, num_cards=10: [{"question": text[:40], "answer": "a"}])
-        monkeypatch.setattr(
             "groups.views.AIService.get_answer", lambda q, text: f"From: {text[:40]}")
         monkeypatch.setattr(
             "groups.views.AIService.generate_quiz",
@@ -193,8 +191,7 @@ class TestSiblingAiEndpointsAreScopedToo:
 
     @pytest.mark.parametrize(
         "url_name, payload",
-        [("ai-flashcards", {}),
-         ("ai-doubt", {"question": "what is the answer to Q1"}),
+        [("ai-doubt", {"question": "what is the answer to Q1"}),
          ("ai-quiz", {})],
     )
     def test_a_non_member_gets_404_and_no_content(self, url_name, payload):
@@ -214,8 +211,7 @@ class TestSiblingAiEndpointsAreScopedToo:
 
     @pytest.mark.parametrize(
         "url_name, payload",
-        [("ai-flashcards", {}),
-         ("ai-doubt", {"question": "summarise"}),
+        [("ai-doubt", {"question": "summarise"}),
          ("ai-quiz", {})],
     )
     def test_the_owner_is_unaffected(self, url_name, payload):

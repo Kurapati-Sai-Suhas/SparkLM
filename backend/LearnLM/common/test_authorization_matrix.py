@@ -139,7 +139,6 @@ MATRIX = {
     # get_queryset(), and common/test_object_storage.py asserts the two
     # return identical statuses for a non-member.
     "studymaterial-download": MATERIAL_SCOPED,
-    "ai-flashcards": MATERIAL_SCOPED,
     "ai-quiz": MATERIAL_SCOPED,
     "ai-doubt": MATERIAL_SCOPED,
     "ai-doubt-rag": MATERIAL_SCOPED,

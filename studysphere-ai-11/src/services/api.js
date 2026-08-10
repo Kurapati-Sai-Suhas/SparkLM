@@ -274,8 +274,6 @@ export const groupsAPI = {
 
 // ==================== AI Features API ====================
 export const aiAPI = {
-  generateFlashcards: (materialId, topic, count = 10) => 
-    api.post('/ai/flashcards/', { materialId, topic, count }),
 
   generateQuiz: (materialId, topic, questionCount = 10, difficulty = 'medium') => 
     api.post('/ai/quiz/', { materialId, topic, questionCount, difficulty }),

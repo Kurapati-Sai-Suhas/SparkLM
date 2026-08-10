@@ -391,6 +391,11 @@ describe("client contract: settings + notifications (Task 1)", () => {
     expect(userAPI.markNotificationRead).toBeUndefined();
     expect(userAPI.updateProfile).toBeUndefined(); // PATCH /user/profile/ -> 405
     expect(aiAPI.submitQuiz).toBeUndefined();
+    // Retired with the Flashcards surface in M1/P1.2-B. The backend route
+    // /api/ai/flashcards/ no longer exists, so re-adding this method would
+    // point the client at a 404 — the same class of dead method the five
+    // above document.
+    expect(aiAPI.generateFlashcards).toBeUndefined();
     expect(scheduleAPI.updateEvent).toBeUndefined();
     expect(scheduleAPI.deleteEvent).toBeUndefined();
   });

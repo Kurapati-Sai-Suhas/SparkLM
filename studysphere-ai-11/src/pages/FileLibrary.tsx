@@ -9,7 +9,7 @@ import {
   Sparkles, FolderOpen,
 } from "lucide-react";
 import VisualSearch from "../components/VisualSearch";
-import api from "@/services/api";
+import api, { groupsAPI } from "@/services/api";
 
 // ── Types ────────────────────────────────────────────────────
 interface StudyGroup {
@@ -65,7 +65,7 @@ export default function FileLibrary() {
   useEffect(() => {
     const fetchGroups = async () => {
       try {
-        const res = await api.get("/groups/?page_size=100");
+        const res = await groupsAPI.getAll();
         setGroups(res.data.results || res.data || []);
       } catch (err) {
         console.error("Failed to load groups", err);
@@ -80,7 +80,7 @@ export default function FileLibrary() {
     const fetchFiles = async () => {
       setLoadingFiles(true);
       try {
-        const res = await api.get(`/materials/?study_group=${selectedGroupId}`);
+        const res = await groupsAPI.getMaterials(selectedGroupId);
         setFiles(res.data.results || res.data || []);
       } catch (err) {
         console.error("Failed to load files", err);
@@ -124,7 +124,7 @@ export default function FileLibrary() {
         }
       }
 
-      const res = await api.get(`/materials/?study_group=${selectedGroupId}`);
+      const res = await groupsAPI.getMaterials(selectedGroupId);
       setFiles(res.data.results || res.data || []);
 
       setUploadTitle("");

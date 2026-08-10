@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { groupsAPI, userAPI } from "@/services/api";
-import api from "@/services/api";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
@@ -63,7 +62,7 @@ export default function GroupDetail() {
   const fetchAssignments = useCallback(async () => {
     if (!id) return;
     try {
-      const res = await api.get(`/quizzes/assigned/?study_group=${id}`);
+      const res = await groupsAPI.getAssignedQuizzes(id);
       setAssignedQuizzes(res.data.results || res.data || []);
     } catch (error) { console.error("Failed to fetch group assignments", error); }
   }, [id]);
@@ -72,7 +71,7 @@ export default function GroupDetail() {
     if (!id) return;
     setMembersLoading(true);
     try {
-      const res = await api.get(`/groups/${id}/members/`);
+      const res = await groupsAPI.getMembers(id);
       setMembersList(res.data.results || res.data || []);
     } catch (error) {
       console.error("Failed to fetch members", error);

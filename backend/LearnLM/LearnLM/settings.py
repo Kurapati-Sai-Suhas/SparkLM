@@ -409,7 +409,12 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 3,
+    # 3 silently truncated every list in the product: a group with 12 members
+    # rendered 3, a library with 40 files rendered 3. No caller followed `next`,
+    # so the remainder was simply invisible (M2 P2.1). This default is now a
+    # backstop only — every list view names its pagination class explicitly, and
+    # `groups.test_pagination` fails if one stops doing so.
+    'PAGE_SIZE': 50,
     # Client-IP-aware variants: Render's LAST X-Forwarded-For hop is a
     # rotating internal load balancer, which silently defeated every
     # throttle. See common/throttling.py for the measurement and the

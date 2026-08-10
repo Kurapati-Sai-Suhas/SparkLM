@@ -43,6 +43,10 @@ async function loadApi() {
       url: config.url,
       method: (config.method ?? "get").toLowerCase(),
       data: config.data,
+      // `params` added for the P2.1 pagination tests, which assert which page
+      // numbers were requested. Existing assertions read only url/method/
+      // data/headers, so this is additive.
+      params: config.params,
       headers: { ...config.headers },
     });
     const queue = responses[config.url] ?? [];
@@ -434,11 +438,16 @@ describe("client contract: every path exists in the backend URLconf", () => {
     const client = readSource("api.js");
     const urls = readSource("../../../backend/LearnLM/groups/urls.py");
 
+    // `fetchAllPages` is matched alongside api.<verb>: it is a wrapper over
+    // api.get that walks the DRF page chain (M2 P2.1), so its literal is the
+    // path that reaches the network and belongs under this contract.
     const requested = [
       ...new Set(
-        [...client.matchAll(/api\.(?:get|post|put|patch|delete)\(\s*[`'"]([^`'"]+)/g)].map(
-          (m) => m[1]
-        )
+        [
+          ...client.matchAll(
+            /(?:api\.(?:get|post|put|patch|delete)|fetchAllPages)\(\s*[`'"]([^`'"]+)/g
+          ),
+        ].map((m) => m[1])
       ),
     ];
 
@@ -477,6 +486,144 @@ describe("client contract: every path exists in the backend URLconf", () => {
       ...client.matchAll(/api\.(?:get|post|put|patch|delete)\(\s*[`'"][^`'"]+/g),
     ].length;
 
-    expect(captured).toBe(callSites);
+    // Exactly one call takes a variable path: fetchAllPages re-issues the
+    // caller's own path with a page number (M2 P2.1). Its literals are
+    // checked at the fetchAllPages(...) call sites by the test above, which
+    // matches that helper by name — so the contract still covers them. Any
+    // OTHER variable-path call is a genuine blind spot and fails here.
+    const viaPaginationHelper = [
+      ...client.matchAll(/await api\.get\(path, \{/g),
+    ].length;
+    expect(viaPaginationHelper).toBe(1);
+
+    expect(captured + viaPaginationHelper).toBe(callSites);
+  });
+});
+
+describe("fetchAllPages — paginated list reads (M2 P2.1)", () => {
+  /** Queue `pages` responses for `url`, the last one ending the chain. */
+  function paginated(url: string, pages: any[][]) {
+    responses[url] = pages.map((results, i) => reply(200, {
+      count: pages.flat().length,
+      next: i === pages.length - 1 ? null : `http://api.example/x?page=${i + 2}`,
+      previous: i === 0 ? null : `http://api.example/x?page=${i}`,
+      results,
+    }));
+  }
+
+  it("returns every row across pages, not just the first page", async () => {
+    const { fetchAllPages } = await loadApi();
+    paginated("/materials/", [
+      [{ id: 1 }, { id: 2 }],
+      [{ id: 3 }, { id: 4 }],
+      [{ id: 5 }],
+    ]);
+
+    const res = await fetchAllPages("/materials/");
+
+    expect(res.data.results.map((r: any) => r.id)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("keeps the { count, next, previous, results } envelope the pages read", async () => {
+    // Five files do `res.data.results || res.data`. If this helper returned a
+    // bare array, every one of them would still "work" via the fallback and
+    // silently change shape for anything reading `count`.
+    const { fetchAllPages } = await loadApi();
+    paginated("/materials/", [[{ id: 1 }], [{ id: 2 }]]);
+
+    const res = await fetchAllPages("/materials/");
+
+    expect(Object.keys(res.data).sort()).toEqual(["count", "next", "previous", "results"]);
+    expect(res.data.count).toBe(2);
+    expect(res.data.next).toBeNull();
+  });
+
+  it("pages by number and never requests the absolute URL from `next`", async () => {
+    // DRF builds `next` from the request host, which behind a proxy can come
+    // back as http:// — following it would be a mixed-content request from an
+    // https page, and would bypass the client's baseURL and interceptors.
+    const { fetchAllPages } = await loadApi();
+    paginated("/materials/", [[{ id: 1 }], [{ id: 2 }], [{ id: 3 }]]);
+
+    await fetchAllPages("/materials/");
+
+    const calls = seen.filter((s) => s.url === "/materials/");
+    expect(calls.map((c) => c.params.page)).toEqual([1, 2, 3]);
+    expect(seen.some((s) => String(s.url).startsWith("http"))).toBe(false);
+  });
+
+  it("stops after one request when there is no next page", async () => {
+    const { fetchAllPages } = await loadApi();
+    paginated("/groups/", [[{ id: 1 }, { id: 2 }]]);
+
+    await fetchAllPages("/groups/");
+
+    expect(seen.filter((s) => s.url === "/groups/")).toHaveLength(1);
+  });
+
+  it("preserves caller-supplied params alongside the page number", async () => {
+    const { fetchAllPages } = await loadApi();
+    paginated("/materials/", [[{ id: 1 }]]);
+
+    await fetchAllPages("/materials/", { params: { study_group: 7 } });
+
+    expect(seen[0].params).toEqual({ study_group: 7, page: 1 });
+  });
+
+  it("hands back an unpaginated response untouched", async () => {
+    // Not every list endpoint is paginated. Wrapping a bare array in an
+    // invented envelope would break callers that read the array directly.
+    const { fetchAllPages } = await loadApi();
+    responses["/plain/"] = [reply(200, [{ id: 1 }, { id: 2 }])];
+
+    const res = await fetchAllPages("/plain/");
+
+    expect(res.data).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(seen.filter((s) => s.url === "/plain/")).toHaveLength(1);
+  });
+
+  it("stops rather than looping forever if `next` never clears", async () => {
+    // A backend bug that always returns a next link must not hang the tab.
+    const { fetchAllPages } = await loadApi();
+    responses["/loop/"] = [reply(200, {
+      count: 999, next: "http://api.example/x?page=2", previous: null, results: [{ id: 1 }],
+    })];
+
+    const res = await fetchAllPages("/loop/");
+
+    const calls = seen.filter((s) => s.url === "/loop/").length;
+    expect(calls).toBe(50);
+    expect(res.data.results).toHaveLength(50);
+  });
+
+  it("propagates errors instead of returning a partial list as if complete", async () => {
+    const { fetchAllPages } = await loadApi();
+    responses["/materials/"] = [
+      reply(200, { count: 4, next: "http://api.example/x?page=2", previous: null, results: [{ id: 1 }] }),
+      reply(500, { detail: "boom" }),
+    ];
+
+    await expect(fetchAllPages("/materials/")).rejects.toThrow();
+  });
+
+  it("routes the four truncating list reads through it", async () => {
+    // The regression this phase exists to prevent: a list read that pages
+    // once and drops the rest. Each of these was doing exactly that.
+    const { groupsAPI } = await loadApi();
+    paginated("/groups/", [[{ id: 1 }], [{ id: 2 }]]);
+    paginated("/materials/?study_group=3", [[{ id: 1 }], [{ id: 2 }]]);
+    paginated("/groups/3/members/", [[{ id: 1 }], [{ id: 2 }]]);
+    paginated("/quizzes/assigned/?study_group=3", [[{ id: 1 }], [{ id: 2 }]]);
+
+    const results = await Promise.all([
+      groupsAPI.getAll(),
+      groupsAPI.getMaterials(3),
+      groupsAPI.getMembers(3),
+      groupsAPI.getAssignedQuizzes(3),
+    ]);
+
+    for (const res of results) {
+      expect(res.data.results).toHaveLength(2);
+    }
   });
 });

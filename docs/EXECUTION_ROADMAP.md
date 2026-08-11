@@ -146,6 +146,24 @@ Track B adds ~52 ed when triggered.
 - **T2.5.6 Oracle execution + reconciliation.** *Done* — `groups/oracle.py`, `reconcile_hidden_tests` (read-only), daily read-only validation at 17:15 UTC (22:45 IST).
 - **T2.5.7 Author reference solutions and oracle-generated hidden tests.** *Blocked* — needs production DB access for the census, and per-problem output-contract review. 12 validated hidden tests is the floor, not the target.
 
+### P2.6 — P2.12 — Trustworthy grading before trustworthy routing
+
+**Approved reordering.** The audit proved the adaptive engine is fed by a single boolean derived from a harness that can mark correct code wrong: three reflection harnesses selected the solution method by three different rules (Python alphabetical, Java **undefined** per the JLS, JavaScript definition order), Python/JS emitted `[0,1]` where Java emitted `0 1`, Python/JS parsed JSON while the seeded data is space-separated, and all three swallowed runtime errors into stdout with exit 0.
+
+The dependency is therefore **execution correctness → grading correctness → learner signal → mastery → routing**, and it must not be reversed: tuning routing on labels where a helper method reads as failure fits a model to corrupted data.
+
+| Phase | Objective | Depends on |
+|---|---|---|
+| **P2.6** Execution Harness Correctness | Deterministic, correctly-classified execution. Versioned via `Question.execution_contract_version`; v1 is byte-identical to what shipped | P2.5 |
+| **P2.7** Question Execution Contract | Extend `wrapper_contract.py` / `audit_wrapper_templates` to all five languages; add `Question.status`; a question with zero executable languages must never be servable | P2.6 |
+| **P2.8** Question Factory | `reseed_questions.py` demoted to Stage-A proposal. Merge boilerplate (never replace), floor 2 → 12, validate every declared language | P2.7 |
+| **P2.9** Reference Oracle + approval state | `DRAFT/UNREVIEWED/APPROVED/REJECTED`; oracle refuses anything unapproved | P2.7 |
+| **P2.10** Hidden Test Generation + Mutation | Oracle-generated outputs only. Tier-1 known-wrong 100%, Tier-2 ≥80% advisory | P2.6, P2.9, census |
+| **P2.11** Trusted Learner Signal | Partial credit and outcome class replace the single boolean | P2.6 |
+| **P2.12** Adaptive Routing Repair | Two-sided Elo, exploration, repeat-failure exclusion, enable the curriculum gate | P2.11 |
+
+**P2.2.2/P2.2.3 (badges), P2.3, P2.4 follow P2.12.** P2.2.1 (streaks) is independent of the judge and is already implemented (PR #13).
+
 ### P2.2 — Streaks and badges inside the transaction
 - **Goal.** Make gamification actually award something.
 - **Dependencies (amended).** P0.1 **and P2.5** — see P2.5's rationale. T2.2.1 (streaks) is independent of the judge and is already implemented; T2.2.2/T2.2.3 (badges) wait on P2.5.

@@ -339,6 +339,18 @@ class Question(models.Model):
     hidden_test_cases = models.JSONField(default=list)
     hidden_wrapper_code = models.JSONField(default=dict, blank=True)
 
+    # Which execution harness grades this question (M2 P2.6). Defaults to "v1"
+    # — the harness exactly as it shipped — so this migration changes no
+    # learner's grading. v2 is the canonical contract (one line per parameter,
+    # space-separated output, exactly one public method); questions move to it
+    # deliberately, after reconciliation, never by default.
+    #
+    # Not a `choices` field on purpose: the authority is
+    # groups.execution_contract.KNOWN_CONTRACTS, which raises on an unknown
+    # value rather than letting a typo fall back to a default and grade a
+    # question under a contract it was not written for.
+    execution_contract_version = models.CharField(max_length=8, default="v1")
+
     class Meta:
         indexes = [
             # §4.4 index catalog: Elo-nearest selection filters by topic and

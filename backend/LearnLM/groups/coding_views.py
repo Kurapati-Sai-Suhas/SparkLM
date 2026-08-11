@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from common import languages
 from common.throttling import ClientIPScopedRateThrottle
+from groups import execution_contract
 
 # Import Models
 from .models import (
@@ -90,6 +91,12 @@ def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
         "base64_encoded": True,
         "wait":           True,
     }
+    # Opt-in only, empty unless an operator configures it (M2 P2.6). Judge0
+    # rejects submissions exceeding its server-side max_cpu_time_limit, and
+    # ours is UNKNOWN from this repository — JUDGE0_API_HOST is `sync: false`.
+    # A rejected submission becomes GradingUnavailable, so guessing here risks
+    # a 503 on every submission.
+    payload.update(execution_contract.judge0_resource_limits())
     
     headers = {
         "Content-Type":    "application/json",

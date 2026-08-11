@@ -71,6 +71,8 @@ belongs to M6's decision about whether the routing engine earns further ML inves
 | `DRF_NUM_PROXIES` | `1` | DRF's proxy depth. **Bypassed** by every current throttle class (`common/throttling.py` keys on the first XFF hop because Render's last hop rotates). Retained because it is correct again behind a stable proxy. | Moving off Render, or in front of a CDN. |
 | `SENTRY_TRACES_RATE` | unset | Sentry performance sample rate. | Sentry quota pressure. |
 | `JUDGE0_URL` | unset | Overrides the Judge0 base URL. Defaults from `JUDGE0_API_HOST`. | Self-hosting Judge0 (roadmap M15+). |
+| `JUDGE0_CPU_TIME_LIMIT` | unset | Seconds sent as `cpu_time_limit` on every submission. **Unset means the field is omitted**, which is what production has always done. Judge0 enforces `max_cpu_time_limit` server-side and REJECTS anything above it — a rejected submission becomes `GradingUnavailable`, i.e. a 503 for every learner. Set only after confirming the deployed instance's ceiling. | Pinning a reproducible TLE boundary once the Judge0 deployment's limits are known (M2 P2.6). |
+| `JUDGE0_MEMORY_LIMIT` | unset | KB sent as `memory_limit`. Same omit-by-default rule and the same rejection risk as above. | As above. |
 
 ---
 

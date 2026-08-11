@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from common import languages
 from common.throttling import ClientIPScopedRateThrottle
+from groups import execution_contract
 
 # Import Models
 from .models import (
@@ -89,6 +90,14 @@ def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
         "stdin":          base64.b64encode(stdin.encode()).decode() if stdin else "",
         "base64_encoded": True,
         "wait":           True,
+        # Stated explicitly rather than inherited (M2 P2.6). These were unset,
+        # so the effective limit was a property of whichever Judge0 deployment
+        # answered and nothing in this repository recorded what it was — which
+        # makes a TLE verdict unreproducible. The values are Judge0 CE's
+        # documented defaults, so making them explicit changes no outcome; it
+        # makes the limit reviewable and changeable in one place.
+        "cpu_time_limit": execution_contract.DEFAULT_CPU_TIME_LIMIT,
+        "memory_limit":   execution_contract.DEFAULT_MEMORY_LIMIT,
     }
     
     headers = {

@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from django.db import transaction
 
 from common import languages
+from groups import execution_contract
 from .engines.agentic_coach import trigger_agentic_coach
 from .engines.elo_engine import EloEngine
 from .engines.hlr_engine import HLREngine
@@ -96,7 +97,15 @@ if __name__ == '__main__':
         else:
             print(str(res))
     except Exception as e:
-        print(f"Runtime Error: {e}")
+        # Reported on stderr and exited non-zero (M2 P2.6). This used to print
+        # to stdout and exit 0, so Judge0 returned status_id 3 "Accepted", the
+        # final-status scan for ids 7-12 could never fire, and every Python
+        # runtime error was recorded as wrong_answer. The submission fails
+        # either way — `all_passed` is unchanged — so this corrects the LABEL
+        # without altering any verdict, which is why it applies to v1 too.
+        import sys as _sys
+        print(f"Runtime Error: {e}", file=_sys.stderr)
+        raise SystemExit(1)
 """
 
 GENERIC_JAVA_WRAPPER = """import java.util.*;
@@ -179,7 +188,12 @@ public class Main {
             }
 
         } catch (Exception e) {
-            e.printStackTrace();
+            // Rethrown as an unchecked exception (M2 P2.6) so the JVM exits
+            // non-zero and Judge0 classifies the run. printStackTrace alone
+            // returned normally, so a crash reached the grader as an empty
+            // stdout and was recorded as wrong_answer. Verdict unchanged —
+            // only the status label — so this applies to v1 as well.
+            throw new RuntimeException(e);
         }
     }
 }
@@ -230,7 +244,10 @@ try {
         console.log(String(__res));
     }
 } catch (e) {
-    console.log(`Runtime Error: ${e.message}`);
+    // stderr + non-zero exit (M2 P2.6): see the Python wrapper's note. This
+    // printed to stdout and exited 0, so a crash was graded as wrong_answer.
+    process.stderr.write(`Runtime Error: ${e.message}\\n`);
+    process.exit(1);
 }
 """
 
@@ -399,8 +416,27 @@ class GradingService:
 
         custom_wrapper = wrapper_for(question, lang_key)
         if custom_wrapper is not None:
+            # A per-question wrapper defines its own I/O contract and is
+            # therefore unaffected by the version — seed_problems.py's
+            # questions are comma-separated, for instance. Checked FIRST so
+            # versioning never overrides a question's own harness (M2 P2.6).
             executable_code = custom_wrapper.replace("{user_code}", raw_code)
-        elif lang_key == "python":
+            return executable_code, raw_code
+
+        # No custom wrapper: the generic harness applies, and which one
+        # depends on the question's declared contract.
+        version = execution_contract.contract_version(question)
+        if version == execution_contract.CONTRACT_V2:
+            template = execution_contract.V2_WRAPPERS.get(
+                languages.canonical(lang_key) or lang_key
+            )
+            if template is not None:
+                return template.replace("{user_code}", raw_code), raw_code
+            # C and C++ are self-contained under every contract: the learner
+            # writes a complete program, so there is nothing to wrap.
+            return raw_code, raw_code
+
+        if lang_key == "python":
             executable_code = GENERIC_PYTHON_WRAPPER.replace("{user_code}", raw_code)
         elif lang_key == "java":
             executable_code = GENERIC_JAVA_WRAPPER.replace("{user_code}", raw_code)

@@ -27,7 +27,9 @@ from .hybrid_router import (
     compute_routing_telemetry, get_mastered_topic_names,
 )
 from .services import GradingService, GradingUnavailable, ProgressionService
-from .ai_services import generate_test_cases
+# `generate_test_cases` is deliberately NOT imported here (M2 P2.5). Grading
+# data must never be produced inside a learner request; see the note in
+# AdaptiveProblemView where the fallback used to live.
 from .engines.tensor_builder import TensorBuilder
 
 
@@ -48,6 +50,17 @@ LANGUAGE_IDS = languages.LANGUAGE_IDS
 JUDGE0_HOST = os.environ.get('JUDGE0_API_HOST', 'judge0-ce.p.rapidapi.com')
 JUDGE0_BASE = os.environ.get('JUDGE0_URL', f'https://{JUDGE0_HOST}')
 JUDGE0_KEY  = os.environ.get('JUDGE0_API_KEY')
+
+# Learner-facing verdict text (M2 P2.5). Deliberately says nothing about WHICH
+# hidden case failed or what it expected — naming the case is itself a leak,
+# because repeated submissions would let a learner bisect the suite.
+SUBMIT_VERDICT_MESSAGES = {
+    "accepted":      "Accepted: your solution passed every hidden test.",
+    "wrong_answer":  "Wrong Answer: your solution failed one or more hidden tests.",
+    "time_limit":    "Time Limit Exceeded: your solution was too slow on one or more hidden tests.",
+    "compile_error": "Compilation Error: your code did not compile.",
+    "runtime_error": "Runtime Error: your code crashed on one or more hidden tests.",
+}
 
 
 def _servable_questions():
@@ -281,13 +294,30 @@ class CodeSubmitView(APIView):
             user=request.user, problem_id=problem_id, question=question, grade=grade,
         )
 
+        # `test_results` is deliberately ABSENT (M2 P2.5). It carried, per
+        # hidden case, both `expected_output` — the answer key — and
+        # `your_output`, which is worse than it looks: a submission of
+        # `print(input())` echoes the hidden INPUT back through it, so the
+        # pair let any learner reconstruct the entire hidden suite from
+        # ordinary API responses. `_sample_case` 200 lines up already states
+        # the rule this violated: "Grading data never leaves the server."
+        #
+        # The full per-case detail still exists server-side — ProgressionService
+        # stores it on AgenticCoachLog.error_logs and reads timings from it —
+        # it simply stops being serialised to the client.
+        #
+        # No production frontend code read `test_results`; the portal renders
+        # all_passed / status / passed / total / agentic_hint.
         return Response({
             "submission_id": submission.id,
             "status":        grade.final_status,
+            "message":       SUBMIT_VERDICT_MESSAGES.get(
+                                 grade.final_status, "Submission graded."),
             "passed":        grade.passed,
             "total":         grade.total,
             "all_passed":    grade.all_passed,
-            "test_results":  grade.results,
+            "runtime_ms":    submission.execution_time_ms,
+            "memory_kb":     submission.memory_used_kb,
             "elo_update":    elo_result,
             "success_rate":  profile.success_rate,
             "agentic_hint":  agentic_hint,
@@ -469,19 +499,30 @@ class NextProblemView(APIView):
             policy_version=ROUTING_POLICY_VERSION,
         )
 
-        # 🤖 AI TEST CASE GENERATION FALLBACK
+        # The AI test-case fallback that used to live here is GONE (M2 P2.5).
+        #
+        # It called an LLM during a learner's request and wrote the result to
+        # `question.hidden_test_cases` as permanent grading truth. Nothing ever
+        # executed a trusted solution against those cases, so the answer key
+        # was a language model's guess — and a learner's correct solution could
+        # be marked Wrong Answer because the key itself was wrong. A user
+        # request must never invent the standard it is about to be judged by.
+        #
+        # It also made grading non-deterministic in a way no test could catch:
+        # the same problem could be graded against different suites depending
+        # on which request happened to arm it first.
+        #
+        # A problem with no hidden tests is now simply not servable.
+        # `_servable_questions()` already excludes it from every recommendation
+        # path, and CodeSubmitView returns 409 `question_not_gradable` if one
+        # is requested by id. Arming problems is the seed/validation
+        # pipeline's job, run by an operator, verified against an oracle.
         if not question.hidden_test_cases:
-            generated_cases = generate_test_cases(question.title, question.content)
-            if generated_cases:
-                question.hidden_test_cases = generated_cases
-                question.save(update_fields=['hidden_test_cases'])
-            else:
-                # Never persist a failed generation — serve the problem
-                # without hidden tests and let a later request retry.
-                logger.error(
-                    "Test-case generation failed for question %s (%s); serving without hidden tests",
-                    question.pk, question.title,
-                )
+            logger.error(
+                "Question %s (%s) has no hidden tests and is not gradable; "
+                "it must be armed by the seed pipeline, not by a user request",
+                question.pk, question.title,
+            )
 
         if question.base_difficulty < 1100: diff_text = "Easy"
         elif question.base_difficulty < 1400: diff_text = "Medium"

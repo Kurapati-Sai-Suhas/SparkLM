@@ -375,6 +375,73 @@ class UserCodingProfile(models.Model):
         return round(self.successful_submissions / self.total_submissions * 100, 1)
 
 
+class ReferenceSolution(models.Model):
+    """
+    A trusted implementation of a question, used to GENERATE and VERIFY hidden
+    test outputs (M2 P2.5, Phase 5). Grading truth, not learner content.
+
+    Kept in its own model rather than as a field on `Question` for one reason
+    that outweighs the convenience: a `Question` field is one serializer
+    mistake away from shipping the answer to learners, and P2.5 exists because
+    exactly that happened — the Submit response was serialising
+    `expected_output` for every hidden case. A model with no serializer, no
+    viewset and no route anywhere is structurally unable to leak. The
+    guarantee comes from absence, not from vigilance.
+
+    Two further reasons the field-on-Question shape does not work here:
+    Judge0 needs a language per solution, so a single field forces either one
+    language or a second schemaless JSON blob — the same weakness that
+    produced the malformed `hidden_test_cases` rows this phase is cleaning up;
+    and grading truth needs provenance, which a scalar field cannot carry.
+
+    NOT registered in admin. Django admin is staff-only, but registering it
+    would create a rendered HTML surface for the answer key whose only
+    protection is the staff flag. Reference solutions are read by seed,
+    validation and reconciliation tooling — none of which needs a web view.
+    """
+
+    question = models.ForeignKey(
+        Question, on_delete=models.CASCADE, related_name="reference_solutions"
+    )
+
+    # The canonical language KEY ("python", "cpp"), not the Judge0 integer id.
+    # `common.languages` exists precisely because those two representations
+    # drifted apart and caused three production bugs; storing the id here
+    # would fork that mapping again. The id is looked up from the registry at
+    # execution time, so a Judge0 renumbering is a one-line change there.
+    language = models.CharField(max_length=20)
+
+    source_code = models.TextField()
+
+    # A superseded solution is deactivated, never edited in place: the outputs
+    # currently stored in `hidden_test_cases` were produced by SOME version of
+    # this code, and losing which one makes a mismatch impossible to explain.
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # At most one active solution per language. Without this, two
+            # active rows make "the" reference output ambiguous, and the
+            # reconciliation report would silently depend on row order.
+            models.UniqueConstraint(
+                fields=["question", "language"],
+                condition=models.Q(is_active=True),
+                name="one_active_reference_solution_per_language",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["question", "is_active"],
+                         name="refsol_question_active_idx"),
+        ]
+
+    def __str__(self):
+        state = "active" if self.is_active else "superseded"
+        return f"Reference[{self.language}] for {self.question_id} ({state})"
+
+
 class CodeSubmission(models.Model):
     STATUS_CHOICES = [
         ("accepted",      "Accepted"),

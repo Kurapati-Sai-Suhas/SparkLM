@@ -1,0 +1,118 @@
+# Daily question-bank validation (M2 P2.5, Phase 8).
+#
+# READ-ONLY against production. It runs two commands that open no write
+# transaction and have no flag that makes them write:
+#
+#   validate_question_bank   coverage, contract compliance, oracle presence
+#   reconcile_hidden_tests   stored expected outputs vs the trusted oracle
+#
+# Deliberately NOT a reseed. `seed_data` deletes every Question, and
+# CodeSubmission.question is on_delete=CASCADE, so a scheduled reseed would
+# destroy learner history on a timer — the exact accident the environment
+# guard in common/environment.py exists to prevent. That guard classifies this
+# job as production (SPARKLM_ENV is not set here, and unset means production),
+# so even a mistaken destructive command in this workflow would be refused.
+#
+# ── Why GitHub Actions ────────────────────────────────────────────────────
+# Render's free tier has no cron and no background worker, and this repository
+# already runs `run_maintenance` this way. Reusing that pattern means one
+# mechanism to reason about rather than two.
+#
+# ── Why the reconciliation step is allowed to fail ────────────────────────
+# It calls Judge0 once per hidden test — twice, with determinism verification.
+# Judge0 is rate limited and the free tier is shared with live submissions, so
+# a throttled run is expected noise, not a bank problem. It is capped and
+# reported, never allowed to fail the job. The coverage validation, which is
+# pure database reads, IS allowed to fail the job.
+
+name: SparkLM Question Bank Validation
+
+on:
+  schedule:
+    # 22:45 Asia/Kolkata = 17:15 UTC. IST is UTC+5:30 with no daylight saving,
+    # so this one expression holds all year.
+    - cron: "15 17 * * *"
+  workflow_dispatch:        # manual trigger after a content change
+
+concurrency:
+  group: question-bank-validation
+  cancel-in-progress: false   # a late run must not kill the one in flight
+
+jobs:
+  validate:
+    name: Hidden-test coverage + oracle reconciliation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      # Exit 2 means the census could not be established — an empty bank or an
+      # unreachable database. That is a FAILURE, not a quiet pass: zero
+      # problems means zero failures, which is how "all green" gets reported
+      # about nothing.
+      - name: Validate hidden-test coverage
+        working-directory: backend/LearnLM
+        # Repeated verbatim in the next step rather than shared with a YAML
+        # anchor. `<<: *anchor` is a YAML merge key: PyYAML accepts it, which
+        # is exactly why it slipped through a local parse check, but GitHub
+        # Actions rejects the workflow outright with "A mapping was not
+        # expected" and the job never runs. Duplication is the supported form.
+        env:
+          DJANGO_DEBUG: "false"
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          DJANGO_ALLOWED_HOSTS: sparklm-api.onrender.com
+        run: |
+          python manage.py validate_question_bank --json > validation.json
+          python manage.py validate_question_bank
+
+      - name: Reconcile stored outputs against the oracle
+        working-directory: backend/LearnLM
+        continue-on-error: true    # Judge0 throttling is not a bank problem
+        env:
+          DJANGO_DEBUG: "false"
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          DJANGO_ALLOWED_HOSTS: sparklm-api.onrender.com
+          JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
+          JUDGE0_API_HOST: ${{ secrets.JUDGE0_API_HOST }}
+        run: |
+          python manage.py reconcile_hidden_tests --json --limit 25 \
+            > reconciliation.json || true
+          python manage.py reconcile_hidden_tests --limit 25 || true
+
+      # Kept regardless of outcome: the run that FAILED is the one whose
+      # report someone needs to read.
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: question-bank-reports
+          path: |
+            backend/LearnLM/validation.json
+            backend/LearnLM/reconciliation.json
+          if-no-files-found: warn
+          retention-days: 30

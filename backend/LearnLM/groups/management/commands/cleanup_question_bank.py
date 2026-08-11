@@ -17,6 +17,7 @@ Usage:
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+from common.environment import require_disposable_environment
 from groups.models import Topic
 
 
@@ -31,6 +32,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         apply_changes = options["apply"]
+        # Dry-run needs no gate — it deletes nothing. --apply cascades through
+        # Topic -> Question -> CodeSubmission, so it does (M2 P2.5).
+        if apply_changes:
+            require_disposable_environment(
+                'cleanup_question_bank --apply (deletes topics and their questions)',
+                acknowledged=True,
+            )
         extra_names = [t.strip() for t in options["topics"].split(",") if t.strip()]
 
         targets = [t for t in Topic.objects.all() if not t.name.strip()]

@@ -383,10 +383,29 @@ def test_caseless_questions_are_never_served(api_client, user, question, monkeyp
 
 
 @pytest.mark.django_db
-def test_failed_generation_is_never_persisted(api_client, user, question, monkeypatch):
+def test_serving_a_caseless_question_generates_no_grading_data(
+    api_client, user, question, monkeypatch
+):
+    """
+    Strengthened in M2 P2.5. This used to assert that a FAILED generation was
+    not persisted, which conceded that a successful one would be. Generation
+    inside a learner request is now gone entirely, so the invariant is the
+    stronger one: serving a question with no hidden tests calls no AI service
+    and writes nothing.
+
+    The old behaviour let a user's request invent the answer key it was about
+    to be graded against — LLM-guessed expected outputs, never verified by
+    executing a trusted solution, saved as permanent grading truth.
+    """
+    from groups import ai_services
     from groups.hybrid_router import RoutingClassifier
     monkeypatch.setattr(RoutingClassifier, "predict_route", lambda self, *a, **k: "flat")
-    monkeypatch.setattr(coding_views, "generate_test_cases", lambda *a, **k: None)
+
+    calls = []
+    monkeypatch.setattr(
+        ai_services, "generate_test_cases",
+        lambda *a, **k: calls.append(a) or [{"stdin": "1", "expected_output": "1"}],
+    )
 
     question.hidden_test_cases = []
     question.save(update_fields=["hidden_test_cases"])
@@ -395,10 +414,22 @@ def test_failed_generation_is_never_persisted(api_client, user, question, monkey
     response = api_client.get(reverse("code-next-problem"), {"topic": "Array"})
 
     assert response.status_code == 200
+    assert calls == [], "a learner request called the test-case generator"
     question.refresh_from_db()
-    # The old code saved the garbage fallback [{"stdin": "1", ...}] here,
-    # permanently corrupting the question's grading data.
-    assert question.hidden_test_cases == []
+    assert question.hidden_test_cases == [], "grading data was written by a user request"
+
+
+@pytest.mark.django_db
+def test_the_view_module_cannot_reach_the_test_case_generator(user):
+    """
+    Structural guard. Re-importing `generate_test_cases` into coding_views is
+    exactly how the request-time fallback would come back, and it would be a
+    one-line change that no behavioural test necessarily covers.
+    """
+    assert not hasattr(coding_views, "generate_test_cases"), (
+        "coding_views imported the test-case generator again — grading data "
+        "must not be creatable from a learner request"
+    )
 
 
 @pytest.mark.django_db

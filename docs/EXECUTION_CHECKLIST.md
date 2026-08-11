@@ -102,8 +102,18 @@ works in production.** P1.1 is closed.
   - [ ] T2.1.1 Raise `PAGE_SIZE`; explicit per-view sizes
   - [ ] T2.1.2 Guard test (mutation: restore `PAGE_SIZE: 3` → must fail)
   - [ ] T2.1.3 Frontend paging where lists exceed one page
-- [ ] **P2.2 Streaks and badges in the transaction** — `m2-p2-gamification`
-  - [ ] T2.2.1 Streak update under the existing profile lock
+- [x] **P2.5 Judge hardening** — MERGED `d6a51fc`
+- [x] **P2.6 Execution harness correctness** — MERGED `0da6f7c`
+- [ ] **P2.7 Question-bank trustworthiness** — grading truth before routing
+  - [ ] T2.7a-1 Tier-A static contract reconciliation (read-only; recommends, never migrates)
+  - [ ] T2.7a-2 Correct the roadmap: reseeding is proposal, not publication
+  - [ ] T2.7b Question Factory — merge boilerplate, floor 2 → 12, C/C++ `main()` templates
+  - [ ] T2.7c Reference approval lifecycle — only `ACTIVE` is grading authority
+  - [ ] T2.7d Hidden-test generation — oracle outputs only; Tier-1 100%, Tier-2 ≥80%
+- [ ] **P2.8 Adaptive-learning signal integrity** — must not consume corrupted verdicts
+- [ ] **P2.9 Adaptive routing algorithm** — research, then repair
+- [ ] **P2.2 Streaks and badges in the transaction** — `m2-p2-gamification` · *badges sequenced after P2.9; catalogue still undefined*
+  - [x] T2.2.1 Streak update under the existing profile lock — PR #13, unmerged
   - [ ] T2.2.2 `seed_badges` command (idempotent)
   - [ ] T2.2.3 Award rules in `apply_submission`
   - [ ] T2.2.4 Threaded race test — no double award

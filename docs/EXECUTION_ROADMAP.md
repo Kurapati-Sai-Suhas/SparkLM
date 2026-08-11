@@ -154,15 +154,60 @@ The dependency is therefore **execution correctness → grading correctness → 
 
 | Phase | Objective | Depends on |
 |---|---|---|
-| **P2.6** Execution Harness Correctness | Deterministic, correctly-classified execution. Versioned via `Question.execution_contract_version`; v1 is byte-identical to what shipped | P2.5 |
-| **P2.7** Question Execution Contract | Extend `wrapper_contract.py` / `audit_wrapper_templates` to all five languages; add `Question.status`; a question with zero executable languages must never be servable | P2.6 |
-| **P2.8** Question Factory | `reseed_questions.py` demoted to Stage-A proposal. Merge boilerplate (never replace), floor 2 → 12, validate every declared language | P2.7 |
-| **P2.9** Reference Oracle + approval state | `DRAFT/UNREVIEWED/APPROVED/REJECTED`; oracle refuses anything unapproved | P2.7 |
-| **P2.10** Hidden Test Generation + Mutation | Oracle-generated outputs only. Tier-1 known-wrong 100%, Tier-2 ≥80% advisory | P2.6, P2.9, census |
-| **P2.11** Trusted Learner Signal | Partial credit and outcome class replace the single boolean | P2.6 |
-| **P2.12** Adaptive Routing Repair | Two-sided Elo, exploration, repeat-failure exclusion, enable the curriculum gate | P2.11 |
+| **P2.6** Execution Harness Correctness | ✅ **MERGED.** Deterministic, correctly-classified execution. Versioned via `Question.execution_contract_version`; v1 is byte-identical to what shipped | P2.5 |
+| **P2.7a** Execution-contract reconciliation | Tier-A static classification of every question's stored data against its configured contract. **Read-only; recommends, never migrates.** Tier B (oracle agreement) needs P2.7c | P2.6 |
+| **P2.7b** Question Factory | `reseed_questions.py` demoted to Stage-A proposal. Merge boilerplate (never replace), floor 2 → 12, per-language validation, C/C++ `main()` templates | P2.7a |
+| **P2.7c** Reference-solution approval lifecycle | `DRAFT → UNREVIEWED → AUTOMATED_VERIFIED → HUMAN_APPROVED → ACTIVE` (+ rejection). Oracle refuses anything not `ACTIVE` | P2.7b |
+| **P2.7d** Hidden-test generation + mutation | Oracle-generated outputs only. Tier-1 known-wrong 100%, Tier-2 ≥80% advisory | P2.7a/b/c, census |
+| **P2.8** Adaptive-learning signal integrity | Audit which learner signals are trustworthy; partial credit and outcome class replace the single boolean | P2.7 complete |
+| **P2.9** Adaptive routing algorithm | Research, then repair. Two-sided Elo, exploration, repeat-failure exclusion, curriculum gate | P2.8 |
 
-**P2.2.2/P2.2.3 (badges), P2.3, P2.4 follow P2.12.** P2.2.1 (streaks) is independent of the judge and is already implemented (PR #13).
+**P2.2.2/P2.2.3 (badges), P2.3, P2.4 follow P2.9.** P2.2.1 (streaks) is independent of the judge and is already implemented (PR #13).
+
+#### The question pipeline — and what "reseed" does NOT mean
+
+```
+AUTHOR → VALIDATE → PROPOSE → STATIC RECONCILE → ORACLE
+       → GENERATE → MUTATE → HUMAN APPROVE → PROMOTE
+```
+
+**`reseed_questions.py` is a proposal/generation mechanism, NOT a trusted
+grading-truth publisher.** Earlier revisions of this roadmap implied that
+reseeding safely refreshes production content. The P2.7 audit disproved that:
+
+- it writes space-separated test data but never sets
+  `execution_contract_version`, so reseeded questions stay on v1 whose Python
+  harness parses JSON per line — **measured: a correct Two Sum solution exits
+  1 with empty stdout and cannot pass**;
+- it replaces `boilerplate_code` wholesale, so a plain-string `starter_code`
+  destroys the java/cpp/js/c entries;
+- its floor is `MIN_TEST_CASES = 2`;
+- it emits C and C++ templates with no `main()`, which cannot link because
+  both languages are self-contained;
+- it never executes anything, so an LLM's `expected_output` becomes grading
+  truth in one hop.
+
+**Load-bearing definitions.** `expected_output` and `hidden_test_cases` **are
+grading truth**. A reference solution becomes grading authority only at
+`ACTIVE`. Changing a question's execution contract **changes how it grades**,
+so v2 migration requires validation and is never automatic. Hidden tests must
+not be generated before execution compatibility is established, or the tests
+encode the harness's bugs. Adaptive-learning signals must not consume grading
+results until the bank is trustworthy — that dependency is the reason for this
+whole ordering.
+
+#### Daily maintenance — 17:15 UTC (22:45 IST)
+
+```
+CENSUS → VALIDATE → PROPOSE → ORACLE → RECONCILE → MUTATION CHECK → REPORT
+```
+
+**Not** `DELETE → RESEED → PUBLISH`. The daily job may never delete a question,
+replace grading truth, activate a reference, or publish hidden tests.
+Automatic promotion is permitted for **one class only**: metadata that cannot
+change a verdict (title, prose `content`, `category` labels on existing cases).
+Anything touching `stdin`, `expected_output`, `boilerplate_code`,
+`hidden_wrapper_code` or the execution contract requires the approval gate.
 
 ### P2.2 — Streaks and badges inside the transaction
 - **Goal.** Make gamification actually award something.

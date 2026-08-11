@@ -13,6 +13,22 @@ cases on Judge0, and their skill estimate, spaced-repetition schedule and
 curriculum position update from the result. Around that sit study groups,
 shared materials, an AI doubt-solver over uploaded documents, quizzes and chat.
 
+> **⚠ Grading is not yet trustworthy (M2 P2.7, open).** That description is the
+> intended design, not the current state. The P2.7 audit measured a correct
+> Two Sum solution exiting 1 with empty stdout on an AI-reseeded question:
+> `reseed_questions` writes space-separated test data but never sets
+> `execution_contract_version`, so those questions stay on the v1 harness which
+> parses JSON per line. P2.6 shipped the fix (v2) and no question uses it yet.
+> Expected outputs were also produced by an LLM and have never been verified by
+> executing a trusted reference solution.
+>
+> **Consequence for the adaptive engine:** `accepted`/`rejected`, Elo, and
+> mastery are derived from those verdicts and are therefore **not currently
+> trustworthy signals**. Topic, prerequisites, attempts, timestamps and streaks
+> are behavioural facts and remain sound. Routing repair (P2.9) is deliberately
+> sequenced after the bank is trustworthy, so the router is never tuned on
+> corrupted labels.
+
 ## Deployment topology (live)
 
 | Tier | Where | Plan | Notes |

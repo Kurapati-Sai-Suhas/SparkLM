@@ -14,6 +14,32 @@ Newest first. Append one entry per working session, **before the session ends**.
 
 ---
 
+## 2026-08-11 — P2.7a: static contract reconciliation; reseeding reclassified
+**Branch:** `m2-p2-7a-contract-reconciliation` · **Phase:** M2/P2.7a · **Status:** in progress
+
+**Done:** Built the Tier-A read-only reconciliation command
+(`reconcile_execution_contracts`) and corrected the authoritative docs, which
+had implied reseeding safely refreshes production grading truth.
+
+**Evidence:** A correct Two Sum solution measured against reseed's own data
+format (`"2 7 11 15\n9"`): **v1 → exit 1, stdout `''`, cannot pass; v2 → exit 0,
+stdout `0 1`, matches the stored expected_output.** `reseed_questions` has
+**zero** references to `execution_contract_version` and **zero** to
+`ReferenceSolution`/oracle, so every reseeded question sits on v1 with v2-shaped
+data. Tier-A classification is decidable statically because `"2 7 11 15"` is not
+valid JSON — no Judge0, no oracle, no learner code needed. 41 new tests.
+
+**Learned:** The question-bank problem is not "too few hidden tests". Adding 12
+tests to a `V2_ONLY`-on-`v1` question would produce 12 tests a correct solution
+still fails. Also: reseed emits C/C++ templates with no `main()`, and both
+languages are self-contained, so those templates cannot link.
+
+**Next:** P2.7b (Question Factory). Tier B — oracle agreement and determinism —
+needs P2.7c plus a working Judge0. Production census remains BLOCKED: repository
+Actions secrets are absent.
+
+---
+
 ## 2026-08-09 — P1.1 closed: authenticated production verification
 **Branch:** `docs/p1-1-closure` · **Phase:** M1/P1.1 · **Status:** closed ✅
 

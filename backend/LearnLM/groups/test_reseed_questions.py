@@ -19,20 +19,38 @@ from groups.ai_services import DailyQuotaExhausted
 from groups.models import CodingPortal, Question, Topic
 
 
+def _cases(n, start=0):
+    """`n` cases with DISTINCT inputs — duplicates are rejected (M2 P2.7b)."""
+    return [
+        {"stdin": str(i), "expected_output": str(i)} for i in range(start, start + n)
+    ]
+
+
 def _valid_payload(**overrides):
+    """
+    A payload satisfying the P2.7b contract.
+
+    Three things changed from the version this fixture used to carry, and each
+    is a real contract change rather than test churn:
+
+      * twelve cases, not two — MIN_TEST_CASES is now the hidden-test floor;
+      * annotated python parameters — the v2 grader types arguments from the
+        signature, and without annotations it cannot tell a one-element list
+        from a scalar;
+      * c and cpp are complete main() programs, not Solution classes — both
+        are self-contained and run with no wrapper, so a class template has no
+        entry point and cannot link.
+    """
     payload = {
         "content": "<p>A perfectly fine problem statement that is long enough.</p>",
         "starter_code": {
-            "python": "class Solution:\n    def solve(self, x):\n        pass",
+            "python": "class Solution:\n    def solve(self, x: int) -> int:\n        pass",
             "java": "class Solution { public int solve(int x) { return 0; } }",
-            "cpp": "class Solution { public: int solve(int x) { return 0; } };",
+            "cpp": "#include <bits/stdc++.h>\nint main() { return 0; }",
             "javascript": "class Solution { solve(x) {} }",
-            "c": "int solve(int x) { return 0; }",
+            "c": "#include <stdio.h>\nint main(void) { return 0; }",
         },
-        "hidden_test_cases": [
-            {"stdin": "1", "expected_output": "1"},
-            {"stdin": "2", "expected_output": "2"},
-        ],
+        "hidden_test_cases": _cases(12),
     }
     payload.update(overrides)
     return payload
@@ -51,7 +69,7 @@ class TestValidateAiPayload:
         payload = _valid_payload(hidden_test_cases=[
             {"stdin": "abc", "expected_output": ""},
             {"stdin": "xyz", "expected_output": "xy"},
-        ])
+        ] + _cases(10))
         assert self.cmd._validate_ai_payload(payload) is None
 
     def test_rejects_missing_keys(self):
@@ -62,24 +80,21 @@ class TestValidateAiPayload:
     def test_rejects_non_string_stdin(self):
         payload = _valid_payload(hidden_test_cases=[
             {"stdin": 5, "expected_output": "5"},
-            {"stdin": "6", "expected_output": "6"},
-        ])
+        ] + _cases(11))
         error = self.cmd._validate_ai_payload(payload)
         assert error is not None and "must be strings" in error
 
     def test_rejects_non_string_expected_output(self):
         payload = _valid_payload(hidden_test_cases=[
             {"stdin": "5", "expected_output": 5},
-            {"stdin": "6", "expected_output": "6"},
-        ])
+        ] + _cases(11))
         error = self.cmd._validate_ai_payload(payload)
         assert error is not None and "must be strings" in error
 
     def test_rejects_null_stdin(self):
         payload = _valid_payload(hidden_test_cases=[
             {"stdin": None, "expected_output": "5"},
-            {"stdin": "6", "expected_output": "6"},
-        ])
+        ] + _cases(11))
         error = self.cmd._validate_ai_payload(payload)
         assert error is not None and "null" in error
 
@@ -88,13 +103,35 @@ class TestValidateAiPayload:
         error = self.cmd._validate_ai_payload(payload)
         assert error is not None and "at least" in error
 
-    def test_rejects_duplicate_inputs(self):
+    def test_rejects_wholly_degenerate_inputs(self):
         payload = _valid_payload(hidden_test_cases=[
-            {"stdin": "1", "expected_output": "1"},
-            {"stdin": "1", "expected_output": "1"},
+            {"stdin": "1", "expected_output": "1"} for _ in range(12)
         ])
         error = self.cmd._validate_ai_payload(payload)
-        assert error is not None and "identical" in error
+        assert error is not None and "duplicates the input" in error
+
+    def test_rejects_a_single_duplicate_padding_the_count(self):
+        """
+        The case the old check missed and the floor makes attractive: eleven
+        genuine inputs plus one repeat reaches twelve without testing anything
+        new. The previous rule only fired when EVERY input was identical.
+        """
+        payload = _valid_payload(hidden_test_cases=_cases(11) + [
+            {"stdin": "0", "expected_output": "0"},   # duplicates _cases(11)[0]
+        ])
+        error = self.cmd._validate_ai_payload(payload)
+        assert error is not None and "duplicates the input of test case 0" in error
+
+    def test_whitespace_variants_are_the_same_input(self):
+        """
+        Compared on normalised text, so a trailing newline does not make one
+        input read as two distinct cases.
+        """
+        payload = _valid_payload(hidden_test_cases=_cases(11) + [
+            {"stdin": "0\n", "expected_output": "0"},
+        ])
+        error = self.cmd._validate_ai_payload(payload)
+        assert error is not None and "duplicates the input" in error
 
     def test_python_only_starter_code_still_valid(self):
         # Only python is a hard requirement (see the module docstring for

@@ -178,3 +178,105 @@ def test_a_failed_sweep_is_recorded_as_failed():
                           detail={"error": "boom"})
 
     assert MaintenanceRun.objects.get(task="unit_test_fail").succeeded is False
+
+
+# ── daily question-bank validation (M2 P2.5, Phase 8) ────────────────────
+
+QUESTION_BANK_WF = "question-bank-validation.yml"
+
+#: Any of these in the daily workflow would make a read-only audit into a
+#: scheduled data change. `seed_data` is the dangerous one: it deletes every
+#: Question, and CodeSubmission.question is on_delete=CASCADE.
+DESTRUCTIVE_COMMANDS = (
+    "seed_data", "seed_leetcode", "seed_problems", "bulk_seed",
+    "restore_questions", "cleanup_question_bank", "reseed_questions",
+    "seed_dsa_dag", "flush", "sqlflush",
+)
+
+
+def test_the_daily_validation_runs_at_the_approved_time():
+    """
+    22:45 Asia/Kolkata. IST is UTC+5:30 with no daylight saving, so 17:15 UTC
+    holds all year and needs no seasonal correction.
+    """
+    wf = _read(QUESTION_BANK_WF)
+
+    assert 'cron: "15 17 * * *"' in wf
+    assert "workflow_dispatch" in wf, "no manual trigger for an ad-hoc audit"
+
+
+def _executable(name):
+    """
+    Workflow text with comment lines removed.
+
+    This file DOCUMENTS why it does not reseed, so it names `seed_data` and
+    `SPARKLM_ENV` in prose. A guard that greps raw text fails on its own
+    explanation — and the property that matters is what the job RUNS.
+    """
+    return "\n".join(
+        line for line in _read(name).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_the_daily_validation_is_read_only():
+    """
+    The safety property of the whole schedule. A reseed on a timer would
+    destroy learner history the first time it ran against production.
+    """
+    wf = _executable(QUESTION_BANK_WF)
+
+    found = [c for c in DESTRUCTIVE_COMMANDS if c in wf]
+    assert found == [], (
+        f"the daily job invokes data-changing command(s): {found}. It must "
+        f"only validate and reconcile."
+    )
+    assert "validate_question_bank" in wf
+    assert "reconcile_hidden_tests" in wf
+
+
+def test_the_daily_validation_does_not_declare_a_disposable_environment():
+    """
+    common/environment.py treats an unset SPARKLM_ENV as production, so this
+    job is protected by default. Setting it to a disposable value here would
+    silently arm every destructive command against the production database.
+    """
+    wf = _executable(QUESTION_BANK_WF)
+
+    assert "SPARKLM_ENV" not in wf, (
+        "the daily job declares SPARKLM_ENV — unset means production, which "
+        "is the protection this job relies on"
+    )
+
+
+def test_the_daily_validation_timeout_is_bounded():
+    wf = _read(QUESTION_BANK_WF)
+
+    assert "timeout-minutes:" in wf
+
+
+def test_the_daily_validation_keeps_its_reports_even_when_it_fails():
+    """The run that failed is the one whose report someone needs to read."""
+    wf = _read(QUESTION_BANK_WF)
+
+    assert "if: always()" in wf
+    assert "upload-artifact" in wf
+
+
+def test_coverage_validation_can_fail_the_job_but_reconciliation_cannot():
+    """
+    Deliberate asymmetry. Coverage validation is pure database reads, so a
+    failure is a real bank problem. Reconciliation calls Judge0 once per
+    hidden test against a shared, rate-limited free tier — a throttled run is
+    expected noise and must not cry wolf every night.
+    """
+    wf = _read(QUESTION_BANK_WF)
+    validate_at = wf.index("Validate hidden-test coverage")
+    reconcile_at = wf.index("Reconcile stored outputs")
+
+    assert "continue-on-error" not in wf[validate_at:reconcile_at], (
+        "coverage validation is allowed to fail silently"
+    )
+    assert "continue-on-error: true" in wf[reconcile_at:], (
+        "a throttled Judge0 run would fail the nightly job"
+    )

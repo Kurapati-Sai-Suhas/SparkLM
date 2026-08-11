@@ -128,8 +128,27 @@ Track B adds ~52 ed when triggered.
 - **T2.1.2 Guard test.** *Why:* prevent silent regression. *Tests:* mutation — restore `PAGE_SIZE: 3`, guard must fail.
 - **T2.1.3 Frontend paging where lists can exceed one page.** *Manual:* File Library with >20 files.
 
+### P2.5 — Coding judge hardening and hidden-test infrastructure
+- **Goal.** Make the grading verdict trustworthy before anything is awarded for it.
+- **Inserted after P2.1, ahead of P2.2**, on evidence from a read-only audit rather than a preference. The roadmap did not anticipate this phase; it was numbered P2.5 rather than renumbering P2.2–P2.4, because those phases are referenced by dependency elsewhere in this document and renumbering would invalidate the references without changing any actual order.
+- **Why it precedes badge awarding.** P2.2.3 awards badges for accepted submissions. Three defects made that verdict untrustworthy: the Submit response returned `expected_output` for every hidden case (with `your_output`, a submission of `print(input())` reconstructed the whole hidden suite); a learner request with no hidden tests called an LLM to invent grading truth and persisted it; and `seed_data` deleted every `Question` unguarded, cascading into `CodeSubmission`. Awarding a badge on a verdict produced by an unverified answer key does not make the gamification wrong — it makes it *credibly* wrong, and permanently, because `UserBadge` rows are not retracted.
+- **Dependencies.** P0.1.
+- **Risk.** MEDIUM. Touches the grading response contract and the seed commands; no learner-state locking is involved.
+- **Success criteria.** No hidden grading data in any learner-facing response; no grading data created by a user request; production cannot execute a destructive reseed; every problem's coverage and oracle status is reportable.
+- **DoD.** Mutation testing proves each security invariant fails when reintroduced.
+
+**Tasks**
+- **T2.5.1 Stop the answer-key leak.** *Done* — `test_results` removed from the Submit response; allowlist assertion on response fields.
+- **T2.5.2 Remove request-time grading-data generation.** *Done* — plus a structural guard that the generator is unreachable from the view module.
+- **T2.5.3 Environment guard on destructive seeds.** *Done* — `common/environment.py`; unset `SPARKLM_ENV` means production.
+- **T2.5.4 `ReferenceSolution` model.** *Done* — no serializer, no route, no admin; structurally unable to leak.
+- **T2.5.5 Hidden-test contract + validator.** *Done* — `groups/hidden_tests.py`, `validate_question_bank`.
+- **T2.5.6 Oracle execution + reconciliation.** *Done* — `groups/oracle.py`, `reconcile_hidden_tests` (read-only), daily read-only validation at 17:15 UTC (22:45 IST).
+- **T2.5.7 Author reference solutions and oracle-generated hidden tests.** *Blocked* — needs production DB access for the census, and per-problem output-contract review. 12 validated hidden tests is the floor, not the target.
+
 ### P2.2 — Streaks and badges inside the transaction
 - **Goal.** Make gamification actually award something.
+- **Dependencies (amended).** P0.1 **and P2.5** — see P2.5's rationale. T2.2.1 (streaks) is independent of the judge and is already implemented; T2.2.2/T2.2.3 (badges) wait on P2.5.
 - **Files.** `groups/services.py` (`ProgressionService.apply_submission`); `groups/models.py`; new `seed_badges` command; migration.
 - **Dependencies.** P0.1.
 - **Effort.** 3 ed.

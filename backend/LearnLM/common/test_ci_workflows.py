@@ -280,3 +280,25 @@ def test_coverage_validation_can_fail_the_job_but_reconciliation_cannot():
     assert "continue-on-error: true" in wf[reconcile_at:], (
         "a throttled Judge0 run would fail the nightly job"
     )
+
+
+def test_no_workflow_uses_a_yaml_merge_key():
+    """
+    `<<: *anchor` is valid YAML and PyYAML resolves it happily — which is
+    precisely why it is dangerous here. GitHub Actions rejects the workflow
+    outright ("A mapping was not expected") and the job silently never runs,
+    while every local parse check passes.
+
+    Measured: question-bank-validation.yml shipped with one and could not be
+    dispatched at all. Duplicating the env block is the supported form.
+    """
+    offenders = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("<<:"):
+                offenders.append(f"{path.name}:{number}")
+
+    assert offenders == [], (
+        f"YAML merge keys are not supported by GitHub Actions: {offenders}"
+    )

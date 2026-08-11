@@ -65,7 +65,12 @@ jobs:
       # about nothing.
       - name: Validate hidden-test coverage
         working-directory: backend/LearnLM
-        env: &prod_env
+        # Repeated verbatim in the next step rather than shared with a YAML
+        # anchor. `<<: *anchor` is a YAML merge key: PyYAML accepts it, which
+        # is exactly why it slipped through a local parse check, but GitHub
+        # Actions rejects the workflow outright with "A mapping was not
+        # expected" and the job never runs. Duplication is the supported form.
+        env:
           DJANGO_DEBUG: "false"
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
@@ -83,7 +88,15 @@ jobs:
         working-directory: backend/LearnLM
         continue-on-error: true    # Judge0 throttling is not a bank problem
         env:
-          <<: *prod_env
+          DJANGO_DEBUG: "false"
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          DJANGO_ALLOWED_HOSTS: sparklm-api.onrender.com
           JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
           JUDGE0_API_HOST: ${{ secrets.JUDGE0_API_HOST }}
         run: |

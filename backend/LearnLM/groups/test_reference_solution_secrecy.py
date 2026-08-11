@@ -26,6 +26,7 @@ from django.urls import get_resolver, reverse
 from rest_framework import serializers as drf_serializers
 from rest_framework.test import APIClient
 
+from groups.conftest import approved_reference
 from groups.models import CodingPortal, Question, ReferenceSolution, Topic
 
 User = get_user_model()
@@ -49,8 +50,8 @@ def question(db):
 
 @pytest.fixture
 def reference(question):
-    return ReferenceSolution.objects.create(
-        question=question, language="python",
+    return approved_reference(
+        question, language="python",
         source_code=f"# {SECRET_SOURCE}\nprint(input())",
     )
 
@@ -303,37 +304,31 @@ def test_only_one_active_reference_per_language(question):
     """
     from django.db import IntegrityError, transaction
 
-    ReferenceSolution.objects.create(
-        question=question, language="python", source_code="a"
-    )
+    approved_reference(question, language="python", source_code="a")
+    # Approved but not yet canonical. Since P2.7d the collision can only
+    # happen at ACTIVATION — creating a second row is now harmless, because
+    # a new row is DRAFT and inactive.
+    second = approved_reference(
+        question, language="python", source_code="b", active=False)
 
     with pytest.raises(IntegrityError):
         with transaction.atomic():
-            ReferenceSolution.objects.create(
-                question=question, language="python", source_code="b"
-            )
+            second.activate()
 
 
 def test_a_superseded_solution_may_coexist_with_an_active_one(question):
     """The other half: history is retained, so a mismatch stays explainable."""
-    old = ReferenceSolution.objects.create(
-        question=question, language="python", source_code="old", is_active=False
-    )
-    new = ReferenceSolution.objects.create(
-        question=question, language="python", source_code="new"
-    )
+    old = approved_reference(
+        question, language="python", source_code="old", active=False)
+    new = approved_reference(question, language="python", source_code="new")
 
     assert ReferenceSolution.objects.filter(question=question).count() == 2
     assert not old.is_active and new.is_active
 
 
 def test_different_languages_may_both_be_active(question):
-    ReferenceSolution.objects.create(
-        question=question, language="python", source_code="p"
-    )
-    ReferenceSolution.objects.create(
-        question=question, language="cpp", source_code="c"
-    )
+    approved_reference(question, language="python", source_code="p")
+    approved_reference(question, language="cpp", source_code="c")
 
     assert ReferenceSolution.objects.filter(
         question=question, is_active=True

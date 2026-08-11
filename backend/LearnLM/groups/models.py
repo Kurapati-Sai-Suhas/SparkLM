@@ -1,3 +1,5 @@
+import hashlib
+
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from datetime import timedelta, timezone
@@ -445,6 +447,44 @@ class UserCodingProfile(models.Model):
         return round(self.successful_submissions / self.total_submissions * 100, 1)
 
 
+def compute_source_hash(source_code):
+    """
+    The approval fingerprint of a reference implementation (M2 P2.7d).
+
+    SHA-256 over the UTF-8 bytes of the source, and nothing else. Deliberately
+    NOT over timestamps, ids, language or any other metadata: the question it
+    answers is "is this the same code a human read and approved?", and mixing
+    in mutable fields would make an untouched implementation look modified.
+
+    Must stay byte-identical to the digest PostgreSQL computes in the
+    `reference_approved_source_unmodified` constraint. If one is ever changed,
+    the other has to change with it or every approval becomes unwritable.
+    """
+    return hashlib.sha256((source_code or "").encode("utf-8")).hexdigest()
+
+
+#: Review states, defined at module level as well as on the model. A nested
+#: `Meta` class cannot see its enclosing class's attributes, so the CHECK
+#: constraints below would otherwise have to repeat the string literals — two
+#: spellings of the same value, one of which the constraints silently depend on.
+_REVIEW_DRAFT = "DRAFT"
+_REVIEW_IN_REVIEW = "IN_REVIEW"
+_REVIEW_APPROVED = "APPROVED"
+_REVIEW_REJECTED = "REJECTED"
+
+
+class Sha256Hex(models.Func):
+    """
+    `compute_source_hash` expressed in SQL, for use inside a CHECK constraint.
+
+    Both `sha256()` and `convert_to()` are IMMUTABLE in PostgreSQL, which is
+    what makes this legal in a constraint at all — verified against
+    PostgreSQL 15 before the constraint was written.
+    """
+    template = "encode(sha256(convert_to(%(expressions)s, 'UTF8')), 'hex')"
+    output_field = models.CharField()
+
+
 class ReferenceSolution(models.Model):
     """
     A trusted implementation of a question, used to GENERATE and VERIFY hidden
@@ -483,10 +523,76 @@ class ReferenceSolution(models.Model):
 
     source_code = models.TextField()
 
+    # ── Lifecycle (M2 P2.7d) ─────────────────────────────────────────────
+    #
+    # TWO fields, deliberately not one, because they answer different
+    # questions:
+    #
+    #   review_state  "has a human approved this implementation?"
+    #   is_active     "is this the canonical reference selected for execution?"
+    #
+    # Collapsing them is the defect P2.7d exists to fix. Before this phase
+    # `is_active` was the ONLY lifecycle field, and it defaulted to True —
+    # so a reference created by any tooling was instantly canonical, and the
+    # oracle would have executed it as grading truth without a human ever
+    # having read it. There was no state in which a reference existed but was
+    # not yet trusted.
+    #
+    # APPROVED + is_active=False is a legitimate, expected state: a reviewed
+    # implementation that is not the currently selected oracle — either
+    # superseded by a newer one, or approved for a language that is not this
+    # problem's canonical oracle language.
+    REVIEW_DRAFT = _REVIEW_DRAFT
+    REVIEW_IN_REVIEW = _REVIEW_IN_REVIEW
+    REVIEW_APPROVED = _REVIEW_APPROVED
+    REVIEW_REJECTED = _REVIEW_REJECTED
+    REVIEW_STATE_CHOICES = [
+        (REVIEW_DRAFT, "Draft"),
+        (REVIEW_IN_REVIEW, "In review"),
+        (REVIEW_APPROVED, "Approved"),
+        (REVIEW_REJECTED, "Rejected"),
+    ]
+
+    review_state = models.CharField(
+        max_length=20, choices=REVIEW_STATE_CHOICES, default=REVIEW_DRAFT
+    )
+
     # A superseded solution is deactivated, never edited in place: the outputs
     # currently stored in `hidden_test_cases` were produced by SOME version of
     # this code, and losing which one makes a mismatch impossible to explain.
-    is_active = models.BooleanField(default=True)
+    #
+    # Defaults to False as of P2.7d. The safe answer to "is this the canonical
+    # source of grading truth?" is No — the same reasoning that makes
+    # Question.status default to DRAFT and CodeSubmission.adaptive_eligible
+    # default to False. A creation path that does not decide produces an inert
+    # row rather than an authoritative one.
+    is_active = models.BooleanField(default=False)
+
+    # ── Approval provenance ──────────────────────────────────────────────
+    #
+    # All three are NULL unless review_state is APPROVED, and all three are
+    # NOT NULL when it is — enforced by a database constraint, not by
+    # convention. "Approved by nobody at no time" is not an approval.
+    #
+    # PROTECT rather than SET_NULL: this is the provenance of grading truth.
+    # A database that can silently forget who approved the answer key has
+    # lost the only thing the field was added for. The cost — an operator
+    # account cannot be deleted while it is the recorded approver of a
+    # reference — is loud, and is resolved by superseding the reference,
+    # which is the workflow this model already prescribes.
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name="approved_reference_solutions",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    # SHA-256 of the source code AS APPROVED — a frozen fingerprint, not a
+    # live one. That distinction is the whole point: if it tracked the current
+    # source it could never detect that the source had changed, which is
+    # exactly what it exists to detect.
+    source_hash = models.CharField(max_length=64, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -501,6 +607,54 @@ class ReferenceSolution(models.Model):
                 condition=models.Q(is_active=True),
                 name="one_active_reference_solution_per_language",
             ),
+            # An unapproved reference must not be canonical. This is the
+            # single most important invariant in the model: without it,
+            # "approved" is advice and the oracle can execute anything.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(is_active=False)
+                    | models.Q(review_state=_REVIEW_APPROVED)
+                ),
+                name="reference_active_requires_approval",
+            ),
+            # Approval carries provenance or it is not an approval — and,
+            # symmetrically, a non-approved row must not retain the metadata
+            # of an approval it no longer holds.
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(review_state=_REVIEW_APPROVED)
+                        & models.Q(approved_by__isnull=False)
+                        & models.Q(approved_at__isnull=False)
+                        & models.Q(source_hash__isnull=False)
+                    )
+                    | (
+                        ~models.Q(review_state=_REVIEW_APPROVED)
+                        & models.Q(approved_by__isnull=True)
+                        & models.Q(approved_at__isnull=True)
+                        & models.Q(source_hash__isnull=True)
+                    )
+                ),
+                name="reference_approval_provenance",
+            ),
+            # The stored fingerprint must still match the stored source.
+            #
+            # Deliberately a DATABASE check rather than a save() guard.
+            # `save()` is bypassed by `QuerySet.update()`, by `bulk_update`,
+            # by loaddata and by raw SQL — every one of which could otherwise
+            # rewrite an approved reference's source while leaving the
+            # approval intact, which is silent corruption of grading truth.
+            # Postgres evaluates the digest itself, so no write path escapes.
+            #
+            # sha256() and convert_to() are IMMUTABLE, which is what makes
+            # them legal inside a CHECK; verified against PostgreSQL 15.
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(review_state=_REVIEW_APPROVED)
+                    | models.Q(source_hash=Sha256Hex(models.F("source_code")))
+                ),
+                name="reference_approved_source_unmodified",
+            ),
         ]
         indexes = [
             models.Index(fields=["question", "is_active"],
@@ -509,7 +663,159 @@ class ReferenceSolution(models.Model):
 
     def __str__(self):
         state = "active" if self.is_active else "superseded"
-        return f"Reference[{self.language}] for {self.question_id} ({state})"
+        return (f"Reference[{self.language}] for {self.question_id} "
+                f"({self.review_state}, {state})")
+
+    # ── Derived state ────────────────────────────────────────────────────
+
+    @property
+    def has_valid_approval_provenance(self):
+        """
+        Whether this row is approved AND its source still matches what was
+        approved.
+
+        The database constraint makes a mismatch unwritable, so this can only
+        be False for an in-memory object whose `source_code` was reassigned
+        but not saved. That is precisely the path the oracle must not trust:
+        it receives model instances, not rows.
+        """
+        return (
+            self.review_state == self.REVIEW_APPROVED
+            and self.source_hash is not None
+            and self.source_hash == compute_source_hash(self.source_code)
+        )
+
+    @property
+    def is_canonical(self):
+        """Approved, active, and unmodified since approval."""
+        return self.is_active and self.has_valid_approval_provenance
+
+    # ── Transitions ──────────────────────────────────────────────────────
+    #
+    # The sanctioned way to move through the lifecycle. They are thin — the
+    # database constraints are what make the invariants true — but they are
+    # the only place that knows the ORDER, and they keep provenance and the
+    # source fingerprint written together rather than by three separate
+    # callers who might each remember two of the three.
+
+    def submit_for_review(self):
+        """DRAFT → IN_REVIEW."""
+        if self.review_state != self.REVIEW_DRAFT:
+            raise ValidationError(
+                f"only a DRAFT reference may be submitted for review; "
+                f"this one is {self.review_state}"
+            )
+        self.review_state = self.REVIEW_IN_REVIEW
+        self.save(update_fields=["review_state", "updated_at"])
+
+    def approve(self, by):
+        """
+        IN_REVIEW → APPROVED, stamping who, when, and what was approved.
+
+        Approval does NOT activate. Choosing which approved implementation is
+        the canonical oracle is a separate decision — see `activate`.
+        """
+        if self.review_state != self.REVIEW_IN_REVIEW:
+            raise ValidationError(
+                f"only an IN_REVIEW reference may be approved; "
+                f"this one is {self.review_state}"
+            )
+        if by is None or by.pk is None:
+            raise ValidationError("approval requires a persisted approver")
+        self.review_state = self.REVIEW_APPROVED
+        self.approved_by = by
+        self.approved_at = timezone.now()
+        self.source_hash = compute_source_hash(self.source_code)
+        self.save(update_fields=["review_state", "approved_by", "approved_at",
+                                 "source_hash", "updated_at"])
+
+    def reject(self):
+        """
+        IN_REVIEW → REJECTED. Terminal.
+
+        There is deliberately no REJECTED → DRAFT transition. Reopening a
+        rejected reference is only useful in order to edit its source, and
+        this model's stated contract is that a reference is superseded rather
+        than edited in place — losing which version of the code produced the
+        stored expected outputs makes a later mismatch impossible to explain.
+        The sanctioned path is to create a new reference; the rejected row
+        stays as the record of why the old one was not used.
+        """
+        if self.review_state != self.REVIEW_IN_REVIEW:
+            raise ValidationError(
+                f"only an IN_REVIEW reference may be rejected; "
+                f"this one is {self.review_state}"
+            )
+        self.review_state = self.REVIEW_REJECTED
+        self.save(update_fields=["review_state", "updated_at"])
+
+    def activate(self):
+        """
+        APPROVED → canonical. Refuses anything else.
+
+        The database constraint refuses it too; this exists so the failure is
+        a readable ValidationError at the service boundary rather than an
+        IntegrityError from a constraint name.
+        """
+        if not self.has_valid_approval_provenance:
+            raise ValidationError(
+                f"only an APPROVED reference with intact provenance may be "
+                f"activated; this one is {self.review_state}"
+            )
+        self.is_active = True
+        self.save(update_fields=["is_active", "updated_at"])
+
+    def deactivate(self):
+        """Supersede: stop being canonical. The row and its source are kept."""
+        self.is_active = False
+        self.save(update_fields=["is_active", "updated_at"])
+
+    def clean(self):
+        """
+        Model-level mirror of the database constraints.
+
+        Not the enforcement layer — `full_clean()` is only called by forms,
+        and this model has no form, no serializer and no admin registration
+        (`test_reference_solution_secrecy` fails if any appears). It is here
+        so that if one is ever added, it reports the invariant instead of
+        surfacing a raw IntegrityError.
+        """
+        super().clean()
+        approved = self.review_state == self.REVIEW_APPROVED
+
+        if self.is_active and not approved:
+            raise ValidationError(
+                {"is_active": "an unapproved reference cannot be active"})
+
+        if approved:
+            missing = [
+                name for name, value in (
+                    ("approved_by", self.approved_by_id),
+                    ("approved_at", self.approved_at),
+                    ("source_hash", self.source_hash),
+                ) if value is None
+            ]
+            if missing:
+                raise ValidationError(
+                    {name: "required once the reference is APPROVED"
+                     for name in missing})
+            if self.source_hash != compute_source_hash(self.source_code):
+                raise ValidationError({
+                    "source_code": "differs from the source that was approved; "
+                                   "supersede this reference instead of editing it"
+                })
+        else:
+            stale = [
+                name for name, value in (
+                    ("approved_by", self.approved_by_id),
+                    ("approved_at", self.approved_at),
+                    ("source_hash", self.source_hash),
+                ) if value is not None
+            ]
+            if stale:
+                raise ValidationError(
+                    {name: "must be empty unless the reference is APPROVED"
+                     for name in stale})
 
 
 class CodeSubmission(models.Model):

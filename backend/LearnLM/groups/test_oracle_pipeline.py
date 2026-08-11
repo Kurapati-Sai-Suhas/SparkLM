@@ -26,6 +26,7 @@ from django.core.management import call_command
 
 from groups import output_contract
 from groups.hidden_tests import MIN_HIDDEN_TESTS
+from groups.conftest import approved_reference
 from groups.models import CodingPortal, Question, ReferenceSolution, Topic
 from groups.oracle import (
     OracleFailed, OracleNondeterministic, OracleService, OracleUnavailable,
@@ -52,9 +53,7 @@ def make(topic, title="Oracle Problem", cases=None, oracle=True, language="pytho
         hidden_test_cases=cases if cases is not None else [], hidden_wrapper_code={},
     )
     if oracle:
-        ReferenceSolution.objects.create(
-            question=question, language=language, source_code="print(input())"
-        )
+        approved_reference(question, language=language)
     return question
 
 
@@ -214,9 +213,7 @@ def test_two_active_references_are_refused_rather_than_chosen_between(topic):
     determine every expected output the problem ever receives.
     """
     question = make(topic, language="python")
-    ReferenceSolution.objects.create(
-        question=question, language="cpp", source_code="int main(){}"
-    )
+    approved_reference(question, language="cpp", source_code="int main(){}")
 
     assert canonical_reference(question) is None
     assert "exactly one canonical oracle" in canonical_reference_problem(question)
@@ -224,9 +221,7 @@ def test_two_active_references_are_refused_rather_than_chosen_between(topic):
 
 def test_a_superseded_reference_does_not_make_the_oracle_ambiguous(topic):
     question = make(topic, language="python")
-    ReferenceSolution.objects.create(
-        question=question, language="cpp", source_code="x", is_active=False
-    )
+    approved_reference(question, language="cpp", source_code="x", active=False)
 
     assert canonical_reference(question).language == "python"
 

@@ -41,7 +41,11 @@ class Command(BaseCommand):
         # One grouped query rather than two per profile.
         truth = {
             row["user_id"]: (row["total"], row["accepted"])
-            for row in CodeSubmission.objects.values("user_id").annotate(
+            # adaptive_eligible only (M2 P2.7c): these counters are read by
+            # the learner model, so rebuilding them from unverified verdicts
+            # would reintroduce exactly what the boundary excludes.
+            for row in CodeSubmission.objects.filter(adaptive_eligible=True)
+            .values("user_id").annotate(
                 total=Count("id"),
                 accepted=Count("id", filter=Q(status="accepted")),
             )

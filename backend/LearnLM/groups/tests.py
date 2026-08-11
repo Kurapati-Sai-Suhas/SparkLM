@@ -101,6 +101,7 @@ class RoutingTelemetryTests(TestCase):
     def _submit(self, sub_status):
         from .models import CodeSubmission
         CodeSubmission.objects.create(
+            adaptive_eligible=True,
             user=self.user, question=self.question,
             language='python', code='x', status=sub_status,
         )
@@ -285,10 +286,12 @@ class OutcomeClassifierTests(TestCase):
         # Window as of the recommendation: 6 fails then 14 passes.
         for _ in range(6):
             CodeSubmission.objects.create(
+                adaptive_eligible=True,
                 user=user, question=question, language='python', code='x', status='wrong_answer'
             )
         for _ in range(14):
             CodeSubmission.objects.create(
+                adaptive_eligible=True,
                 user=user, question=question, language='python', code='x', status='accepted'
             )
 
@@ -301,6 +304,7 @@ class OutcomeClassifierTests(TestCase):
         # that leakage was the v1 builder's train/serve mismatch.
         for _ in range(5):
             CodeSubmission.objects.create(
+                adaptive_eligible=True,
                 user=user, question=question, language='python', code='x', status='wrong_answer'
             )
 

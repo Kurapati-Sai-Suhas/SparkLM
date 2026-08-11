@@ -339,6 +339,64 @@ class Question(models.Model):
     hidden_test_cases = models.JSONField(default=list)
     hidden_wrapper_code = models.JSONField(default=dict, blank=True)
 
+    # ── Trust boundary (M2 P2.7c) ────────────────────────────────────────
+    #
+    # Two INDEPENDENT axes, because "we serve it" and "we believe its answers"
+    # are different facts and collapsing them is what let unverified grading
+    # data look trusted:
+    #
+    #   status       lifecycle — where the question is in the pipeline
+    #   trust_state  evidence  — has an oracle ever confirmed its outputs
+    #
+    # servable        = status == PUBLISHED
+    # adaptive-eligible = status == PUBLISHED and trust_state == ORACLE_VERIFIED
+    #
+    # A legacy question is PUBLISHED + UNVERIFIED: a learner may practise on it
+    # and see a verdict, but that verdict may be wrong — no oracle has ever
+    # checked it — so it must never teach the adaptive engine. When P2.7d
+    # verifies one, `trust_state` flips and it starts counting. No status
+    # churn, one flag, fully auditable.
+    #
+    # Both default to the SAFE value. Nothing is published or trusted by
+    # accident, and the migration therefore promotes nothing.
+    STATUS_DRAFT = "DRAFT"
+    STATUS_PENDING_REVIEW = "PENDING_REVIEW"
+    STATUS_PUBLISHED = "PUBLISHED"
+    STATUS_BLOCKED = "BLOCKED"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_PENDING_REVIEW, "Pending review"),
+        (STATUS_PUBLISHED, "Published"),
+        (STATUS_BLOCKED, "Blocked"),
+    ]
+
+    TRUST_UNVERIFIED = "UNVERIFIED"
+    TRUST_ORACLE_VERIFIED = "ORACLE_VERIFIED"
+    TRUST_CHOICES = [
+        (TRUST_UNVERIFIED, "Unverified"),
+        (TRUST_ORACLE_VERIFIED, "Oracle verified"),
+    ]
+
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT
+    )
+    trust_state = models.CharField(
+        max_length=20, choices=TRUST_CHOICES, default=TRUST_UNVERIFIED
+    )
+
+    @property
+    def is_adaptive_eligible(self):
+        """
+        Whether a submission against this question may teach the learner
+        model. Read at submission time and FROZEN onto the row — never
+        recomputed, so verifying a question later cannot retroactively turn
+        past evidence into trusted evidence.
+        """
+        return (
+            self.status == self.STATUS_PUBLISHED
+            and self.trust_state == self.TRUST_ORACLE_VERIFIED
+        )
+
     # Which execution harness grades this question (M2 P2.6). Defaults to "v1"
     # — the harness exactly as it shipped — so this migration changes no
     # learner's grading. v2 is the canonical contract (one line per parameter,
@@ -470,6 +528,27 @@ class CodeSubmission(models.Model):
     execution_time_ms = models.IntegerField(null=True, blank=True)
     memory_used_kb = models.IntegerField(null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
+
+    # Whether this result may teach the adaptive engine (M2 P2.7c).
+    #
+    # DENORMALISED and FROZEN at creation, deliberately. Two reasons:
+    #
+    #   * Correctness. If a question is verified on day 20, a submission
+    #     graded on day 1 against unverified data must NOT retroactively
+    #     become trusted evidence — the learner really was judged by an
+    #     answer key nobody had checked. Recomputing from the current
+    #     Question row would rewrite history in the learner's disfavour or
+    #     favour at random.
+    #   * Safety. There are seven learning consumers of this table. Filtering
+    #     each one on a join to Question is a design that fails silently the
+    #     first time an eighth is added; filtering on one local boolean does
+    #     not.
+    #
+    # Defaults FALSE: a row created by any path that does not explicitly
+    # decide is inert, which is the safe direction. Existing rows keep False
+    # for the same reason — nothing in the bank has ever been oracle-verified,
+    # so marking historical submissions eligible would be a false claim.
+    adaptive_eligible = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-submitted_at"]

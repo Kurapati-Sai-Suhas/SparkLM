@@ -81,22 +81,56 @@ Known pre-existing limitation, NOT fixed here (out of scope for this file):
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
 from django.core.management.base import BaseCommand
 from django.db import transaction, connection, OperationalError
 
+from groups import hidden_tests
 from groups.models import Question
 from groups.ai_services import generate_full_question, DailyQuotaExhausted
+from groups.utils import normalize_output
 
 logger = logging.getLogger("reseed_questions")
 
 PLACEHOLDER_MARKER = Question.PLACEHOLDER_MARKER
 
-MIN_TEST_CASES = 2
+# The coverage FLOOR, raised 2 -> 12 (M2 P2.7b). Twelve is the minimum a
+# proposal must clear, NOT evidence of coverage: twelve near-identical cases
+# are worse than two honest ones, because the count looks satisfied. Whether a
+# suite is actually adequate is decided by the mutation gate in P2.7d, not
+# here. This constant only stops a question being armed with a suite that is
+# obviously too thin to be worth verifying.
+MIN_TEST_CASES = hidden_tests.MIN_HIDDEN_TESTS
 MAX_RETRIES = 3
 MAX_RAW_LOG_CHARS = 2000
+
+#: Every case this generator proposes is tagged with its provenance. The
+#: value is deliberately blunt: an LLM produced the expected output and
+#: NOTHING has executed a trusted reference against it. The oracle pipeline
+#: (P2.7c/P2.7d) is what replaces this with a verified provenance, and until
+#: it does, a downstream consumer can tell the difference without guessing.
+#:
+#: `source` is already an optional field in the P2.5 hidden-test contract, so
+#: recording this needs no schema change and no migration.
+SOURCE_LLM_UNVERIFIED = "llm_unverified"
+
+
+def tag_unverified(cases):
+    """
+    Stamp proposed cases with their provenance, without altering their values.
+
+    Deliberately does NOT touch `stdin` or `expected_output`. reseed proposes;
+    it does not decide what is correct.
+    """
+    tagged = []
+    for case in cases:
+        if isinstance(case, dict):
+            case = {**case, "source": SOURCE_LLM_UNVERIFIED}
+        tagged.append(case)
+    return tagged
 
 DEFAULT_FAILURE_FILE = "reseed_failures.json"
 
@@ -300,11 +334,41 @@ class Command(BaseCommand):
             try:
                 starter = ai_data["starter_code"]
                 if not isinstance(starter, dict):
+                    # A plain string is the legacy python-only shape. It used
+                    # to become the WHOLE boilerplate dict, silently deleting
+                    # java/cpp/js/c — and since the editor derives its language
+                    # picker from these keys, a five-language question became a
+                    # python-only one with no error (M2 P2.7b).
                     starter = {"python": starter}
+
+                # MERGE, never replace. Same semantic as backfill_boilerplate,
+                # which has always done this correctly:
+                #     q.boilerplate_code = {**(q.boilerplate_code or {}), **stubs}
+                merged_boilerplate = {**(q.boilerplate_code or {}), **starter}
+
+                # Hidden tests are GRADING TRUTH. reseed may arm a question
+                # that has none; it must never overwrite a suite that already
+                # exists, because those expected outputs may since have been
+                # verified against an oracle and this generator has no way to
+                # know. Regenerating them is P2.7c/P2.7d's job, behind the
+                # approval gate.
+                existing_cases = q.hidden_test_cases
+                if isinstance(existing_cases, list) and existing_cases:
+                    proposed_cases = existing_cases
+                    self.stdout.write(self.style.WARNING(
+                        "     hidden tests already present — left untouched "
+                        "(regeneration requires the oracle pipeline)"
+                    ))
+                else:
+                    proposed_cases = tag_unverified(ai_data["hidden_test_cases"])
+
                 with transaction.atomic():
                     q.content = new_content
-                    q.boilerplate_code = starter
-                    q.hidden_test_cases = ai_data["hidden_test_cases"]
+                    q.boilerplate_code = merged_boilerplate
+                    q.hidden_test_cases = proposed_cases
+                    # execution_contract_version is deliberately ABSENT from
+                    # update_fields: reseed must never migrate a question
+                    # between grading contracts.
                     q.save(update_fields=["content", "boilerplate_code", "hidden_test_cases"])
                 return True
             except OperationalError:
@@ -325,6 +389,76 @@ class Command(BaseCommand):
     # We only reject a test case when the key is truly absent or None — not when
     # it holds a legitimate falsy value.
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Per-language starter validation (M2 P2.7b).
+    #
+    # The generator was producing templates that CANNOT run under the
+    # execution model they are for: `class Solution { ... };` for C++ and a
+    # bare `int methodName(...)` for C. Both languages are self-contained —
+    # `_build_executable` runs them raw with no wrapper — so a template with
+    # no main() has no entry point and cannot link. Every C/C++ starter it
+    # has ever produced is unusable.
+    #
+    # Python is also checked for parameter annotations, because the v2
+    # contract types arguments from the signature; without them it falls back
+    # to a heuristic where a single-token line is a scalar, which is wrong for
+    # a valid one-element array. The annotation belongs in the template, not
+    # in a guess at grading time.
+    # ------------------------------------------------------------------
+    SELF_CONTAINED = ("c", "cpp", "c++")
+    REFLECTION = ("python", "java", "javascript", "js")
+
+    def _validate_starter_code(self, starter):
+        if isinstance(starter, str):
+            starter = {"python": starter}
+        if not isinstance(starter, dict):
+            return "starter_code is neither a string nor an object"
+
+        for language, template in starter.items():
+            key = str(language).lower()
+            if not isinstance(template, str) or not template.strip():
+                return f"starter_code[{key}] is empty"
+
+            if key in self.SELF_CONTAINED:
+                if "main" not in template:
+                    return (
+                        f"starter_code[{key}] has no main(); {key} is "
+                        f"self-contained and runs with no wrapper, so a "
+                        f"Solution-class template cannot link"
+                    )
+            elif key in self.REFLECTION:
+                if "Solution" not in template:
+                    return (
+                        f"starter_code[{key}] has no Solution class; the "
+                        f"{key} harness resolves the method by reflection"
+                    )
+                if key == "python" and not self._python_is_annotated(template):
+                    return (
+                        "starter_code[python] has unannotated parameters; the "
+                        "v2 contract types arguments from the signature"
+                    )
+        return None
+
+    @staticmethod
+    def _python_is_annotated(template):
+        """
+        Every parameter besides `self` carries an annotation.
+
+        Reads the signature rather than guessing from names: a heuristic over
+        identifiers ("nums must be a list") is exactly the fragile inference
+        this check exists to remove.
+        """
+        match = re.search(r"def\s+\w+\s*\(([^)]*)\)", template)
+        if not match:
+            return False
+        params = [p.strip() for p in match.group(1).split(",") if p.strip()]
+        for param in params:
+            if param in ("self", "cls") or param.startswith("*"):
+                continue
+            if ":" not in param:
+                return False
+        return True
+
     def _validate_ai_payload(self, ai_data):
         if not isinstance(ai_data, dict):
             return "AI response is not a JSON object"
@@ -336,6 +470,10 @@ class Command(BaseCommand):
 
         if not isinstance(ai_data["content"], str) or len(ai_data["content"].strip()) < 20:
             return "content is empty or too short"
+
+        starter_problem = self._validate_starter_code(ai_data["starter_code"])
+        if starter_problem:
+            return starter_problem
 
         # starter_code may be a plain string (legacy: python only) or an
         # object keyed by language. Either way python must be present.
@@ -374,11 +512,27 @@ class Command(BaseCommand):
                     f"{type(stdin_val).__name__}/{type(expected_val).__name__}"
                 )
 
-        # Reject only exact-duplicate inputs across every test case (degenerate case
-        # where the model didn't vary inputs at all).
-        unique_inputs = {str(tc["stdin"]) for tc in test_cases}
-        if len(unique_inputs) < 2:
-            return "all test cases have identical input"
+        # Duplicate inputs (M2 P2.7b). A repeated stdin inflates the count
+        # toward the floor while testing nothing new — precisely how a
+        # generator asked for twelve cases reaches twelve cheaply. Compared on
+        # NORMALISED text so trailing-whitespace variants of one input do not
+        # read as two distinct cases.
+        seen = {}
+        for i, tc in enumerate(test_cases):
+            key = normalize_output(tc["stdin"])
+            if key in seen:
+                return (
+                    f"test case {i} duplicates the input of test case "
+                    f"{seen[key]} — {len(test_cases)} cases but fewer distinct "
+                    f"inputs"
+                )
+            seen[key] = i
+
+        # (The previous check here rejected only the fully-degenerate case —
+        # every input identical. It is now unreachable: the pairwise check
+        # above fires on ANY repeat, including that one, and catches the case
+        # it missed, which is eleven distinct inputs plus one duplicate
+        # padding the count to the floor.)
 
         return None
 

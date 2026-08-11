@@ -434,11 +434,11 @@ def generate_full_question(title):
     {{
       "content": "<p>Full problem statement in simple HTML: description, input/output format, constraints.</p>",
       "starter_code": {{
-        "python": "class Solution:\\n    def methodName(self, param1):\\n        # Write your code here\\n        pass",
-        "java": "class Solution {{\\n    public int methodName(int param1) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}",
-        "cpp": "class Solution {{\\npublic:\\n    int methodName(int param1) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}};",
-        "javascript": "class Solution {{\\n    methodName(param1) {{\\n        // Write your code here\\n    }}\\n}}",
-        "c": "int methodName(int param1) {{\\n    // Write your code here\\n    return 0;\\n}}"
+        "python": "class Solution:\\n    def methodName(self, param1: list[int], param2: int) -> int:\\n        # Write your code here\\n        pass",
+        "java": "class Solution {{\\n    public int methodName(int[] param1, int param2) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}",
+        "cpp": "#include <bits/stdc++.h>\\nusing namespace std;\\n\\nint main() {{\\n    // Read stdin, print the answer.\\n    return 0;\\n}}",
+        "javascript": "class Solution {{\\n    methodName(param1, param2) {{\\n        // Write your code here\\n    }}\\n}}",
+        "c": "#include <stdio.h>\\n\\nint main(void) {{\\n    /* Read stdin, print the answer. */\\n    return 0;\\n}}"
       }},
       "hidden_test_cases": [
         {{"stdin": "2 7 11 15\\n9", "expected_output": "0 1", "explanation": "nums[0] + nums[1] == 9"}},
@@ -447,7 +447,12 @@ def generate_full_question(title):
     }}
 
     Rules:
-    - Provide at least 4 diverse hidden_test_cases, including edge cases, each with different stdin.
+    - Provide at least 12 diverse hidden_test_cases, each with a DIFFERENT stdin. Twelve
+      near-identical cases will be rejected: cover minimum and maximum boundaries, a single
+      element, duplicates, all-equal values, zero and negatives where the contract allows
+      them, sorted and reverse-sorted order, and at least one adversarial or worst-case
+      input. Skip any category the problem's input contract makes meaningless and cover a
+      problem-specific failure mode instead.
     - stdin holds the raw input lines the program reads (newline-separated values). stdin must NEVER be empty.
     - stdin and expected_output must ALWAYS be JSON strings — quote numbers too (e.g. "5", not 5).
     - If the problem involves a binary tree, encode it in stdin as ONE line of space-separated
@@ -455,12 +460,20 @@ def generate_full_question(title):
       and write the problem content so the solution is expected to parse that encoding.
     - If the problem involves a linked list, encode it as one line of space-separated values.
     - expected_output is the exact stdout string the correct solution prints.
-    - starter_code should include an entry for every language shown above: python, java, cpp,
-      javascript, c. python/java/cpp/javascript must be a "Solution" class with one public method
-      and no solution logic. "c" has no classes — it must be a single free function with the same
-      method name and equivalent parameter types (arrays as pointer+length pairs, e.g.
-      "int* nums, int numsSize"), also with no solution logic. Only "python" is strictly required;
-      the others are included whenever you can, at no extra cost to you.
+    - starter_code should include an entry for every language shown above. There are TWO
+      execution models and the template must match the one its language uses:
+        * python, java, javascript run inside a reflection harness. Each must be a
+          "Solution" class with EXACTLY ONE public method and no solution logic. More than
+          one public method is rejected — the harness will not guess which one to call.
+        * c and cpp are SELF-CONTAINED: they are compiled and run exactly as written, with
+          no wrapper. Each must therefore be a COMPLETE program with main() that reads
+          stdin and prints the answer. A "Solution" class for c/cpp has no entry point,
+          cannot link, and will be rejected.
+    - The python method MUST annotate every parameter and its return type
+      (e.g. "def twoSum(self, nums: list[int], target: int) -> list[int]"). The grader types
+      arguments from that signature; without annotations it cannot tell a one-element list
+      from a scalar.
+    - Only "python" is strictly required; the others are included whenever you can.
     """
 
     return _generate_json_with_fallback(prompt, f"full question generation for {title!r}")

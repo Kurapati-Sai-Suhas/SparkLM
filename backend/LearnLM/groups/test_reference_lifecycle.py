@@ -429,6 +429,68 @@ def test_the_hash_ignores_nothing_about_the_source():
     assert compute_source_hash("x = 1") != compute_source_hash("x  =  1")
 
 
+#: Source shapes a real reference implementation actually has. Every previous
+#: test used whitespace-clean source, which let a `compute_source_hash(
+#: source.strip())` mutant survive — and real files end with a newline, so the
+#: stripped case was the common one, not the exotic one.
+REALISTIC_SOURCES = [
+    ("normal", "class Solution:\n    def solve(self, n):\n        return n"),
+    ("trailing newline", "class Solution:\n    pass\n"),
+    ("leading blank line", "\nclass Solution:\n    pass"),
+    ("CRLF", "class Solution:\r\n    pass\r\n"),
+    ("trailing spaces", "class Solution:    \n    pass   "),
+    ("tabs", "class Solution:\n\tpass\n"),
+    ("unicode identifiers", "# \u00e9\u00e0\u4e2d\u6587\nclass Solution:\n    pass\n"),
+    ("emoji", "# \U0001f600\nclass Solution:\n    pass\n"),
+    ("empty string", ""),
+    ("quotes", "s = \"it's\" + 'a \"quote\"'\n"),
+    ("backslashes", "p = 'C:\\\\tmp\\\\x'\n"),
+    ("byte literals", "b = b'\\x01\\x02'\n"),
+]
+
+
+@pytest.mark.parametrize("label,source",
+                         REALISTIC_SOURCES, ids=[s[0] for s in REALISTIC_SOURCES])
+def test_python_and_postgres_compute_the_same_digest(db, label, source):
+    """
+    The two implementations of this hash must agree byte for byte.
+
+    `compute_source_hash` runs in Python; the
+    `reference_approved_source_unmodified` constraint runs
+    `encode(sha256(convert_to(source_code,'UTF8')),'hex')` inside PostgreSQL.
+    If they ever diverge, approving a reference becomes impossible — the
+    constraint rejects a digest the model just computed.
+    """
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT encode(sha256(convert_to(%s, 'UTF8')), 'hex')", [source])
+        postgres_digest = cursor.fetchone()[0]
+
+    assert compute_source_hash(source) == postgres_digest, (
+        f"Python and PostgreSQL disagree on the digest of {label!r} source")
+
+
+@pytest.mark.parametrize("label,source",
+                         REALISTIC_SOURCES, ids=[s[0] for s in REALISTIC_SOURCES])
+def test_realistic_sources_can_actually_be_approved(question, approver,
+                                                    label, source):
+    """
+    Agreement is necessary but not sufficient — the end-to-end check is that
+    the row reaches APPROVED + ACTIVE without the constraint rejecting it.
+    """
+    reference = ReferenceSolution.objects.create(
+        question=question, language="python", source_code=source)
+    reference.submit_for_review()
+    reference.approve(by=approver)
+    reference.activate()
+
+    reference.refresh_from_db()
+    assert reference.is_canonical is True, f"{label!r} source could not be approved"
+    assert reference.source_code == source, "the stored source was altered"
+
+
 def test_an_approved_source_cannot_be_rewritten_by_update(question, approver):
     """
     The reason this is a database constraint. `QuerySet.update()` never calls
@@ -524,7 +586,7 @@ def test_the_oracle_runs_a_canonical_reference(question, approver):
     assert len(runner.calls) == 2, "determinism verification should run twice"
 
 
-def test_run_many_gates_every_input_not_just_the_first(question, approver):
+def test_run_many_refuses_a_reference_that_is_never_canonical(question, approver):
     reference = approved_reference(question, active=False, approver=approver)
     runner = accepting("1")
 
@@ -532,6 +594,126 @@ def test_run_many_gates_every_input_not_just_the_first(question, approver):
         OracleService(runner).run_many(question, reference, ["1", "2", "3"])
 
     assert runner.calls == []
+
+
+def test_run_many_re_checks_the_reference_between_inputs(question, approver):
+    """
+    The gate is per INPUT, not per batch.
+
+    An earlier version of this test passed an already-inactive reference, so
+    the first input raised and inputs 2 and 3 were never reached — it proved
+    the first call was gated and could not distinguish that from a guard
+    hoisted out of the loop. Mutation testing caught it: moving the check to
+    "once per batch" left the test green.
+
+    This version makes the reference stop being canonical PART-WAY THROUGH the
+    batch — an operator deactivating it while a long reconciliation runs, which
+    is a real race on a suite of twelve inputs against a single-worker Judge0.
+    Input 1 must complete and input 2 must be refused, which is only possible
+    if the guard runs again between them.
+    """
+    reference = approved_reference(question, approver=approver)
+    seen = []
+
+    def runner(source, language, stdin):
+        seen.append(stdin)
+        # Input 1 is verified for determinism, so it costs two calls. After the
+        # second, the reference stops being canonical.
+        if len(seen) == 2:
+            reference.is_active = False
+        return {"status": "Accepted", "status_id": 3, "stdout": "out",
+                "stderr": "", "compile_output": "", "time": "0.01", "memory": 1}
+
+    with pytest.raises(OracleUnapproved):
+        OracleService(runner).run_many(question, reference, ["a", "b", "c"])
+
+    assert seen == ["a", "a"], (
+        f"expected only input 'a' to execute (twice, for determinism); the "
+        f"runner saw {seen}. Inputs 'b' and 'c' reaching it means the "
+        f"reference was checked once for the whole batch."
+    )
+
+
+def test_run_many_executes_every_input_while_the_reference_stays_canonical(
+        question, approver):
+    """Positive control for the test above — the gate is not blocking the batch."""
+    reference = approved_reference(question, approver=approver)
+    runner = accepting("out")
+
+    pairs = OracleService(runner).run_many(question, reference, ["a", "b", "c"])
+
+    assert [stdin for stdin, _ in pairs] == ["a", "b", "c"]
+    assert runner.calls == [("python", s) for s in ("a", "a", "b", "b", "c", "c")]
+
+
+# ── Ownership: a reference may only answer for its own question ──────────
+
+def test_the_oracle_refuses_a_reference_from_another_question(question, approver):
+    """
+    F1. `canonical_reference(question)` reads the related manager and cannot
+    return a foreign row, but `OracleService.run` is public API and does not
+    require that caller. Question A's wrapper around question B's approved
+    reference produces a well-formed, authoritative-looking answer — the
+    confidently-wrong answer key this milestone exists to prevent.
+    """
+    other = Question.objects.create(
+        title="Other Problem", content="c", topic=question.topic,
+        base_difficulty=1200.0,
+        hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
+        boilerplate_code={"python": "class Solution: pass"}, hidden_wrapper_code={})
+    foreign = approved_reference(other, source_code="print('other')",
+                                 approver=approver)
+    runner = accepting("output-from-the-wrong-problem")
+
+    with pytest.raises(OracleUnapproved) as exc:
+        OracleService(runner).run(question, foreign, "1")
+
+    assert runner.calls == [], "a foreign reference reached execution"
+    assert str(other.pk) in str(exc.value) and str(question.pk) in str(exc.value)
+
+
+def test_run_many_refuses_a_reference_from_another_question(question, approver):
+    other = Question.objects.create(
+        title="Other Problem 2", content="c", topic=question.topic,
+        base_difficulty=1200.0, hidden_test_cases=[],
+        boilerplate_code={}, hidden_wrapper_code={})
+    foreign = approved_reference(other, source_code="print('other')",
+                                 approver=approver)
+    runner = accepting("x")
+
+    with pytest.raises(OracleUnapproved):
+        OracleService(runner).run_many(question, foreign, ["1", "2", "3"])
+
+    assert runner.calls == []
+
+
+def test_ownership_is_checked_before_canonicality(question, approver):
+    """
+    Order matters for the operator reading the report. A foreign reference that
+    is ALSO a draft must be reported as the wrong problem's reference — telling
+    them to get it approved would send them to fix the wrong thing.
+    """
+    other = Question.objects.create(
+        title="Other Problem 3", content="c", topic=question.topic,
+        base_difficulty=1200.0, hidden_test_cases=[],
+        boilerplate_code={}, hidden_wrapper_code={})
+    foreign_draft = draft(other)
+    runner = accepting("x")
+
+    with pytest.raises(OracleUnapproved) as exc:
+        OracleService(runner).run(question, foreign_draft, "1")
+
+    assert "belongs to question" in str(exc.value)
+    assert runner.calls == []
+
+
+def test_a_reference_still_answers_for_its_own_question(question, approver):
+    """Positive control — ownership is a gate, not a wall."""
+    reference = approved_reference(question, approver=approver)
+    runner = accepting("42")
+
+    assert OracleService(runner).run(question, reference, "1") == "42"
+    assert len(runner.calls) == 2
 
 
 def test_an_unapproved_reference_is_not_canonical(question):
@@ -708,6 +890,79 @@ def test_reference_solution_is_still_absent_from_admin():
     from django.contrib import admin
 
     assert ReferenceSolution not in admin.site._registry
+
+
+# ═════════════════════════════════════════════════════════════
+# J. Test-infrastructure integrity
+# ═════════════════════════════════════════════════════════════
+
+def test_the_shared_factory_walks_the_real_lifecycle(question, approver):
+    """
+    F4. Protects the tests, not production.
+
+    `approved_reference()` is used by every suite that needs a usable oracle.
+    Mutation testing showed it could be replaced with a single
+    `objects.create(review_state=APPROVED, is_active=True, ...)` and all 174
+    tests would still pass — after which nothing in the repository would be
+    exercising the transitions at all, while appearing to.
+
+    Watching `post_save` is the evidence, because it records the sequence of
+    states the row actually passed through rather than the state it ended in.
+    A shortcut produces one INSERT; the real lifecycle produces four writes.
+    """
+    from django.db.models.signals import post_save
+
+    observed = []
+
+    def spy(sender, instance, created, **kwargs):
+        observed.append((instance.review_state, instance.is_active, created))
+
+    post_save.connect(spy, sender=ReferenceSolution,
+                      dispatch_uid="p27d-factory-integrity")
+    try:
+        reference = approved_reference(question, approver=approver)
+    finally:
+        post_save.disconnect(sender=ReferenceSolution,
+                             dispatch_uid="p27d-factory-integrity")
+
+    assert observed == [
+        (ReferenceSolution.REVIEW_DRAFT, False, True),       # created
+        (ReferenceSolution.REVIEW_IN_REVIEW, False, False),  # submit_for_review
+        (ReferenceSolution.REVIEW_APPROVED, False, False),   # approve
+        (ReferenceSolution.REVIEW_APPROVED, True, False),    # activate
+    ], (
+        f"the factory did not walk DRAFT -> IN_REVIEW -> APPROVED -> ACTIVE; "
+        f"observed {observed}"
+    )
+
+    # Approval metadata was produced BY approve(), not handed to create().
+    assert reference.approved_by == approver
+    assert reference.approved_at >= reference.created_at
+    assert reference.source_hash == compute_source_hash(reference.source_code)
+
+
+def test_the_shared_factory_can_stop_before_activation(question, approver):
+    """The `active=False` branch must walk the same path minus the last step."""
+    from django.db.models.signals import post_save
+
+    observed = []
+
+    def spy(sender, instance, created, **kwargs):
+        observed.append((instance.review_state, instance.is_active, created))
+
+    post_save.connect(spy, sender=ReferenceSolution,
+                      dispatch_uid="p27d-factory-integrity-inactive")
+    try:
+        approved_reference(question, active=False, approver=approver)
+    finally:
+        post_save.disconnect(sender=ReferenceSolution,
+                             dispatch_uid="p27d-factory-integrity-inactive")
+
+    assert observed == [
+        (ReferenceSolution.REVIEW_DRAFT, False, True),
+        (ReferenceSolution.REVIEW_IN_REVIEW, False, False),
+        (ReferenceSolution.REVIEW_APPROVED, False, False),
+    ], f"observed {observed}"
 
 
 # ═════════════════════════════════════════════════════════════

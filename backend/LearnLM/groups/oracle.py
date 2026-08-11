@@ -149,10 +149,26 @@ class OracleService:
 
     def _execute(self, question, reference, stdin):
         # The lifecycle gate (M2 P2.7d), checked on every execution rather
-        # than once per batch: `run_many` loops through here, and a caller
-        # that assembled the reference itself never passed `canonical_reference`
-        # at all. The service takes a model instance as an argument, so this
-        # is the only place that can refuse one.
+        # than once per batch: `run_many` loops through here, a reference can
+        # stop being canonical part-way through a batch, and a caller that
+        # assembled the reference itself never passed `canonical_reference` at
+        # all. The service takes two model instances as arguments, so this is
+        # the only place that can refuse the pair.
+        #
+        # OWNERSHIP FIRST. `canonical_reference(question)` reads the related
+        # manager and therefore cannot return a foreign row, but this method is
+        # public API and does not require that caller. Executing question A's
+        # wrapper around question B's approved reference produces a perfectly
+        # well-formed answer — which is worse than a crash, not better: it is
+        # the confidently-wrong answer key this whole milestone exists to
+        # prevent, and nothing about it looks broken.
+        if reference.question_id != question.pk:
+            raise OracleUnapproved(
+                f"reference {reference.pk} belongs to question "
+                f"{reference.question_id}, not question {question.pk}; a "
+                f"reference may only define the answers of its own problem"
+            )
+
         if not reference.is_canonical:
             raise OracleUnapproved(
                 f"reference {reference.pk} for question {question.pk} is not a "

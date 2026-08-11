@@ -86,8 +86,13 @@ def compute_routing_telemetry(user, window: int = 20):
     from groups.models import CodeSubmission
     from learning.router import outcome_stats
 
+    # adaptive_eligible only (M2 P2.7c): routing telemetry IS the learner
+    # model's view of recent performance, and a verdict from a question whose
+    # answer key no oracle has checked may be our defect rather than the
+    # learner's. Frozen at submission time, so verifying a question later does
+    # not retroactively rewrite this window.
     statuses = list(
-        CodeSubmission.objects.filter(user=user)
+        CodeSubmission.objects.filter(user=user, adaptive_eligible=True)
         .order_by('-submitted_at')
         .values_list('status', flat=True)[:window]
     )

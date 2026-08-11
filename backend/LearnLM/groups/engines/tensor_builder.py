@@ -26,8 +26,11 @@ class TensorBuilder:
             recency_norm = 0.0  # Cold start
 
         # 2. Fetch Recent Submissions for Time/Space averages
+        # adaptive_eligible only (M2 P2.7c): this feeds the ML tensor, so an
+        # unverified verdict must not become a feature.
         recent_subs = CodeSubmission.objects.filter(
             user=user, 
+            adaptive_eligible=True,
             status='accepted' # Only average successful runs
         ).order_by('-submitted_at')[:5]
 

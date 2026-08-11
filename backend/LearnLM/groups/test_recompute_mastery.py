@@ -20,7 +20,10 @@ def drifted_setup(db):
     # Ground truth: 4 submissions, 1 accepted -> real accuracy 0.25, reviews 4.
     for status in ["wrong_answer", "wrong_answer", "wrong_answer", "accepted"]:
         CodeSubmission.objects.create(
-            user=user, question=question, language="python", code="x", status=status
+            user=user, question=question, language="python", code="x", status=status,
+            # The rebuild reads only adaptive-eligible rows (M2 P2.7c): an
+            # unverified verdict must not be reconstructed into mastery.
+            adaptive_eligible=True,
         )
     # Drifted stored state, as if an earlier bug/session corrupted it.
     mastery = UserTopicMastery.objects.create(

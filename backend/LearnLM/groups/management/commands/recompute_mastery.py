@@ -37,7 +37,8 @@ class Command(BaseCommand):
         username = options["username"]
 
         truth = (
-            CodeSubmission.objects.filter(question__isnull=False)
+            # adaptive_eligible only (M2 P2.7c): mastery is learner-model state.
+            CodeSubmission.objects.filter(question__isnull=False, adaptive_eligible=True)
             .values("user_id", "question__topic_id")
             .annotate(
                 total=Count("id"),

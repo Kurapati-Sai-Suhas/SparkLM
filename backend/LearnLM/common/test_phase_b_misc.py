@@ -90,6 +90,7 @@ class TestRebuildCounters:
 
     def _drifted_profile(self, user, question):
         CodeSubmission.objects.create(
+            adaptive_eligible=True,
             user=user, question=question, language="python",
             code="x", status="accepted",
         )
@@ -118,6 +119,7 @@ class TestRebuildCounters:
 
     def test_reports_nothing_when_counters_agree(self, user, question):
         CodeSubmission.objects.create(
+            adaptive_eligible=True,
             user=user, question=question, language="python",
             code="x", status="wrong_answer",
         )

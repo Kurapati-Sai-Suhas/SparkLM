@@ -68,6 +68,12 @@ def question(db):
         base_difficulty=1200.0,
         hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
         hidden_wrapper_code={},
+        # Adaptive-eligible EXPLICITLY (M2 P2.7c). These tests exercise the
+        # learner-model path — Elo, mastery, the farming guard — and under the
+        # trust boundary that path only runs for a PUBLISHED + ORACLE_VERIFIED
+        # question. The default is DRAFT + UNVERIFIED, which is the point.
+        status=Question.STATUS_PUBLISHED,
+        trust_state=Question.TRUST_ORACLE_VERIFIED,
     )
 
 

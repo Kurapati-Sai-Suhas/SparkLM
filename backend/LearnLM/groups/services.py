@@ -488,6 +488,12 @@ class ProgressionService:
                 user=user, question=question, status='accepted'
             ).exists()
 
+            # Decided HERE, from the question's trust state, and frozen onto
+            # the row (M2 P2.7c). Enforced in the service rather than the view
+            # so any future caller inherits it — the views are a second layer,
+            # not the only one.
+            adaptive_eligible = question.is_adaptive_eligible
+
             submission = CodeSubmission.objects.create(
                 user=user,
                 question=question,
@@ -496,23 +502,42 @@ class ProgressionService:
                 status=grade.final_status,
                 execution_time_ms=exec_time,
                 memory_used_kb=mem_used,
+                adaptive_eligible=adaptive_eligible,
             )
 
-            # Close the data-flywheel loop for the routing classifier.
-            recent_log = RecommendationLog.objects.filter(
-                user=user,
-                problem_id=str(question.id),
-                actual_result_correct__isnull=True
-            ).order_by('-created_at').first()
-            if recent_log:
-                recent_log.actual_result_correct = all_passed
-                recent_log.save()
+            # The data-flywheel loop for the routing classifier is TRAINING
+            # DATA, so an unverified verdict must not close it (M2 P2.7c).
+            if adaptive_eligible:
+                recent_log = RecommendationLog.objects.filter(
+                    user=user,
+                    problem_id=str(question.id),
+                    actual_result_correct__isnull=True
+                ).order_by('-created_at').first()
+                if recent_log:
+                    recent_log.actual_result_correct = all_passed
+                    recent_log.save()
 
             profile.total_submissions += 1
             if all_passed:
                 profile.successful_submissions += 1
 
-            if all_passed and already_solved:
+            if not adaptive_eligible:
+                # The core P2.7c invariant. The verdict is still computed,
+                # returned and stored — the learner practises and sees a
+                # result — but this question's answer key has never been
+                # checked by an oracle, so a Wrong Answer here may be OUR
+                # defect rather than the learner's mistake. Letting it move
+                # the rating would teach the model that a correct solver is
+                # weak. Rating is reported unchanged rather than hidden, so
+                # the response shape the frontend reads is preserved.
+                elo_result = {
+                    "old_rating": round(profile.elo_rating, 2),
+                    "new_rating": round(profile.elo_rating, 2),
+                    "rating_change": 0.0,
+                    "insight": "Practice mode: this problem's answers are not "
+                               "yet verified, so it doesn't change your rating.",
+                }
+            elif all_passed and already_solved:
                 # Re-solving an already-accepted problem is legitimate
                 # spaced repetition (mastery/HLR still update below), but
                 # it must not farm rating points.
@@ -549,14 +574,19 @@ class ProgressionService:
                     )
                 )
 
-            ProgressionService._apply_sm2_update(
-                user, question, grade, submission, masteries[question.topic.pk]
-            )
+            # Mastery, SM-2 half-life and GDCP decay are all learner-model
+            # writes and are skipped for an ineligible submission (M2 P2.7c).
+            # The mastery rows are still locked above so the lock order in
+            # §2.2 is unchanged whether or not the update runs.
+            if adaptive_eligible:
+                ProgressionService._apply_sm2_update(
+                    user, question, grade, submission, masteries[question.topic.pk]
+                )
 
             # GDCP application is best-effort enrichment, as it was before
             # the single-transaction change: a failure rolls back only this
             # savepoint, never the submission itself.
-            if gdcp_penalties:
+            if adaptive_eligible and gdcp_penalties:
                 try:
                     with transaction.atomic():
                         for desc_topic, penalty in gdcp_penalties:
@@ -665,10 +695,24 @@ class ProgressionService:
                                 user=user, question=question, status='accepted'
                             ).exists()
                             if not already_accepted:
+                                # adaptive_eligible=False, unconditionally
+                                # (M2 P2.7c). These rows are SELF-REPORTED
+                                # ("I already know this topic"), not measured:
+                                # no code ran and no verdict was earned. They
+                                # exist so the recommenders skip the topic,
+                                # which is a deduplication job, and dedup
+                                # reads the row regardless of eligibility.
+                                #
+                                # This also closes a pre-existing hole: these
+                                # rows carry status='accepted', so routing
+                                # telemetry was counting a learner's own claim
+                                # as evidence of accuracy — independent of any
+                                # question's trust state.
                                 CodeSubmission.objects.create(
                                     user=user,
                                     question=question,
                                     language='python',
+                                    adaptive_eligible=False,
                                     code='# Skipped via Onboarding',
                                     status='accepted',
                                     execution_time_ms=10,

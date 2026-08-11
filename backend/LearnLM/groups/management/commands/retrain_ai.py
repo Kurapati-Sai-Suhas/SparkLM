@@ -52,8 +52,11 @@ def build_outcome_dataset(logs):
             continue
 
         statuses = list(
+            # adaptive_eligible only (M2 P2.7c): this is classifier TRAINING
+            # DATA. An unverified label teaches the router a falsehood.
             CodeSubmission.objects.filter(
-                user=log.user, submitted_at__lt=log.created_at
+                user=log.user, submitted_at__lt=log.created_at,
+                adaptive_eligible=True,
             ).order_by('-submitted_at').values_list('status', flat=True)[:OUTCOME_WINDOW]
         )
         if statuses:

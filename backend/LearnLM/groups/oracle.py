@@ -27,6 +27,7 @@ commands. Nothing here is imported by a view, and
 and builds an HTTP response.
 """
 
+from groups.models import ReferenceSolution
 from groups.services import GradingService
 from groups.utils import normalize_output
 
@@ -61,6 +62,20 @@ class OracleNondeterministic(OracleError):
     """
 
 
+class OracleUnapproved(OracleError):
+    """
+    The reference offered is not a canonical, human-approved implementation
+    (M2 P2.7d).
+
+    Raised BEFORE any execution. A reference that nobody has read cannot
+    define the right answer, however cleanly it runs — a plausible wrong
+    implementation executes perfectly and produces a confidently wrong answer
+    key. `OracleFailed` catches references that break; this catches references
+    that were never authorised, which is the more dangerous case precisely
+    because nothing looks broken.
+    """
+
+
 class OracleService:
     """
     Executes a question's canonical reference solution.
@@ -81,6 +96,29 @@ class OracleService:
         endings only. Deliberately not extended here: a comparator that is
         looser during generation than during grading would mint expected
         outputs that the grader then rejects.
+
+        ── verify_determinism, and the P2.7d/P2.7g boundary ─────────────────
+
+        The default is True and P2.7d does not change that. `False` is
+        legitimate for bulk regeneration, where a caller re-runs a reference
+        it has already verified and is paying one Judge0 call per input rather
+        than two.
+
+        It is NOT legitimate on a trust-promotion path, because a single run
+        is not evidence that the output is a function of the input alone.
+        Nothing here can enforce that today: no trust-promotion path exists to
+        constrain — `trust_state` has no writer, by P2.7c's design. Making
+        this method carry a "was determinism verified?" flag in its return
+        value would change its signature and break `reconcile_hidden_tests`,
+        for a caller that does not yet exist.
+
+        So the enforcement is deferred, deliberately, and stated here as the
+        contract P2.7g inherits: THE ORACLE_VERIFIED TRANSITION MUST NOT BE
+        REACHABLE FROM A CALL THAT PASSED verify_determinism=False. P2.7d
+        pins the default (see test_reference_lifecycle) so that a future
+        caller which simply omits the argument is correct by default; a
+        caller that passes False explicitly is making a claim P2.7g must
+        refuse.
         """
         first = self._execute(question, reference, stdin)
         if not verify_determinism:
@@ -110,6 +148,20 @@ class OracleService:
     # ── internals ────────────────────────────────────────────
 
     def _execute(self, question, reference, stdin):
+        # The lifecycle gate (M2 P2.7d), checked on every execution rather
+        # than once per batch: `run_many` loops through here, and a caller
+        # that assembled the reference itself never passed `canonical_reference`
+        # at all. The service takes a model instance as an argument, so this
+        # is the only place that can refuse one.
+        if not reference.is_canonical:
+            raise OracleUnapproved(
+                f"reference {reference.pk} for question {question.pk} is not a "
+                f"canonical approved implementation "
+                f"(review_state={reference.review_state!r}, "
+                f"is_active={reference.is_active}, "
+                f"provenance_intact={reference.has_valid_approval_provenance})"
+            )
+
         executable, _stored = GradingService._build_executable(
             question, reference.language, reference.source_code
         )
@@ -134,31 +186,78 @@ class OracleService:
         return normalize_output(verdict.get("stdout") or "")
 
 
+def _canonical_candidates(question):
+    """
+    Rows that are active AND approved AND unmodified since approval
+    (M2 P2.7d).
+
+    Selecting on `is_active` alone would be sufficient given the
+    `reference_active_requires_approval` database constraint — but the oracle
+    must not depend on a constraint declared in another module for a
+    correctness property this severe, and the constraint cannot see an
+    in-memory instance whose `source_code` was reassigned after loading.
+    Checking here costs nothing and removes both assumptions.
+    """
+    return [s for s in question.reference_solutions.all() if s.is_canonical]
+
+
 def canonical_reference(question):
     """
-    The one active reference solution for a question, or None.
+    The one canonical reference solution for a question, or None.
 
-    The schema permits one active row per language; the CURRENT product
-    contract is exactly one canonical oracle per problem. More than one active
-    row is therefore a configuration error the caller must surface rather than
-    resolve by picking — which oracle was chosen would silently determine
+    Canonical means approved by a human, currently selected, and byte-identical
+    to what was approved. The schema permits one active row per language; the
+    CURRENT product contract is exactly one canonical oracle per problem. More
+    than one is therefore a configuration error the caller must surface rather
+    than resolve by picking — which oracle was chosen would silently determine
     every expected output the problem ever gets.
     """
-    active = [s for s in question.reference_solutions.all() if s.is_active]
-    if len(active) == 1:
-        return active[0]
+    candidates = _canonical_candidates(question)
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 
 def canonical_reference_problem(question):
     """Why `canonical_reference` returned None, for reporting. None if fine."""
-    active = [s for s in question.reference_solutions.all() if s.is_active]
-    if not active:
-        return "no active reference solution"
-    if len(active) > 1:
-        langs = ", ".join(sorted(s.language for s in active))
+    candidates = _canonical_candidates(question)
+    if len(candidates) > 1:
+        langs = ", ".join(sorted(s.language for s in candidates))
         return (
-            f"{len(active)} active reference solutions ({langs}); the current "
+            f"{len(candidates)} active reference solutions ({langs}); the current "
             f"contract allows exactly one canonical oracle per problem"
         )
+    if not candidates:
+        # Distinguish "none exists" from "one exists but is not usable as
+        # grading truth" — they need completely different operator responses,
+        # and reporting both as "no active reference solution" is how a
+        # pending review looks identical to missing work.
+        unusable = [
+            s for s in question.reference_solutions.all()
+            if s.is_active and not s.has_valid_approval_provenance
+        ]
+        if unusable:
+            return (
+                f"{len(unusable)} active reference solution(s) are not usable "
+                f"as grading truth: "
+                + "; ".join(
+                    f"{s.language} is {s.review_state}" if
+                    s.review_state != ReferenceSolution.REVIEW_APPROVED
+                    else f"{s.language} was modified after approval"
+                    for s in unusable
+                )
+            )
+        pending = [
+            s for s in question.reference_solutions.all()
+            if not s.is_active
+            and s.review_state != ReferenceSolution.REVIEW_REJECTED
+        ]
+        if pending:
+            return (
+                f"no ACTIVE reference solution; {len(pending)} exist(s) but "
+                f"none is activated ("
+                + ", ".join(f"{s.language}={s.review_state}" for s in pending)
+                + ")"
+            )
+        return "no active reference solution"
     return None

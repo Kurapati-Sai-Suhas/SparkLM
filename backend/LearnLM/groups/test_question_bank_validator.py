@@ -19,6 +19,7 @@ import json
 import pytest
 from django.core.management import call_command
 
+from groups.conftest import approved_reference
 from groups.models import CodingPortal, Question, ReferenceSolution, Topic
 
 
@@ -37,9 +38,7 @@ def make(topic, title, cases, oracle=True, language="python"):
         hidden_test_cases=cases, hidden_wrapper_code={},
     )
     if oracle:
-        ReferenceSolution.objects.create(
-            question=question, language=language, source_code="print(input())"
-        )
+        approved_reference(question, language=language)
     return question
 
 
@@ -116,9 +115,7 @@ def test_a_problem_with_no_active_oracle_fails(topic, capsys):
 
 def test_a_deactivated_oracle_does_not_count(topic, capsys):
     question = make(topic, "Superseded only", good_cases(16), oracle=False)
-    ReferenceSolution.objects.create(
-        question=question, language="python", source_code="x", is_active=False
-    )
+    approved_reference(question, language="python", source_code="x", active=False)
 
     _, data = report(capsys)
 
@@ -330,10 +327,8 @@ def test_the_report_never_contains_a_reference_solution_body(topic, capsys):
     truth to end up.
     """
     question = make(topic, "Oracle body", good_cases(12), oracle=False)
-    ReferenceSolution.objects.create(
-        question=question, language="python",
-        source_code="SECRET_ORACLE_BODY_5521",
-    )
+    approved_reference(question, language="python",
+                       source_code="SECRET_ORACLE_BODY_5521")
 
     _, out = run(capsys)
     _, json_out = run(capsys, "--json")

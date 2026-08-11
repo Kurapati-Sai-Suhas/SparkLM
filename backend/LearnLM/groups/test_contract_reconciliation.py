@@ -26,6 +26,7 @@ import pytest
 from django.core.management import call_command
 
 from groups import contract_reconciliation as tier_a
+from groups.conftest import approved_reference
 from groups.models import CodingPortal, Question, ReferenceSolution, Topic
 
 # The exact formats found in the repository, so these tests fail if the real
@@ -56,9 +57,7 @@ def make(topic, title="Q", cases=None, version="v1", boilerplate=None,
         execution_contract_version=version,
     )
     if reference:
-        ReferenceSolution.objects.create(
-            question=question, language="python", source_code="print(1)"
-        )
+        approved_reference(question, language="python", source_code="print(1)")
     return question
 
 
@@ -415,9 +414,8 @@ def test_the_report_never_contains_hidden_inputs_or_expected_outputs(topic, caps
 
 def test_the_report_never_contains_reference_source(topic, capsys):
     question = make(topic, cases=cases_of(RESEED_STDIN, RESEED_OUT))
-    ReferenceSolution.objects.create(
-        question=question, language="python", source_code="SECRET_ORACLE_3391"
-    )
+    approved_reference(question, language="python",
+                       source_code="SECRET_ORACLE_3391")
 
     _, table = run(capsys)
     _, json_out = run(capsys, "--json")

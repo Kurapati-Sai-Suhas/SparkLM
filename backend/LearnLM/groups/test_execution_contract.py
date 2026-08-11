@@ -329,6 +329,104 @@ def test_javascript_runtime_errors_exit_non_zero():
 
 
 # ─────────────────────────────────────────────────────────────
+# Cross-language agreement on ambiguity
+# ─────────────────────────────────────────────────────────────
+
+AMBIGUITY_CASES = {
+    "two public methods": (
+        "class Solution:\n    def a(self, n): return 1\n    def b(self, n): return 2",
+        "class Solution { a(n){return 1;} b(n){return 2;} }",
+    ),
+    "inherited public method": (
+        "class Base:\n    def inherited(self): return 1\n"
+        "class Solution(Base):\n    def solve(self, n): return n",
+        "class Base { inherited(){return 1;} }\n"
+        "class Solution extends Base { solve(n){return n;} }",
+    ),
+    "no public method": (
+        "class Solution:\n    def _only(self, n): return n",
+        "class Solution { _only(n){return n;} }",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(AMBIGUITY_CASES))
+def test_python_and_javascript_agree_on_what_is_ambiguous(case):
+    """
+    A shared contract that two languages interpret differently is not a
+    contract. Found in P2.6's own adversarial review: Python's `dir()` sees
+    inherited methods and blocked, while JavaScript inspected only the own
+    prototype and silently picked — the same submission accepted in one
+    language and refused in the other.
+    """
+    python_code, js_code = AMBIGUITY_CASES[case]
+
+    _, _, py_rc = run_python(python_code, "5")
+    _, _, js_rc = run_js(js_code, "5")
+
+    assert py_rc == 2, f"python accepted the ambiguous case {case!r}"
+    assert js_rc == 2, f"javascript accepted the ambiguous case {case!r}"
+
+
+def test_discovery_does_not_execute_learner_property_getters():
+    """
+    Reading a descriptor rather than the value: touching a getter during
+    method discovery runs learner code before grading has begun, and a getter
+    that raised would break discovery rather than the solution.
+    """
+    js_code = (
+        "class Solution { get boom(){ throw new Error('executed'); } "
+        "solve(n){ return n; } }"
+    )
+
+    out, err, rc = run_js(js_code, "7")
+
+    assert rc == 0, err
+    assert out == "7"
+    assert "executed" not in err
+
+
+# ─────────────────────────────────────────────────────────────
+# The output contract — deliberately strict
+# ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("expected,actual,should_match", [
+    ("0 1", "0 1",       True),   # exact
+    ("0 1", "0 1\n",     True),   # Judge0 always appends a newline
+    ("0 1", "0 1   ",    True),   # trailing whitespace per line
+    ("0 1", "   0 1",    True),   # leading whitespace
+    ("0 1", "0 1\r\n",   True),   # CRLF
+    ("",    "",          True),   # empty
+    ("0 1", "0  1",      False),  # internal doubled space
+    ("0 1", "0\n1",      False),  # newline is NOT a token separator
+    ("0 1", "0\t1",      False),  # tab is NOT a token separator
+    # Multi-line: the per-line rstrip is what handles trailing whitespace on
+    # an INNER line. A whole-string strip() cannot reach it, so without these
+    # rows removing the rstrip goes undetected — mutation testing found
+    # exactly that.
+    ("0 1\n2 3", "0 1   \n2 3",   True),
+    ("0 1\n2 3", "0 1\n2 3   ",   True),
+    ("0 1\n2 3", "0 1\r\n2 3",    True),
+    ("0 1\n2 3", "0 1\n  2 3",    False),  # leading space on an inner line
+])
+def test_the_normalization_contract_is_exactly_this_and_no_broader(
+    expected, actual, should_match
+):
+    """
+    Pins what `normalize_output` accepts, because P2.6 must not silently
+    broaden it. It trims each line and normalises line endings — nothing more.
+
+    The three non-matching rows are the important ones: a solution printing
+    `0\\n1` is NOT accepted for an expected `0 1`. The canonical contract is
+    space-separated tokens ON ONE LINE, and loosening this later would let
+    incorrect output pass, which is the failure direction that matters.
+    """
+    from groups.utils import normalize_output
+
+    assert (normalize_output(expected) == normalize_output(actual)) is should_match
+
+
+# ─────────────────────────────────────────────────────────────
 # v1 — the UNIVERSAL fixes, which apply to existing questions
 # ─────────────────────────────────────────────────────────────
 
@@ -482,11 +580,7 @@ def test_java_v2_renders_space_separated():
 # Judge0 resource policy
 # ─────────────────────────────────────────────────────────────
 
-def test_judge0_requests_carry_explicit_limits(monkeypatch):
-    """
-    Unset limits made a TLE verdict a property of whichever Judge0 answered,
-    and unreproducible. Captured from the real payload rather than the source.
-    """
+def _capture_judge0_payload(monkeypatch):
     from groups import coding_views
 
     captured = {}
@@ -505,9 +599,40 @@ def test_judge0_requests_carry_explicit_limits(monkeypatch):
 
     monkeypatch.setattr(coding_views.requests, "post", fake_post)
     coding_views._run_on_judge0("print(1)", "python", "1")
+    return captured
 
-    assert captured["cpu_time_limit"] == execution_contract.DEFAULT_CPU_TIME_LIMIT
-    assert captured["memory_limit"] == execution_contract.DEFAULT_MEMORY_LIMIT
+
+def test_judge0_limits_are_omitted_unless_configured(monkeypatch):
+    """
+    The correction from P2.6's own adversarial review.
+
+    Sending limits unconditionally looked free — they were "Judge0 CE's
+    documented defaults" — but Judge0 enforces max_cpu_time_limit server-side
+    and REJECTS anything above it, and our deployment's value is UNKNOWN from
+    this repository (JUDGE0_API_HOST is `sync: false`). A rejected submission
+    becomes GradingUnavailable, so the failure mode is a 503 on EVERY
+    submission. Omitting the fields is exactly what production has always
+    done.
+    """
+    monkeypatch.delenv("JUDGE0_CPU_TIME_LIMIT", raising=False)
+    monkeypatch.delenv("JUDGE0_MEMORY_LIMIT", raising=False)
+
+    captured = _capture_judge0_payload(monkeypatch)
+
+    assert "cpu_time_limit" not in captured
+    assert "memory_limit" not in captured
+
+
+def test_judge0_limits_are_sent_when_an_operator_configures_them(monkeypatch):
+    """The other half: opt-in must actually work once someone can verify the
+    deployment's ceiling."""
+    monkeypatch.setenv("JUDGE0_CPU_TIME_LIMIT", "2.5")
+    monkeypatch.setenv("JUDGE0_MEMORY_LIMIT", "64000")
+
+    captured = _capture_judge0_payload(monkeypatch)
+
+    assert captured["cpu_time_limit"] == 2.5
+    assert captured["memory_limit"] == 64000
 
 
 def test_judge0_language_ids_come_from_the_one_registry():

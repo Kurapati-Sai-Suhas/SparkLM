@@ -90,15 +90,13 @@ def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
         "stdin":          base64.b64encode(stdin.encode()).decode() if stdin else "",
         "base64_encoded": True,
         "wait":           True,
-        # Stated explicitly rather than inherited (M2 P2.6). These were unset,
-        # so the effective limit was a property of whichever Judge0 deployment
-        # answered and nothing in this repository recorded what it was — which
-        # makes a TLE verdict unreproducible. The values are Judge0 CE's
-        # documented defaults, so making them explicit changes no outcome; it
-        # makes the limit reviewable and changeable in one place.
-        "cpu_time_limit": execution_contract.DEFAULT_CPU_TIME_LIMIT,
-        "memory_limit":   execution_contract.DEFAULT_MEMORY_LIMIT,
     }
+    # Opt-in only, empty unless an operator configures it (M2 P2.6). Judge0
+    # rejects submissions exceeding its server-side max_cpu_time_limit, and
+    # ours is UNKNOWN from this repository — JUDGE0_API_HOST is `sync: false`.
+    # A rejected submission becomes GradingUnavailable, so guessing here risks
+    # a 503 on every submission.
+    payload.update(execution_contract.judge0_resource_limits())
     
     headers = {
         "Content-Type":    "application/json",

@@ -64,6 +64,8 @@ ERRORS  Propagate. The process exits non-zero so Judge0 classifies the run and
         `GradingService` can distinguish runtime_error from wrong_answer.
 """
 
+import os
+
 CONTRACT_V1 = "v1"
 CONTRACT_V2 = "v2"
 
@@ -81,13 +83,38 @@ class UnknownExecutionContract(Exception):
 
 # ── Judge0 resource policy ───────────────────────────────────────────────────
 #
-# Previously unset, so whatever the Judge0 instance defaulted to applied and
-# nothing in this repository recorded what that was. These are Judge0 CE's
-# documented defaults, stated explicitly so the limit is visible, reviewable
-# and changeable in one place rather than being a property of someone else's
-# deployment.
-DEFAULT_CPU_TIME_LIMIT = 5.0      # seconds
-DEFAULT_MEMORY_LIMIT = 128000     # KB
+# OPT-IN, and unset by default. This is a correction made during P2.6's own
+# adversarial review, and the reasoning matters more than the values.
+#
+# The first version of this phase sent cpu_time_limit=5.0 and
+# memory_limit=128000 on every request, on the argument that they were Judge0
+# CE's documented defaults and therefore changed nothing. That argument is
+# wrong. Judge0 enforces `max_cpu_time_limit` server-side and REJECTS any
+# submission asking for more, and the limit belongs to whichever deployment
+# answers — ours is configured through JUDGE0_API_HOST, which render.yaml marks
+# `sync: false`, so its value is UNKNOWN from this repository.
+#
+# The failure mode is total: a rejected submission raises for status, becomes
+# GradingUnavailable, and every learner gets a 503. Trading a certain outage
+# risk for reproducibility we cannot verify is a bad trade, so the fields are
+# omitted entirely unless an operator sets them — which restores exactly the
+# behaviour that shipped, while still allowing the limits to be pinned once
+# someone can confirm what the deployment accepts.
+def judge0_resource_limits():
+    """
+    The limit fields to merge into a Judge0 submission, or {} when unset.
+
+    Empty is the default and means "whatever the instance is configured for",
+    which is what production has always done.
+    """
+    limits = {}
+    cpu = os.getenv("JUDGE0_CPU_TIME_LIMIT", "").strip()
+    memory = os.getenv("JUDGE0_MEMORY_LIMIT", "").strip()
+    if cpu:
+        limits["cpu_time_limit"] = float(cpu)
+    if memory:
+        limits["memory_limit"] = int(memory)
+    return limits
 
 
 # ─────────────────────────────────────────────────────────────
@@ -182,10 +209,27 @@ _sparklm_main()
 V2_JS_WRAPPER = '''{user_code}
 
 function __sparklmPublicMethods(instance) {
-    return Object.getOwnPropertyNames(Object.getPrototypeOf(instance))
-        .filter((name) => name !== 'constructor' && !name.startsWith('_')
-                && typeof instance[name] === 'function')
-        .sort();
+    // Walks the prototype CHAIN, stopping before Object.prototype. Own-
+    // prototype-only made JavaScript disagree with Python on inherited
+    // methods: Python's dir() sees them and blocks the ambiguity, while this
+    // did not see them and silently picked. Found in P2.6's own adversarial
+    // review — the same learner code must not be treated differently by
+    // language, which is the whole point of a shared contract.
+    const names = new Set();
+    let proto = Object.getPrototypeOf(instance);
+    while (proto && proto !== Object.prototype) {
+        for (const name of Object.getOwnPropertyNames(proto)) {
+            if (name === 'constructor' || name.startsWith('_')) continue;
+            // Read the descriptor rather than the value: touching a getter
+            // would execute learner code during discovery.
+            const descriptor = Object.getOwnPropertyDescriptor(proto, name);
+            if (descriptor && typeof descriptor.value === 'function') {
+                names.add(name);
+            }
+        }
+        proto = Object.getPrototypeOf(proto);
+    }
+    return [...names].sort();
 }
 
 function __sparklmToken(text) {

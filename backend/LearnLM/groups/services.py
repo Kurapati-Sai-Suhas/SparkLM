@@ -616,6 +616,24 @@ class ProgressionService:
                     user, question, grade, submission, mastery
                 )
 
+        # ── Shadow adaptive model (M2 P2.9a) ──────────────────────────────
+        #
+        # UNARMED. Writes only to LearnerTopicSkill / QuestionSkill, reads
+        # nothing production depends on, and returns nothing to the caller —
+        # the response above is already built. Production Elo, mastery and
+        # routing are unchanged whether this runs, fails, or is deleted.
+        #
+        # AFTER the transaction commits, deliberately. Inside it, a shadow
+        # failure that escaped its savepoint could abort a real submission,
+        # and the shadow model is not worth that risk. `record_submission_safely`
+        # additionally swallows and logs everything.
+        #
+        # Imported here rather than at module scope: groups.shadow imports
+        # LEARNER_EVIDENCE_STATUSES from this module, and a top-level import
+        # would be circular.
+        from groups import shadow
+        shadow.record_submission_safely(submission)
+
         return submission, elo_result, profile
 
     @staticmethod

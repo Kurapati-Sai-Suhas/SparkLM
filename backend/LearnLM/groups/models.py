@@ -1038,3 +1038,98 @@ class UserBadge(models.Model):
 
     def __str__(self):
         return f"{self.user.username} earned {self.badge.name}"
+
+# ── Shadow adaptive model (M2 P2.9a) ─────────────────────────────────────
+#
+# UNARMED. Nothing in these two tables reaches a learner. Production routing,
+# Elo and mastery are untouched and remain the live system; this runs beside
+# them so the two can be compared on the same evidence before anything is
+# promoted.
+#
+# Deliberately NEW TABLES rather than new columns on UserCodingProfile /
+# UserTopicMastery / Question. Those columns have live semantics that other
+# code depends on — `elo_rating` IS the routing engine's ability estimate,
+# `base_difficulty` IS the ordering key — and repurposing any of them would
+# make "shadow" a lie the first time something read a changed value.
+
+
+class LearnerTopicSkill(models.Model):
+    """
+    Shadow Glicko-2 state for one (learner, topic).
+
+    PER TOPIC on purpose. The production system has exactly one global ability
+    number, so a learner strong in Arrays and weak in Dynamic Programming is
+    represented by a single scalar that is wrong for both. `UserTopicMastery`
+    already has an `elo_rating` column that looks like per-topic ability — it
+    is never incremented by anything, only decremented by `calculate_decay`,
+    and no router reads it, so it is not reused here.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="shadow_skills")
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE,
+                              related_name="shadow_skills")
+
+    rating = models.FloatField(default=1200.0)
+    #: Rating deviation. High means "we do not know yet" — which is the honest
+    #: state for a new learner and the reason exploration is possible at all.
+    rating_deviation = models.FloatField(default=350.0)
+    volatility = models.FloatField(default=0.06)
+
+    #: Counts only adaptive_eligible, conceptually-evaluable submissions.
+    evidence_count = models.PositiveIntegerField(default=0)
+    #: Drives RD inflation. Distinct from UserTopicMastery.last_practiced,
+    #: which counts any activity; this counts only evidence.
+    last_evidence_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "topic")
+        indexes = [
+            models.Index(fields=["user", "topic"], name="shadow_skill_user_topic_idx"),
+        ]
+
+    def __str__(self):
+        return (f"{self.user_id}/{self.topic_id}: "
+                f"{self.rating:.0f}±{self.rating_deviation:.0f}")
+
+
+class QuestionSkill(models.Model):
+    """
+    Shadow Glicko-2 state for one question — the other side of the two-sided
+    rating.
+
+    `Question.base_difficulty` is NOT overwritten and NOT treated as
+    calibrated. It seeds `rating` as a PRIOR and nothing more: it came from a
+    three-valued CSV label (`Easy/Medium/Hard` -> 1000/1300/1600) that no code
+    has ever updated from an outcome. A fresh row therefore carries the prior
+    with MAXIMUM uncertainty, which is the honest encoding of "somebody typed
+    this once".
+    """
+
+    question = models.OneToOneField(Question, on_delete=models.CASCADE,
+                                    related_name="shadow_skill")
+
+    rating = models.FloatField(default=1200.0)
+    rating_deviation = models.FloatField(default=350.0)
+    volatility = models.FloatField(default=0.06)
+
+    evidence_count = models.PositiveIntegerField(default=0)
+    last_evidence_at = models.DateTimeField(null=True, blank=True)
+
+    #: The prior this row started from, kept so a later audit can tell a
+    #: learned rating apart from an untouched seed.
+    prior_rating = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["rating"], name="shadow_qskill_rating_idx"),
+        ]
+
+    def __str__(self):
+        return (f"Q{self.question_id}: {self.rating:.0f}"
+                f"±{self.rating_deviation:.0f} (prior {self.prior_rating:.0f})")

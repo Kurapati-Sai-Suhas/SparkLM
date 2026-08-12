@@ -2,8 +2,14 @@ import os
 import base64
 import requests
 import logging
+from datetime import timedelta
+
 from django.core.cache import cache
-from django.db.models import F, Func
+from django.db.models import (
+    Case, Count, Exists, F, Func, IntegerField, Max, OuterRef, Subquery, Value,
+    When,
+)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from rest_framework.views import APIView
@@ -78,6 +84,147 @@ def _servable_questions():
     return Question.objects.exclude(
         content__icontains=Question.PLACEHOLDER_MARKER
     ).exclude(hidden_test_cases=[]).exclude(hidden_test_cases__isnull=True)
+
+
+#: How long a failed question stays demoted (M2 P2.8a).
+#:
+#: PROVISIONAL AND NOT DERIVED FROM DATA. There is no telemetry on session
+#: length, attempts per problem, or how often a learner returns, so 24 hours is
+#: a judgement call, not a measurement. It is a module constant rather than a
+#: setting on purpose: a knob invites tuning by feel, and nobody currently has
+#: the evidence to tune it. Revisit when P2.7e and real usage telemetry exist.
+FAILED_QUESTION_COOLDOWN = timedelta(hours=24)
+
+
+def _candidate_questions(user, topic_name=None, now=None):
+    """
+    Servable questions for `user`, ordered by the P2.8a policy (M2 P2.8a).
+
+    ONE set-based query. The previous implementation pulled every accepted
+    `question_id` into Python and passed it back as `NOT IN (...)`, an IN-list
+    that grew without bound for the learner it was meant to serve, and then
+    ordered by `ABS(base_difficulty - elo)` alone — with `base_difficulty`
+    taking one of three values across the whole bank, that left ties hundreds
+    of rows deep, resolved by whatever order PostgreSQL happened to return.
+    Same learner, same state, arbitrary and irreproducible answer.
+
+    The exposure terms come from `CodeSubmission` only, served by the existing
+    `subm_user_q_ts_idx (user, question, -submitted_at)`. `RecommendationLog`
+    is deliberately not consulted: an impression is not an interaction, and a
+    learner who was shown a problem and navigated away must still be able to
+    receive it.
+
+    ── Ordering ────────────────────────────────────────────────────────────
+
+        1. |base_difficulty - target_elo|   existing intent, preserved
+        2. failed within the cooldown       not-in-cooldown first
+        3. attempt count                    least-seen first
+        4. last attempt                     ascending, NULLs (never tried) first
+        5. question id                      terminal, makes the order TOTAL
+
+    Key 5 is not cosmetic. Without a unique final key the ordering is only
+    partial, and every guarantee above it is void.
+
+    ── Demote, never exclude ───────────────────────────────────────────────
+
+    Cooldown is an ORDERING TERM. A filter could empty the candidate set and
+    force the fallback — the very path that used to cross topics silently — so
+    the invariant "cooldown never empties the set" is satisfied structurally
+    rather than by a guard somebody has to remember. In the worst case every
+    candidate is cooling down and the least-recently-failed one is returned,
+    which is the right answer.
+
+    ── Trust boundary ──────────────────────────────────────────────────────
+
+    This reads `status` from submissions that may be UNVERIFIED. That is
+    permitted and safe: it decides WHAT WE SHOW, never WHAT WE BELIEVE (P2.7c).
+    No rating, mastery, telemetry or tensor value is touched here. And the
+    direction is right — if a question's answer key is wrong the learner fails
+    it, and moving them off it is exactly the correct response.
+    """
+    now = now or timezone.now()
+    attempts = CodeSubmission.objects.filter(user=user, question=OuterRef("pk"))
+
+    queryset = _servable_questions()
+    if topic_name is not None:
+        queryset = queryset.filter(topic__name=topic_name)
+
+    return (
+        queryset
+        .annotate(
+            solved=Exists(attempts.filter(status="accepted")),
+            attempt_count=Coalesce(
+                Subquery(
+                    attempts.values("question")
+                    .annotate(n=Count("pk"))
+                    .values("n")[:1],
+                    output_field=IntegerField(),
+                ),
+                Value(0),
+            ),
+            last_attempt_at=Subquery(
+                attempts.values("question")
+                .annotate(latest=Max("submitted_at"))
+                .values("latest")[:1]
+            ),
+        )
+        # A question the learner has already solved is gone from the practice
+        # route for good. This is the one hard exclusion.
+        .filter(solved=False)
+        .annotate(
+            in_cooldown=Case(
+                When(last_attempt_at__gte=now - FAILED_QUESTION_COOLDOWN,
+                     then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            ),
+        )
+    )
+
+
+def _select_question(user, topic_name, target_elo, now=None):
+    """
+    The single next question for `user` in `topic_name`, or None (M2 P2.8a).
+
+    The whole P2.8a ordering in one place so both routing branches and every
+    test go through the same code rather than two hand-synchronised copies.
+    """
+    return (
+        _candidate_questions(user, topic_name=topic_name, now=now)
+        .annotate(
+            elo_diff=Func(F("base_difficulty") - target_elo, function="ABS"),
+        )
+        .order_by(
+            "elo_diff",                              # 1. nearest difficulty
+            "in_cooldown",                           # 2. not recently failed
+            "attempt_count",                         # 3. least seen
+            F("last_attempt_at").asc(nulls_first=True),  # 4. longest ago / never
+            "id",                                    # 5. TOTAL order
+        )
+        .first()
+    )
+
+
+#: How many alternatives to offer when a topic runs dry. Small on purpose —
+#: this is a signpost, not a recommendation.
+SUGGESTED_TOPIC_LIMIT = 5
+
+
+def _topics_with_candidates(user, limit=SUGGESTED_TOPIC_LIMIT, now=None):
+    """
+    Topic names that still hold at least one question this learner can attempt.
+
+    Deliberately NOT a ranking. It is the same candidate filter with the topic
+    constraint dropped, projected to topic names and sorted alphabetically so
+    the list is reproducible. Inventing a cross-topic recommender is P2.9 work;
+    this only answers "where else is there anything left?".
+    """
+    return sorted(
+        _candidate_questions(user, now=now)
+        .values_list("topic__name", flat=True)
+        .distinct()
+    )[:limit]
+
 
 def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
     language_id = LANGUAGE_IDS.get(language.lower())
@@ -383,18 +530,9 @@ class NextProblemView(APIView):
         except Topic.DoesNotExist:
             topic = Topic.objects.first() # Fallback
 
-        # --- Safely cast problem IDs to Integers ---
-        raw_solved_ids = CodeSubmission.objects.filter(
-            user=request.user, status='accepted'
-        ).values_list('question_id', flat=True)
-
-        solved_ids = []
-        for pid in raw_solved_ids:
-            try:
-                solved_ids.append(int(pid))
-            except (ValueError, TypeError):
-                pass 
-        # -------------------------------------------
+        # Solved exclusion and exposure ordering are now one set-based query
+        # (M2 P2.8a) — see `_candidate_questions`. The unbounded Python
+        # NOT IN (...) list this replaced grew with the learner's own history.
 
         question = None
         xai_explanation = ""
@@ -447,34 +585,48 @@ class NextProblemView(APIView):
             target_topic_name = optimal_node.get("recommended_topic") or topic.name
             xai_explanation = optimal_node.get("reason", "")
 
-            question = _servable_questions().filter(
-                topic__name=target_topic_name
-            ).exclude(id__in=solved_ids).annotate(
-                elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
-            ).order_by('elo_diff').first()
+            question = _select_question(request.user, target_topic_name, target_elo)
 
         # 🚥 ROUTE 2: FLAT (ELO ENGINE)
         else:
             logger.info("[Traffic Cop] Routing to Flat Elo engine for %s", topic.name if topic else "fallback")
             xai_explanation = f"📈 Matched to your current skill level (Elo: {round(target_elo)})."
 
+            target_topic_name = topic.name if topic else None
             if topic:
-                question = _servable_questions().filter(
-                    topic__name=topic.name
-                ).exclude(id__in=solved_ids).annotate(
-                    elo_diff=Func(F('base_difficulty') - target_elo, function='ABS')
-                ).order_by('elo_diff').first()
+                question = _select_question(request.user, topic.name, target_elo)
 
         if not question:
-            unsolved_qs = _servable_questions().exclude(id__in=solved_ids)
-            if not unsolved_qs.exists():
+            # The global `.first()` fallback that used to live here is GONE
+            # (M2 P2.8a). It ignored topic AND difficulty, so a learner who
+            # exhausted Dynamic Programming silently received an arbitrary Bit
+            # Manipulation question while the portal's topic badge still read
+            # "Dynamic Programming". Crossing topics is a product decision, not
+            # something a `.first()` should make by accident.
+            #
+            # Two distinct conditions, reported distinctly, because they need
+            # completely different responses from the learner:
+            if _candidate_questions(request.user).exists():
                 return Response({
-                    'status': 'completed',
-                    'message': 'You have solved all available problems! New problems coming soon.',
-                    'mastery_percentage': 100.0,
+                    'status': 'topic_exhausted',
+                    'message': (
+                        f"You've worked through everything available in "
+                        f"{target_topic_name or topic_name}. Pick another topic "
+                        f"to keep going."
+                    ),
+                    'requested_topic': topic_name,
+                    'served_topic': None,
+                    'topic_substituted': False,
+                    'suggested_topics': _topics_with_candidates(request.user),
                     'next_problem': None,
                 }, status=200)
-            question = unsolved_qs.first()
+
+            return Response({
+                'status': 'completed',
+                'message': 'You have solved all available problems! New problems coming soon.',
+                'mastery_percentage': 100.0,
+                'next_problem': None,
+            }, status=200)
 
         # 🧠 XAI PAYLOAD — computed once, after the final question is known
         from .engines.hlr_engine import HLREngine
@@ -535,13 +687,31 @@ class NextProblemView(APIView):
         elif question.base_difficulty < 1400: diff_text = "Medium"
         else: diff_text = "Hard"
 
+        # Topic provenance (M2 P2.8a). The hierarchical route may serve a
+        # different topic than the caller asked for — the DAG's whole purpose
+        # is sequencing — but nothing in the response ever said so, and the
+        # portal renders its topic badge from the URL. The badge could
+        # therefore disagree with the question underneath it.
+        #
+        # Selection semantics are UNCHANGED. This reports what happened; it
+        # does not alter what happens. Whether an explicit `?topic=` should
+        # become a hard constraint is a product question the frontend cannot
+        # currently express — it always sends the parameter, defaulting to
+        # 'Array', so "chosen" and "defaulted" are indistinguishable server
+        # side. Deciding that needs a frontend contract change, not a guess.
+        served_topic = question.topic.name
+        topic_substituted = served_topic.strip().lower() != topic_name.strip().lower()
+
         return Response({
             "id": str(question.pk),
             "title": f"[{question.topic.name}] {question.title}",
             "difficulty": diff_text,
-            "description": question.content, 
+            "description": question.content,
             "explanation": xai_explanation,
             "boilerplate_code": question.boilerplate_code,
+            "requested_topic": topic_name,
+            "served_topic": served_topic,
+            "topic_substituted": topic_substituted,
             # Sample INPUT only, for the Run button. The stdin of case 1 is
             # already public in the Examples block, but its expected_output
             # must never ship: for single-case questions it IS the answer

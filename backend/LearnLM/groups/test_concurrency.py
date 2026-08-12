@@ -194,7 +194,10 @@ def test_onboarding_calibrates_profile_and_is_idempotent(question):
     )
 
     profile = UserCodingProfile.objects.get(user=user)
-    assert profile.elo_rating == 1250  # 1200 + 50 * one known topic
+    # elo_rating is untouched by onboarding as of M2 P2.8a — a self-reported
+    # claim must not set the routing engine's ability estimate. The claim is
+    # still stored as theta.
+    assert profile.elo_rating == 1200.0
     assert profile.irt_latent_logic == pytest.approx(-1.6)
 
     synthetic = CodeSubmission.objects.filter(

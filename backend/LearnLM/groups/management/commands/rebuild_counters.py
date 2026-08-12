@@ -41,10 +41,26 @@ class Command(BaseCommand):
         # One grouped query rather than two per profile.
         truth = {
             row["user_id"]: (row["total"], row["accepted"])
-            # adaptive_eligible only (M2 P2.7c): these counters are read by
-            # the learner model, so rebuilding them from unverified verdicts
-            # would reintroduce exactly what the boundary excludes.
-            for row in CodeSubmission.objects.filter(adaptive_eligible=True)
+            # EVERY submission, deliberately unfiltered (M2 P2.8a).
+            #
+            # P2.7c added an `adaptive_eligible=True` filter here on the
+            # reasoning that "these counters are read by the learner model".
+            # They are not: `success_rate` is returned by CodeSubmitView and
+            # CodingProfileView and read by nothing in routing, Elo, mastery,
+            # telemetry or the ML tensor. They are display-only.
+            #
+            # Worse, the live writer in ProgressionService.apply_submission
+            # increments them UNCONDITIONALLY, so the filtered rebuild
+            # disagreed with every row it was supposed to repair — running
+            # `--apply` would have reported every profile as drifted and reset
+            # each learner's visible activity to the eligible subset, which is
+            # currently zero.
+            #
+            # These count ACTIVITY, not EVIDENCE. A learner who solved forty
+            # unverified problems really did make forty submissions, and
+            # hiding that from their own profile because our verification
+            # backlog is long would be wrong.
+            for row in CodeSubmission.objects.all()
             .values("user_id").annotate(
                 total=Count("id"),
                 accepted=Count("id", filter=Q(status="accepted")),

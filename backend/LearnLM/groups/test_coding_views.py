@@ -567,7 +567,11 @@ def test_onboarding_calibrates_profile_and_skips_topics(api_client, user, questi
 
     assert response.status_code == 200
     profile = UserCodingProfile.objects.get(user=user)
-    assert profile.elo_rating == 1250  # 1200 + 1 known topic * 50
+    # Onboarding no longer touches elo_rating (M2 P2.8a). It used to write
+    # 1200 + 50*known, so a self-reported claim set the routing engine's
+    # ability estimate directly. The claim is still recorded as theta below —
+    # stored, but not treated as a measurement.
+    assert profile.elo_rating == 1200.0
     assert profile.irt_latent_logic == pytest.approx(-1.6)
 
     sub = CodeSubmission.objects.get(user=user, question=question)

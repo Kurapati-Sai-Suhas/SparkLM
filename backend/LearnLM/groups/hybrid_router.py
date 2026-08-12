@@ -51,7 +51,18 @@ MASTERY_MIN_REVIEWS = 3
 #
 # Format: v<major>-<short-description>. Free text, compared for equality
 # only; nothing parses it.
-ROUTING_POLICY_VERSION = "v1-runs-test-elo-band"
+#
+# THE RULE (M2 P2.8a): bump when the DISTRIBUTION OF RECOMMENDATIONS changes
+# for a fixed learner state. That includes bugfixes — a later analyst cannot
+# see intent, only that the same state started producing different answers.
+# It excludes frontend-only changes, logging, and refactors with provably
+# identical output.
+#
+# v2-exposure-aware (M2 P2.8a): candidate selection became exposure-aware and
+# totally ordered — solved exclusion moved into SQL, failed questions are
+# demoted for a cooldown window, and ties break on attempt count, last attempt
+# and finally question id. The global cross-topic fallback was removed.
+ROUTING_POLICY_VERSION = "v2-exposure-aware"
 
 
 def get_mastered_topic_names(user) -> list:

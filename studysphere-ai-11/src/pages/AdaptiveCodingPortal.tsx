@@ -228,13 +228,58 @@ export default function AdaptiveCodingPortal() {
       </div>
     );
 
-  if (!problem)
+  // Hoisted above the early returns below: the topic-exhausted screen offers
+  // these as buttons, and a `const` referenced before its declaration is a
+  // temporal-dead-zone ReferenceError, not a compile error — it would only
+  // surface the first time a learner actually exhausted a topic.
+  const handleStartTopic = (newTopic: string) => {
+    searchParams.set('topic', newTopic);
+    setSearchParams(searchParams);
+    setShowLearningPath(false);
+  };
+
+  // The backend now distinguishes "this topic is finished" from "the whole
+  // catalogue is finished" (P2.8a). Previously it silently handed back an
+  // arbitrary question from another topic while the badge overhead still
+  // showed the topic that had been asked for.
+  if (problem?.status === 'topic_exhausted')
+    return (
+      <div
+        data-testid="portal-topic-exhausted"
+        className="flex h-screen flex-col items-center justify-center gap-6 bg-gradient-to-br from-[#0a0f1e] to-[#050612] px-6 text-center"
+      >
+        <div className="max-w-md space-y-3">
+          <h2 className="text-xl font-semibold text-white">
+            Nothing left in {problem.requested_topic}
+          </h2>
+          <p className="text-sm leading-relaxed text-slate-400">{problem.message}</p>
+        </div>
+        {problem.suggested_topics?.length > 0 && (
+          <div data-testid="suggested-topics" className="flex flex-wrap justify-center gap-2">
+            {problem.suggested_topics.map((name: string) => (
+              <Button
+                key={name}
+                data-testid={`suggested-topic-${name}`}
+                variant="outline"
+                size="sm"
+                onClick={() => handleStartTopic(name)}
+                className="border-indigo-400/40 bg-indigo-500/[0.08] text-indigo-300 hover:bg-indigo-500/[0.15] hover:text-indigo-200"
+              >
+                {name}
+              </Button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+
+  if (!problem || problem.status === 'completed')
     return (
       <div
         data-testid="portal-empty"
         className="flex h-screen items-center justify-center bg-gradient-to-br from-[#0a0f1e] to-[#050612] text-slate-500 font-mono text-sm"
       >
-        No problems found.
+        {problem?.message ?? 'No problems found.'}
       </div>
     );
 
@@ -244,12 +289,6 @@ export default function AdaptiveCodingPortal() {
       : problem.difficulty === 'Medium'
       ? 'border-amber-400/30 bg-amber-500/10 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
       : 'border-rose-400/30 bg-rose-500/10 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.25)]';
-
-  const handleStartTopic = (newTopic: string) => {
-    searchParams.set('topic', newTopic);
-    setSearchParams(searchParams);
-    setShowLearningPath(false);
-  };
 
   if (showLearningPath) {
     return (
@@ -316,8 +355,23 @@ export default function AdaptiveCodingPortal() {
               data-testid="topic-badge"
               className="bg-indigo-500/10 text-indigo-300 border border-indigo-400/30 font-medium px-3 py-0.5 shadow-[0_0_12px_rgba(99,102,241,0.2)]"
             >
-              {topic}
+              {/*
+                The topic the question ACTUALLY belongs to (P2.8a), not the one
+                in the URL. The hierarchical router may serve a different topic
+                than was requested — that is the DAG doing its job — but the
+                badge used to render the URL parameter regardless, so it could
+                sit above a question from somewhere else entirely.
+              */}
+              {problem.served_topic ?? topic}
             </Badge>
+            {problem.topic_substituted && (
+              <span
+                data-testid="topic-substituted-note"
+                className="text-[10px] uppercase tracking-[0.16em] text-slate-500"
+              >
+                curriculum pick · you asked for {problem.requested_topic}
+              </span>
+            )}
           </div>
         </div>
 
@@ -754,14 +808,37 @@ export default function AdaptiveCodingPortal() {
                   </div>
                 )}
 
-                {results.all_passed && (
+                {/*
+                  Advancement is an EXPLICIT action, never automatic (P2.8a).
+                  Auto-advancing would destroy the feedback the learner
+                  submitted for — test results, the coach hint, their editor
+                  contents — so the button only ever appears; it never fires
+                  on its own.
+
+                  It used to render only on `all_passed`, which left the
+                  failure path with no way forward at all: the learner sat on a
+                  problem they could not solve until they edited the URL. A
+                  wrong answer is a legitimate moment to move on, so the button
+                  now shows there too — alongside, not instead of, retrying,
+                  which still works because the problem and the editor are
+                  untouched.
+
+                  Compile / runtime / timeout errors deliberately do NOT get
+                  the button. Those are the learner's own iteration loop; a
+                  missing semicolon is not a signal to abandon the problem.
+                */}
+                {(results.all_passed || results.status === 'wrong_answer') && (
                   <Button
                     data-testid="next-problem-btn"
                     onClick={fetchNextProblem}
-                    className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white border border-indigo-400/30 shadow-[0_0_20px_rgba(99,102,241,0.55)] hover:shadow-[0_0_35px_rgba(99,102,241,0.75)] transition-all font-medium group"
+                    className={
+                      results.all_passed
+                        ? "w-full h-11 rounded-xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white border border-indigo-400/30 shadow-[0_0_20px_rgba(99,102,241,0.55)] hover:shadow-[0_0_35px_rgba(99,102,241,0.75)] transition-all font-medium group"
+                        : "w-full h-11 rounded-xl border border-white/15 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07] hover:text-white transition-all font-medium group"
+                    }
                   >
                     <Zap className="h-4 w-4 mr-2" />
-                    Load Next Problem
+                    {results.all_passed ? 'Load Next Problem' : 'Try a Different Problem'}
                     <span className="ml-2 opacity-60 group-hover:opacity-100 group-hover:translate-x-1 transition-all">→</span>
                   </Button>
                 )}

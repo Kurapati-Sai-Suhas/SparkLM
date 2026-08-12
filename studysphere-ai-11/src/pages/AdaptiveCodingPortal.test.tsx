@@ -484,3 +484,156 @@ describe("Existing portal behaviour is untouched", () => {
     expect(JSON.parse(submitCall[1].body).problem_id).toBe("999");
   });
 });
+
+/**
+ * P2.8a — advancement and topic provenance.
+ *
+ * The "Load Next Problem" button used to render only inside
+ * `{results.all_passed && ...}`, so a learner who failed had no way forward at
+ * all: they sat on the problem until they edited the URL. Advancement stays an
+ * EXPLICIT action — auto-advancing would destroy the results, the coach hint
+ * and the editor contents the submission was made to produce.
+ */
+
+/** Mock /code/next/ and /code/submit/ independently. */
+function mockPortal(problem: any, submitResult: any) {
+  (global.fetch as any) = vi.fn().mockImplementation((url: string) => {
+    if (String(url).includes("/api/code/next/")) {
+      return Promise.resolve({ json: () => Promise.resolve(problem) });
+    }
+    return Promise.resolve({ json: () => Promise.resolve(submitResult) });
+  });
+}
+
+async function submitWith(result: any) {
+  mockPortal(PROBLEM, result);
+  render(
+    <MemoryRouter>
+      <AdaptiveCodingPortal />
+    </MemoryRouter>
+  );
+  await screen.findByTestId("coding-portal");
+  fireEvent.click(screen.getByTestId("submit-code-btn"));
+  await screen.findByTestId("results-block");
+}
+
+const WRONG_ANSWER = {
+  status: "wrong_answer",
+  all_passed: false,
+  passed: 1,
+  total: 3,
+};
+
+describe("P2.8a — explicit advancement", () => {
+  it("offers advancement after a wrong answer", async () => {
+    await submitWith(WRONG_ANSWER);
+    expect(screen.getByTestId("next-problem-btn")).toBeTruthy();
+  });
+
+  it("still offers advancement after a pass", async () => {
+    await submitWith({ status: "accepted", all_passed: true, passed: 3, total: 3 });
+    expect(screen.getByTestId("next-problem-btn")).toBeTruthy();
+  });
+
+  it.each(["compile_error", "runtime_error", "time_limit"])(
+    "does not offer advancement on %s — that is the learner's own iteration loop",
+    async (status) => {
+      await submitWith({ status, all_passed: false, passed: 0, total: 3 });
+      expect(screen.queryByTestId("next-problem-btn")).toBeNull();
+    }
+  );
+
+  it("never advances on its own — only one /code/next/ call before a click", async () => {
+    await submitWith(WRONG_ANSWER);
+    const before = (global.fetch as any).mock.calls.filter((c: any[]) =>
+      String(c[0]).includes("/api/code/next/")
+    ).length;
+
+    expect(before).toBe(1);
+  });
+
+  it("advances only when the learner clicks", async () => {
+    await submitWith(WRONG_ANSWER);
+    fireEvent.click(screen.getByTestId("next-problem-btn"));
+
+    await waitFor(() => {
+      const calls = (global.fetch as any).mock.calls.filter((c: any[]) =>
+        String(c[0]).includes("/api/code/next/")
+      );
+      expect(calls.length).toBe(2);
+    });
+  });
+
+  it("keeps the failed result readable while advancement is offered", async () => {
+    await submitWith(WRONG_ANSWER);
+    expect(screen.getByTestId("results-block")).toBeTruthy();
+    expect(screen.getByTestId("next-problem-btn")).toBeTruthy();
+  });
+
+  it("leaves the editor contents intact after a failed submission", async () => {
+    await submitWith(WRONG_ANSWER);
+    const editor = screen.getByLabelText("editor") as HTMLTextAreaElement;
+    expect(editor.value).toContain("class Solution");
+  });
+});
+
+describe("P2.8a — topic provenance and exhaustion", () => {
+  it("shows the topic actually served, not the one in the URL", async () => {
+    await renderPortal({
+      ...PROBLEM,
+      requested_topic: "Advanced",
+      served_topic: "Foundation",
+      topic_substituted: true,
+    });
+
+    expect(screen.getByTestId("topic-badge").textContent).toContain("Foundation");
+    expect(screen.getByTestId("topic-substituted-note")).toBeTruthy();
+  });
+
+  it("shows no substitution note when the served topic matches", async () => {
+    await renderPortal({
+      ...PROBLEM,
+      requested_topic: "Array",
+      served_topic: "Array",
+      topic_substituted: false,
+    });
+
+    expect(screen.queryByTestId("topic-substituted-note")).toBeNull();
+  });
+
+  it("renders the typed topic_exhausted state with alternatives", async () => {
+    mockNextProblem({
+      status: "topic_exhausted",
+      message: "Nothing left here.",
+      requested_topic: "Array",
+      suggested_topics: ["Graph", "Tree"],
+      next_problem: null,
+    });
+    render(
+      <MemoryRouter>
+        <AdaptiveCodingPortal />
+      </MemoryRouter>
+    );
+
+    await screen.findByTestId("portal-topic-exhausted");
+    expect(screen.getByTestId("suggested-topic-Graph")).toBeTruthy();
+    expect(screen.getByTestId("suggested-topic-Tree")).toBeTruthy();
+    expect(screen.queryByTestId("coding-portal")).toBeNull();
+  });
+
+  it("still renders the completed state when the catalogue is empty", async () => {
+    mockNextProblem({
+      status: "completed",
+      message: "You have solved all available problems!",
+      next_problem: null,
+    });
+    render(
+      <MemoryRouter>
+        <AdaptiveCodingPortal />
+      </MemoryRouter>
+    );
+
+    const empty = await screen.findByTestId("portal-empty");
+    expect(empty.textContent).toContain("solved all available problems");
+  });
+});

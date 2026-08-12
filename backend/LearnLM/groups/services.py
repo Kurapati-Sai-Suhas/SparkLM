@@ -735,12 +735,34 @@ class ProgressionService:
                 theta_guess, expected,
             )
 
+            # The claim is STORED, and stays a claim (M2 P2.8a).
+            #
+            # `irt_latent_*` is written here and read by nothing — which is
+            # exactly the right shape for self-reported skill. It is a record
+            # of what the learner said, available to any future model that
+            # knows how to weight an unmeasured prior.
             profile.irt_latent_logic = theta_guess
             profile.irt_latent_syntax = theta_guess
             profile.irt_latent_optimization = theta_guess
 
-            # Also boost Elo to skip the cold-start problem.
-            profile.elo_rating = 1200 + (num_known * 50)
+            # elo_rating is deliberately NOT written (M2 P2.8a).
+            #
+            # This line used to read `profile.elo_rating = 1200 + num_known*50`.
+            # `elo_rating` is the routing engine's ability estimate — it picks
+            # the difficulty band in NextProblemView — so ten checkboxes moved
+            # a learner to 1700 against a bank whose hardest question is rated
+            # 1600, and the very first problem they saw was the hardest one
+            # available. Reaching 1700 by solving takes roughly 15–30 wins.
+            #
+            # P2.7c stopped self-reported ROWS from teaching the model but
+            # left this write ungated, so the claim still reached routing by
+            # the shortest possible path. Ability is a measurement; a claim is
+            # not a measurement. Everyone now starts at the honest default of
+            # 1200 and moves on evidence.
+            #
+            # No cold-start regression: 1200 selects the middle difficulty
+            # band, which is the correct default for an unmeasured learner,
+            # and a genuine expert leaves it within a handful of solves.
             profile.save()
 
         return theta_guess

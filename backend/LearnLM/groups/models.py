@@ -1133,3 +1133,178 @@ class QuestionSkill(models.Model):
     def __str__(self):
         return (f"Q{self.question_id}: {self.rating:.0f}"
                 f"±{self.rating_deviation:.0f} (prior {self.prior_rating:.0f})")
+
+
+# ── Output provenance (M2 P2.7g-1) ───────────────────────────────────────
+#
+# The missing last link in the trust chain. P2.7d made a reference's approval
+# auditable; nothing yet records which reference produced which answer. Without
+# that a later revocation cannot identify what to invalidate — the F5 finding —
+# and "verified" would mean "somebody ran something once".
+#
+# This records EXECUTIONS, not truth. A row means "this ran and produced this
+# output". It never means the output is correct, and nothing here touches
+# Question.status, trust_state or adaptive_eligible. Promotion is a later,
+# separate, human-gated step.
+
+
+class OracleExecution(models.Model):
+    """
+    One append-only record of one reference execution against one input.
+
+    Answers, for any future expected_output: which approved reference produced
+    it, for which question, from which input, under which execution contract,
+    at what time, and from exactly which revision of the reference source.
+
+    ── Two digests, deliberately ────────────────────────────────────────────
+
+    `case_digest` identifies WHICH hidden-test case this is, and is stable
+    under reordering — the JSON blob has no per-case id, so array position is
+    not an identity. It uses `normalize_output(stdin)`, the same comparison
+    `reseed_questions` and the P2.7h-1 quality gate already use for duplicate
+    detection, so "the same case" means one thing across the codebase.
+
+    `input_digest` is the exact byte sequence handed to the executor, which is
+    NOT the same thing: both `GradingService.grade` and `OracleService._execute`
+    convert a literal two-character backslash-n into a real newline before
+    running, so the stored stdin and the executed input genuinely differ.
+    Reproducing an execution needs the bytes that ran; identifying a case needs
+    the normalized form. Collapsing them would make one of the two questions
+    unanswerable.
+
+    ── Immutability ─────────────────────────────────────────────────────────
+
+    Every column except `is_authoritative` is frozen by a database trigger.
+    A correction is a NEW row, never an edit — the point is that history
+    survives, including history somebody later wishes were different.
+    """
+
+    #: Bumped when the MEANING of a recorded field changes, so an old row is
+    #: never silently reinterpreted under new rules.
+    PROVENANCE_SCHEMA_VERSION = 1
+
+    STATUS_SUCCESS = "SUCCESS"
+    STATUS_FAILED = "FAILED"
+    STATUS_TIMEOUT = "TIMEOUT"
+    STATUS_ERROR = "ERROR"
+    STATUS_NONDETERMINISTIC = "NONDETERMINISTIC"
+    STATUS_CHOICES = [
+        (STATUS_SUCCESS, "Ran cleanly"),
+        (STATUS_FAILED, "Reference did not run cleanly"),
+        (STATUS_TIMEOUT, "Timed out"),
+        (STATUS_ERROR, "Execution service error"),
+        (STATUS_NONDETERMINISTIC, "Disagreed with an identical run"),
+    ]
+
+    # PROTECT on both: provenance that outlives what it describes is not
+    # provenance. Deleting a question or a reference is blocked while any
+    # execution record points at it, exactly as `approved_by` is protected.
+    question = models.ForeignKey(Question, on_delete=models.PROTECT,
+                                 related_name="oracle_executions")
+    reference = models.ForeignKey(ReferenceSolution, on_delete=models.PROTECT,
+                                  related_name="oracle_executions")
+
+    #: The reference's `source_hash` AT EXECUTION TIME. Denormalised on
+    #: purpose: a reference is superseded rather than edited, so this pins the
+    #: exact revision that ran even after a newer one becomes canonical.
+    #: Produced by `compute_source_hash` — the P2.7d function, not a second
+    #: hashing scheme.
+    reference_source_hash = models.CharField(max_length=64)
+    language = models.CharField(max_length=20)
+
+    case_digest = models.CharField(max_length=64)
+    input_digest = models.CharField(max_length=64)
+
+    produced_output = models.TextField(blank=True)
+    output_digest = models.CharField(max_length=64)
+
+    execution_contract_version = models.CharField(max_length=8)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    executed_at = models.DateTimeField()
+
+    #: Everything needed to reproduce the run that is not already a column —
+    #: runner identity, resource limits, judge version. A dict rather than
+    #: columns because the executor's own shape is not ours to fix.
+    executor = models.JSONField(default=dict, blank=True)
+
+    provenance_schema_version = models.PositiveSmallIntegerField(
+        default=PROVENANCE_SCHEMA_VERSION)
+
+    #: The ONE mutable column. An execution is a fact; whether its output is
+    #: the accepted answer is a later decision (P2.7g-2), and recording that
+    #: decision must not require rewriting the fact or duplicating the row.
+    is_authoritative = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            # At most one accepted answer per (question, case). Repeated runs
+            # for determinism checking are welcome; two contradictory
+            # authoritative answers are not. Same partial-unique idiom as
+            # `one_active_reference_solution_per_language`.
+            models.UniqueConstraint(
+                fields=["question", "case_digest"],
+                condition=models.Q(is_authoritative=True),
+                name="one_authoritative_output_per_case",
+            ),
+            # The recorded digest must match the recorded output, checked by
+            # PostgreSQL itself so no write path — including raw SQL — can
+            # store an output that disagrees with its own fingerprint.
+            models.CheckConstraint(
+                condition=models.Q(
+                    output_digest=Sha256Hex(models.F("produced_output"))),
+                name="oracle_execution_output_digest_matches",
+            ),
+        ]
+        indexes = [
+            # "Which outputs came from this reference?" — the revocation query
+            # (P2.7d F5). An index, not a free-text scan.
+            models.Index(fields=["reference", "-executed_at"],
+                         name="prov_reference_ts_idx"),
+            models.Index(fields=["question", "case_digest"],
+                         name="prov_question_case_idx"),
+            models.Index(fields=["reference_source_hash"],
+                         name="prov_source_hash_idx"),
+        ]
+
+    def __str__(self):
+        return (f"exec q{self.question_id}/ref{self.reference_id} "
+                f"case={self.case_digest[:12]} {self.status}"
+                f"{' AUTHORITATIVE' if self.is_authoritative else ''}")
+
+    def clean(self):
+        """
+        Application-layer mirror of the database guards.
+
+        A reference may only ever answer for its OWN question — the invariant
+        P2.7d's adversarial review found missing in OracleService, restated
+        here because provenance that crossed questions would attribute an
+        answer to a problem it was never written for.
+        """
+        super().clean()
+        if self.reference_id and self.question_id:
+            if self.reference.question_id != self.question_id:
+                raise ValidationError({
+                    "reference": (
+                        f"reference {self.reference_id} belongs to question "
+                        f"{self.reference.question_id}, not {self.question_id}; "
+                        f"provenance may not cross questions")
+                })
+
+    def save(self, *args, **kwargs):
+        """
+        Append-only at the application layer; the trigger is the backstop.
+
+        Only `is_authoritative` may change after creation. Everything else is a
+        recorded fact about something that already happened.
+        """
+        if self.pk is not None:
+            update_fields = kwargs.get("update_fields")
+            if update_fields is None or not set(update_fields).issubset(
+                    {"is_authoritative"}):
+                raise ValidationError(
+                    "OracleExecution is append-only: only `is_authoritative` "
+                    "may be updated after creation. Record a NEW execution "
+                    "instead of editing history.")
+        super().save(*args, **kwargs)

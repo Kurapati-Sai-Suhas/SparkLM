@@ -21,6 +21,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 
 from groups.models import CodeSubmission, UserTopicMastery
+from groups.services import LEARNER_EVIDENCE_STATUSES
 
 
 class Command(BaseCommand):
@@ -38,7 +39,18 @@ class Command(BaseCommand):
 
         truth = (
             # adaptive_eligible only (M2 P2.7c): mastery is learner-model state.
-            CodeSubmission.objects.filter(question__isnull=False, adaptive_eligible=True)
+            #
+            # status__in LEARNER_EVIDENCE_STATUSES (M2 P2.8b): the incremental
+            # writer in ProgressionService._apply_sm2_update skips compile
+            # errors, crashes and timeouts, so this MUST skip them too. The two
+            # writers of `accuracy` have to compute the same statistic or the
+            # repair becomes the corruption — the exact failure mode P2.8b was
+            # opened to remove.
+            CodeSubmission.objects.filter(
+                question__isnull=False,
+                adaptive_eligible=True,
+                status__in=LEARNER_EVIDENCE_STATUSES,
+            )
             .values("user_id", "question__topic_id")
             .annotate(
                 total=Count("id"),

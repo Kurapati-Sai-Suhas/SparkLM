@@ -525,10 +525,22 @@ class NextProblemView(APIView):
         # Default to 'Array' if no topic is provided by the frontend
         topic_name = request.query_params.get('topic', 'Array')
         
+        # An unknown topic is a client error, not an invitation to guess
+        # (M2 P2.8b — B11).
+        #
+        # This used to fall back to `Topic.objects.first()` — an arbitrary row
+        # in unspecified order — so a typo in the query string silently served
+        # a question from some unrelated topic while the portal's badge still
+        # showed what had been asked for. A 400 naming the topic is the only
+        # answer that lets the caller fix it.
         try:
             topic = Topic.objects.get(name__iexact=topic_name)
         except Topic.DoesNotExist:
-            topic = Topic.objects.first() # Fallback
+            return Response({
+                "error": "unknown_topic",
+                "message": f"No topic named '{topic_name}'.",
+                "requested_topic": topic_name,
+            }, status=400)
 
         # Solved exclusion and exposure ordering are now one set-based query
         # (M2 P2.8a) — see `_candidate_questions`. The unbounded Python

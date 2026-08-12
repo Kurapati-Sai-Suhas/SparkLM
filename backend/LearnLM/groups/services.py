@@ -311,6 +311,23 @@ class GradeResult:
         return self.passed == self.total
 
 
+#: Verdicts that carry evidence about the learner's CONCEPTUAL ability
+#: (M2 P2.8b).
+#:
+#: `accepted` and `wrong_answer` mean the program built and ran, so the verdict
+#: is about the algorithm the learner wrote. `compile_error`, `runtime_error`
+#: and `time_limit` mean something else went wrong first — a typo, an
+#: unhandled edge case in I/O plumbing, an unfamiliar language's syntax — and
+#: the previous code lumped all of them together under `not all_passed`, so a
+#: missing semicolon counted as a topic failure in the learner's accuracy
+#: statistic and cut their memory half-life by 70%.
+#:
+#: Deliberately NOT extended to Elo in this phase. Elo still moves on every
+#: verdict, which is inconsistent with the above; changing it is a rating-model
+#: decision, not a taxonomy cleanup, and it is reported rather than assumed.
+LEARNER_EVIDENCE_STATUSES = frozenset({"accepted", "wrong_answer"})
+
+
 def first_case_stats(results):
     """Execution stats reported by the first test case (ms, KB) or None."""
     exec_time = int(float(results[0]['time'] or 0) * 1000) if results and results[0].get('time') else None
@@ -466,12 +483,33 @@ class ProgressionService:
         """
         all_passed = grade.all_passed
 
-        # Pre-lock phase, reads only: GDCP penalties are a pure walk over
-        # the (cached) curriculum graph and never read learner state, so
-        # they are resolved before any row is locked.
-        gdcp_penalties = []
-        if not all_passed:
-            gdcp_penalties = ProgressionService._resolve_gdcp_penalties(user, question)
+        # GDCP is NO LONGER RESOLVED OR APPLIED HERE (M2 P2.8b — B5).
+        #
+        # It used to subtract a constant from `UserTopicMastery.accuracy` for
+        # every descendant of the failed topic. `accuracy` is defined as a
+        # running mean of outcomes, and both of its writers — the incremental
+        # update below and `recompute_mastery` — compute exactly
+        # accepted / total. Subtracting an arbitrary penalty made the column
+        # stop being a mean of anything, and every consumer (the mastery gate,
+        # the weak-topic list, the ML tensor's Logic Accuracy feature, the
+        # review queue) was reading a number whose definition had silently
+        # changed.
+        #
+        # Worse, the two were mutually destructive: `recompute_mastery`
+        # rebuilds accuracy from submissions, and GDCP's penalties are not
+        # derivable from submissions, so every maintenance run silently erased
+        # them. Whether a learner carried a GDCP penalty depended on whether an
+        # operator had happened to run a command.
+        #
+        # Removing the write restores the invariant: `accuracy` has exactly two
+        # writers and they agree. Reinstating cross-topic curriculum penalties
+        # needs somewhere to put them that is not a statistic — see the P2.8b
+        # report; it requires a schema change, which is not authorised here.
+        #
+        # `GDCPEngine.propagate_decay` and `_resolve_gdcp_penalties` are kept:
+        # they are pure, correct, and are what a future phase will build on.
+        # Not calling `_resolve_gdcp_penalties` also removes a per-descendant
+        # `Topic.objects.filter(...)` N+1 from the submission path.
 
         exec_time, mem_used = first_case_stats(grade.results)
 
@@ -559,44 +597,24 @@ class ProgressionService:
             profile.elo_rating = elo_result["new_rating"]
             profile.save()
 
-            # Lock 2..n: every mastery row this submission touches — the
-            # question's own topic plus any GDCP descendants — in
-            # ascending topic-id order (§2.2's deadlock preclusion).
-            touched_topics = {question.topic.pk: question.topic}
-            for desc_topic, _penalty in gdcp_penalties:
-                touched_topics.setdefault(desc_topic.pk, desc_topic)
-
-            masteries = {}
-            for topic_pk in sorted(touched_topics):
-                masteries[topic_pk], _ = (
-                    UserTopicMastery.objects.select_for_update().get_or_create(
-                        user=user, topic=touched_topics[topic_pk]
-                    )
+            # Lock 2: the mastery row for this question's topic (§2.2's
+            # deadlock preclusion — a single row now that GDCP no longer
+            # touches descendants, so the ascending-topic-id ordering that
+            # rule prescribes is trivially satisfied).
+            mastery, _ = (
+                UserTopicMastery.objects.select_for_update().get_or_create(
+                    user=user, topic=question.topic
                 )
+            )
 
-            # Mastery, SM-2 half-life and GDCP decay are all learner-model
-            # writes and are skipped for an ineligible submission (M2 P2.7c).
-            # The mastery rows are still locked above so the lock order in
-            # §2.2 is unchanged whether or not the update runs.
+            # Mastery and SM-2 half-life are learner-model writes and are
+            # skipped for an ineligible submission (M2 P2.7c). The row is
+            # still locked above so the lock order in §2.2 is unchanged
+            # whether or not the update runs.
             if adaptive_eligible:
                 ProgressionService._apply_sm2_update(
-                    user, question, grade, submission, masteries[question.topic.pk]
+                    user, question, grade, submission, mastery
                 )
-
-            # GDCP application is best-effort enrichment, as it was before
-            # the single-transaction change: a failure rolls back only this
-            # savepoint, never the submission itself.
-            if adaptive_eligible and gdcp_penalties:
-                try:
-                    with transaction.atomic():
-                        for desc_topic, penalty in gdcp_penalties:
-                            desc_mastery = masteries[desc_topic.pk]
-                            desc_mastery.accuracy = max(0.0, desc_mastery.accuracy - penalty)
-                            desc_mastery.save(update_fields=['accuracy'])
-                except Exception:
-                    logger.exception(
-                        "GDCP decay failed user=%s topic=%s", user.id, question.topic.name
-                    )
 
         return submission, elo_result, profile
 
@@ -635,6 +653,20 @@ class ProgressionService:
         newest first). Lifetime counting would permanently cap quality at
         3 after two historic fails, no matter how cleanly later reviews go.
         """
+        # Only a verdict that says something about the learner's ALGORITHM
+        # updates the statistics (M2 P2.8b — B4). A compile error, a crash or
+        # a timeout means the program never got to be judged on its logic;
+        # counting it as a failed recall put a 0 into the accuracy mean and
+        # cut `hlr_halflife` to 30%, so one missing semicolon looked identical
+        # to forgetting the topic.
+        #
+        # `last_practiced` is still stamped below for ANY submission: the
+        # learner did show up and work on this topic, which is what recency
+        # measures. Only the correctness statistics are withheld.
+        if grade.final_status not in LEARNER_EVIDENCE_STATUSES:
+            EloEngine.record_real_submission(mastery)
+            return
+
         quality = 0
         if grade.all_passed:
             prior_statuses = CodeSubmission.objects.filter(

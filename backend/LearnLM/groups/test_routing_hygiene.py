@@ -501,20 +501,21 @@ def test_provenance_comparison_is_case_insensitive(topic, learner, client):
     assert body["topic_substituted"] is False
 
 
-def test_an_unknown_topic_keeps_its_existing_fallback_behaviour(
-        topic, learner, client):
+def test_an_unknown_topic_is_rejected(topic, learner, client):
     """
-    REGRESSION PIN, not an endorsement. An unknown topic still falls back to
-    `Topic.objects.first()`; P2.8a does not change it (that is Q8, deferred).
-    The substitution is now at least visible.
+    P2.8a pinned the old `Topic.objects.first()` fallback as a regression
+    guard, explicitly "not an endorsement". P2.8b (B11) replaces it: an
+    unknown topic is a client error, not an invitation to guess.
+
+    The detailed contract lives in test_learning_signal_hygiene.py; this
+    asserts only that the routing path no longer substitutes silently.
     """
     make(topic, "Reachable", 1200.0)
 
-    body = next_problem(client, topic_name="NoSuchTopic").json()
+    response = next_problem(client, topic_name="NoSuchTopic")
 
-    assert body["requested_topic"] == "NoSuchTopic"
-    assert body["served_topic"] == "HygieneTopic"
-    assert body["topic_substituted"] is True
+    assert response.status_code == 400
+    assert response.json()["requested_topic"] == "NoSuchTopic"
 
 
 # ═════════════════════════════════════════════════════════════

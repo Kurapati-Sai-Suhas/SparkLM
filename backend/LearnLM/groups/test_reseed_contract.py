@@ -876,6 +876,123 @@ def test_the_contract_role_is_the_one_remediate_contract_already_uses():
     assert ops.ALLOWED_CONTRACT_ROLES == frozenset({"learnlm_contract_rw"})
 
 
+# ═════════════════════════════════════════════════════════════
+# 13A/13G — migration 0049
+#
+# Applied to production, so its safety is asserted rather than reviewed by
+# eye. The claim being defended is narrow and total: this migration changes
+# CHOICES ONLY, and choices have no representation in PostgreSQL.
+# ═════════════════════════════════════════════════════════════
+
+import pathlib  # noqa: E402
+
+MIGRATION_0049 = (pathlib.Path(__file__).parent / "migrations"
+                  / "0049_reseed_contract_stage.py")
+
+#: Operations that could alter or destroy data. 0049 must contain none.
+FORBIDDEN_OPERATIONS = {
+    "RunSQL", "RunPython", "RemoveField", "DeleteModel", "AddField",
+    "CreateModel", "AlterModelTable", "RenameField", "RenameModel",
+    "AddConstraint", "RemoveConstraint", "AddIndex", "RemoveIndex",
+}
+
+
+def migration_operations():
+    tree = ast.parse(MIGRATION_0049.read_text(encoding="utf-8"))
+    return [node.func.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "migrations"]
+
+
+def test_0049_contains_no_data_altering_operation():
+    used = set(migration_operations())
+    assert not (used & FORBIDDEN_OPERATIONS), used & FORBIDDEN_OPERATIONS
+
+
+def test_0049_is_exactly_two_alter_fields():
+    from collections import Counter
+
+    assert Counter(migration_operations()) == Counter({"AlterField": 2})
+
+
+def test_0049_depends_on_the_expected_predecessor():
+    source = MIGRATION_0049.read_text(encoding="utf-8")
+    assert "'0048_reseed_action_classes_and_ledger'" in source
+
+
+@pytest.mark.parametrize("field,length", [
+    ("action_class", "max_length=32"),
+    ("stage", "max_length=24"),
+])
+def test_0049_does_not_move_the_column_width(field, length):
+    """
+    A `max_length` change WOULD be real DDL — `ALTER TYPE varchar(n)` — and
+    would stop this being a no-op. Both widths must match 0048 exactly.
+    """
+    source = MIGRATION_0049.read_text(encoding="utf-8")
+    block = source.split(f"name='{field}'")[1].split("),\n")[0]
+    assert length in block
+
+
+def test_0049_preserves_the_ledger_default():
+    source = MIGRATION_0049.read_text(encoding="utf-8")
+    assert "default='PENDING'" in source
+
+
+def test_0049_is_required_by_the_deployed_choices():
+    """
+    The migration is not optional decoration: the two values the Phase 12
+    command depends on must be the ones it introduces, so a deployment that
+    skips it has models whose choices disagree with the recorded state.
+    """
+    source = MIGRATION_0049.read_text(encoding="utf-8")
+    assert "'CONTRACT_DECLARATION'" in source
+    assert "'CONTRACT_SET'" in source
+
+    predecessor = (MIGRATION_0049.parent
+                   / "0048_reseed_action_classes_and_ledger.py"
+                   ).read_text(encoding="utf-8")
+    assert "CONTRACT_DECLARATION" not in predecessor
+    assert "CONTRACT_SET" not in predecessor
+
+
+def test_0049_choices_match_the_models_exactly():
+    """
+    Generated migrations drift when a model is edited and no migration is
+    made. If these disagree, `makemigrations --check` would want another one.
+    """
+    source = MIGRATION_0049.read_text(encoding="utf-8")
+    for value, _label in RemediationAction.CLASS_CHOICES:
+        assert f"'{value}'" in source, value
+    for value, _label in ReseedLedger.STAGE_CHOICES:
+        assert f"'{value}'" in source, value
+
+
+def test_no_further_migration_is_outstanding():
+    """
+    `makemigrations --check` in test form: the models and the migration graph
+    must agree, or applying 0049 leaves production still out of step.
+
+    Uses the autodetector directly rather than the management command, so it
+    compares the model state against the on-disk graph without a connection.
+    """
+    from django.apps import apps
+    from django.db.migrations.autodetector import MigrationAutodetector
+    from django.db.migrations.loader import MigrationLoader
+    from django.db.migrations.state import ProjectState
+
+    loader = MigrationLoader(None, ignore_no_migrations=True)
+    autodetector = MigrationAutodetector(
+        loader.project_state(), ProjectState.from_apps(apps))
+    changes = autodetector.changes(graph=loader.graph)
+
+    assert "groups" not in changes, [
+        str(op) for migration in changes.get("groups", [])
+        for op in migration.operations]
+
+
 def test_remediate_contract_is_not_weakened():
     """Its refusal must still be there, unchanged."""
     import inspect

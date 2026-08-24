@@ -455,7 +455,9 @@ def test_the_derived_stage_advances_with_the_real_writes(tmp_path, stub, batch,
     declare(tmp_path, stub, operator, batch, extra=APPLY)
     stub.refresh_from_db()
     stage, problems = reseed_authoring.derive_stage(stub, batch)
-    assert (stage, problems) == (ReseedLedger.STAGE_COMPLETE, [])
+    # Not COMPLETE: the contract stage (M2 P2.7h-27) sits between signature
+    # declaration and suite authoring, and these two writes do not reach it.
+    assert (stage, problems) == (ReseedLedger.STAGE_SIGNATURE, [])
 
 
 @pytest.mark.django_db
@@ -809,7 +811,7 @@ def test_the_orchestrator_runs_both_stages_to_complete(tmp_path, stub, batch,
     assert stub.boilerplate_code["python"] == DECLARED
 
     row = ReseedLedger.objects.get(batch=batch, question=stub)
-    assert row.stage == ReseedLedger.STAGE_COMPLETE
+    assert row.stage == ReseedLedger.STAGE_SIGNATURE
 
     classes = list(RemediationAction.objects.filter(question=stub)
                    .order_by("id").values_list("action_class", flat=True))
@@ -870,7 +872,7 @@ def test_a_failed_question_resumes_from_live_state(tmp_path, stub, batch,
 
     stub.refresh_from_db()
     assert ReseedLedger.objects.get(question=stub).stage == \
-        ReseedLedger.STAGE_COMPLETE
+        ReseedLedger.STAGE_SIGNATURE
     assert RemediationAction.objects.filter(question=stub).count() == 2
 
 
@@ -889,7 +891,7 @@ def test_rerunning_a_complete_slice_changes_nothing(tmp_path, stub, batch,
     assert pre_image.live_digest(stub) == digest
     assert RemediationAction.objects.filter(question=stub).count() == 2
     assert ReseedLedger.objects.get(question=stub).stage == \
-        ReseedLedger.STAGE_COMPLETE
+        ReseedLedger.STAGE_SIGNATURE
 
 
 @pytest.mark.django_db

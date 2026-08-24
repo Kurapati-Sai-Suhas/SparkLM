@@ -11,12 +11,21 @@ Coordinate stages 1-2 of a reseed slice (M2 P2.7h-18).
 ── What it does, and the two things it deliberately cannot do ──────────────
 
     PENDING -> statement generation -> verify -> signature declaration
-            -> verify -> COMPLETE
+            -> verify -> SIGNATURE_WRITTEN
 
-It stops at COMPLETE. Hidden-test expansion, contract remediation, oracle,
-approval, promotion and publication are NOT driven from here; they keep their
-existing authorities and their existing commands, and the two that establish
-trust stay deliberate.
+It stops at SIGNATURE_WRITTEN. Contract selection (`reseed_contract`),
+hidden-test expansion, oracle, approval, promotion and publication are NOT
+driven from here; they keep their existing authorities and their existing
+commands, and the ones that establish trust stay deliberate.
+
+── Why the terminal is not COMPLETE (M2 P2.7h-27) ──────────────────────────
+
+It used to be. The contract stage now sits between signature declaration and
+suite authoring, so a question with both writes landed is at
+SIGNATURE_WRITTEN, not COMPLETE — there is a third reseed write, and this
+command does not perform it. Naming the terminal explicitly rather than
+reusing COMPLETE keeps the orchestrator honest about how far it actually got:
+it reports what it achieved, not what remains.
 
 **It authors nothing.** Statements and starters are read from `--content-dir`
 as `<id>.statement.html` and `<id>.starter.py`. Generation is somebody else's
@@ -54,10 +63,14 @@ from groups.models import (
 #: the entire point of the ledger is that it proceeds in resumable pieces.
 MAX_SLICE = 50
 
+#: The furthest THIS command can take a question. Stages beyond it belong to
+#: other authorities; see the module docstring.
+ORCHESTRATED_TERMINAL = ReseedLedger.STAGE_SIGNATURE
+
 
 class Command(BaseCommand):
     help = ("Coordinate statement generation and signature declaration for a "
-            "reseed slice. Dry-run by default. Stops at COMPLETE.")
+            "reseed slice. Dry-run by default. Stops at SIGNATURE_WRITTEN.")
 
     def add_arguments(self, parser):
         parser.add_argument("--batch", required=True, metavar="KEY")
@@ -154,7 +167,7 @@ class Command(BaseCommand):
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(
-            f"slice finished — {done} COMPLETE, {failed} FAILED, "
+            f"slice finished — {done} {ORCHESTRATED_TERMINAL}, {failed} FAILED, "
             f"{skipped} skipped"))
         self.stdout.write(
             "Stages 3-8 (hidden tests, contract, oracle, approval, promotion, "
@@ -228,7 +241,7 @@ class Command(BaseCommand):
                   f"{plan['pre_image'].state_digest if plan['pre_image'] else 'MISSING'}")
             write(f"    derived stage   {plan['derived_stage']}"
                   f"   ledger says {plan['ledger_stage'] or '(no row)'}")
-            write(f"    projected next  {plan['next_stage'] or 'COMPLETE'}")
+            write(f"    projected next  {plan['next_stage'] or ORCHESTRATED_TERMINAL}")
             write(f"    statement       {plan['statement_action']}"
                   f"   file={'yes' if plan['statement_file_present'] else 'no'}")
             write(f"    signature       {plan['signature_action']}"
@@ -313,12 +326,12 @@ class Command(BaseCommand):
                 question, batch, using=alias)
             if discrepancies:
                 raise ops.GateFailure("; ".join(discrepancies))
-            if stage != ReseedLedger.STAGE_COMPLETE:
+            if stage != ORCHESTRATED_TERMINAL:
                 raise ops.GateFailure(
                     f"both writes reported success but the derived stage is "
                     f"{stage}")
 
-            self._advance(alias, row, ReseedLedger.STAGE_COMPLETE)
+            self._advance(alias, row, ORCHESTRATED_TERMINAL)
             return True
 
         except Exception as exc:                      # noqa: BLE001

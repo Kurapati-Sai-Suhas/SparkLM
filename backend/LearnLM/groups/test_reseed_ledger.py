@@ -188,7 +188,11 @@ def test_the_stage_order_is_statement_then_signature(stub, batch):
     row.stage = ReseedLedger.STAGE_STATEMENT
     assert row.next_stage() == ReseedLedger.STAGE_SIGNATURE
     row.stage = ReseedLedger.STAGE_SIGNATURE
-    assert row.next_stage() == ReseedLedger.STAGE_COMPLETE
+    assert row.next_stage() == ReseedLedger.STAGE_CONTRACT
+    # CONTRACT_SET is terminal in ADVANCES on purpose: what follows it is
+    # suite authoring, which is not a reseed write (M2 P2.7h-27).
+    row.stage = ReseedLedger.STAGE_CONTRACT
+    assert row.next_stage() is None
     row.stage = ReseedLedger.STAGE_COMPLETE
     assert row.next_stage() is None
 

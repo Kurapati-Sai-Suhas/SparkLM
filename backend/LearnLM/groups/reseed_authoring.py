@@ -129,6 +129,93 @@ def signature_blockers(question, *, pre_image_record=None, using=None):
     return blockers
 
 
+def contract_blockers(question, *, pre_image_record=None, using=None):
+    """
+    `stub_blockers`, plus the conditions specific to CHOOSING A CONTRACT
+    (M2 P2.7h-27) — [] means the contract may be set.
+
+    ── The exact inverse of `signature_blockers` on one clause ──────────────
+
+    `signature_blockers` refuses a starter that ALREADY declares parameters:
+    its job is to declare a signature where none exists. This refuses a starter
+    that declares NONE. The contract is a decision ABOUT a signature, so it can
+    only be taken once one exists, and the two commands therefore cover
+    disjoint states of the same question by construction. A question can never
+    be eligible for both at the same moment.
+
+    That ordering is the whole safety argument for the stage. v3 rewrites the
+    stdin a stored expected output was authored against, so choosing the
+    contract after cases exist would silently reinterpret every one of them.
+    `stub_blockers` already requires `hidden_test_cases == []`, which pins the
+    decision to the window between `declare_signature` and suite authoring.
+    """
+    blockers = stub_blockers(question, using=using)
+
+    # Same anchor as `signature_blockers`, and for the same reason: the
+    # statement write removes the live marker, so eligibility is bound to what
+    # the batch froze rather than to what the row says now.
+    captured = (pre_image_record.content if pre_image_record is not None
+                else question.content)
+    if Question.PLACEHOLDER_MARKER not in (captured or ""):
+        blockers.append(
+            "this question was not a placeholder stub when the batch was "
+            "frozen; a contract may only be set on a reseed candidate")
+
+    source = (question.boilerplate_code or {}).get("python") or ""
+    if not source.strip():
+        blockers.append(
+            "the question has no python starter, so there is no signature to "
+            "choose a contract for")
+        return blockers
+
+    if execution_adapter.accepts_variable_arity(source):
+        blockers.append(
+            "the starter is still variadic (*args/**kwargs); declare_signature "
+            "has not run and there is no arity to decide a contract from")
+    if execution_adapter.has_keyword_only_parameters(source):
+        blockers.append(
+            "the starter declares keyword-only parameters, whose names stdin "
+            "cannot supply under any contract this harness implements")
+
+    declared = execution_adapter.declared_signature(source)
+    if declared is None:
+        blockers.append("the starter declares nothing the harness could call")
+    elif not declared[1]:
+        blockers.append(
+            "the starter declares no parameters, so no contract distinction "
+            "applies to it")
+
+    return blockers
+
+
+def contract_target(question):
+    """
+    (version, verdict) for a question whose signature is declared.
+
+    The rule is IMPORTED from the census, never restated. Phase 11 tested it
+    against the real adapter and pinned it with a mutation sweep; a second
+    copy here would be a second thing to keep true.
+
+    A per-question wrapper defines its own I/O contract and is consulted by
+    `_build_executable` BEFORE the version is, so the generic harness never
+    runs and the splat defect it fixes cannot occur. Such a question keeps v1
+    — migrating it would change a field that nothing reads.
+    """
+    from groups import execution_contract, reseed_contract_census as census
+
+    source = (question.boilerplate_code or {}).get("python") or ""
+
+    if census.has_custom_wrapper(getattr(question, "hidden_wrapper_code", None)):
+        return execution_contract.CONTRACT_V1, census.V1_SUFFICIENT
+
+    verdict = census.v3_requirement(source)
+    if verdict == census.V3_REQUIRED:
+        return execution_contract.CONTRACT_V3, verdict
+    if verdict == census.V1_SUFFICIENT:
+        return execution_contract.CONTRACT_V1, verdict
+    return None, census.UNKNOWN
+
+
 def validate_signature(current_source, proposed_source, *, language="python"):
     """
     Refusals for a proposed starter — [] means it may be written.
@@ -293,11 +380,37 @@ def derive_stage(question, batch, *, using=None):
             "a SIGNATURE_DECLARATION was recorded but the starter declares no "
             "signature — the write was reverted after it was audited")
 
+    # ── the contract stage (M2 P2.7h-27) ────────────────────────────────
+    #
+    # Unlike the other two, this stage has NO reliable live signal. A question
+    # whose signature is V1_SUFFICIENT keeps `execution_contract_version` at
+    # "v1", which is byte-identical to a question nobody has looked at yet.
+    # "Decided v1" and "never decided" are therefore indistinguishable from
+    # the row alone, and only the append-only trail separates them — which is
+    # exactly why the command records an action even when it writes no field.
+    contract_recorded = \
+        RemediationAction.CLASS_CONTRACT_DECLARATION in classes
+    if contract_recorded and signature_present:
+        intended, _verdict = contract_target(question)
+        live = question.execution_contract_version or "v1"
+        if intended is not None and live != intended:
+            discrepancies.append(
+                f"a CONTRACT_DECLARATION was recorded and the signature "
+                f"implies {intended}, but the question declares {live} — the "
+                f"write was reverted or overwritten after it was audited")
+    if contract_recorded and not signature_present:
+        discrepancies.append(
+            "a CONTRACT_DECLARATION was recorded but the starter declares no "
+            "signature; the contract was chosen for a shape that is gone")
+
     statement_done = marker_gone and statement_recorded
     signature_done = signature_present and signature_recorded
+    contract_done = signature_done and contract_recorded
 
-    if statement_done and signature_done:
-        stage = ReseedLedger.STAGE_COMPLETE
+    if contract_done and statement_done:
+        stage = ReseedLedger.STAGE_CONTRACT
+    elif statement_done and signature_done:
+        stage = ReseedLedger.STAGE_SIGNATURE
     elif statement_done:
         stage = ReseedLedger.STAGE_STATEMENT
     else:

@@ -1835,6 +1835,22 @@ class RemediationAction(models.Model):
     #: existed.
     CLASS_SIGNATURE_DECLARATION = "SIGNATURE_DECLARATION"
 
+    #: A reseed candidate's execution contract was CHOSEN from its newly
+    #: declared signature, before any hidden case existed (M2 P2.7h-27).
+    #:
+    #: NOT `CONTRACT_REPAIR`, and the difference is the evidence, not the
+    #: column — both write `execution_contract_version` under the same role.
+    #: `remediate_contract` justifies its write by EXECUTION: it refuses a
+    #: question with no stored cases, because nothing would demonstrate the
+    #: contract actually runs. This class is the opposite by construction —
+    #: `hidden_test_cases` must be empty, so the write is justified by the
+    #: DECLARED SHAPE alone and no execution has occurred.
+    #:
+    #: Filed under one label they would be indistinguishable, and the first
+    #: question a reviewer asks of this table is precisely "which contract
+    #: changes were made without execution evidence?"
+    CLASS_CONTRACT_DECLARATION = "CONTRACT_DECLARATION"
+
     #: A question moved along the status lifecycle (M2 P2.7h-8, migration
     #: 0047).
     #:
@@ -1857,7 +1873,8 @@ class RemediationAction(models.Model):
         CLASS_BOILERPLATE_REPAIR, CLASS_HIDDEN_TEST_REPAIR,
         CLASS_EXPECTED_OUTPUT_REPAIR, CLASS_INPUT_REPAIR,
         CLASS_SUITE_EXPANSION, CLASS_STATEMENT_GENERATION,
-        CLASS_SIGNATURE_DECLARATION, CLASS_STATUS_TRANSITION,
+        CLASS_SIGNATURE_DECLARATION, CLASS_CONTRACT_DECLARATION,
+        CLASS_STATUS_TRANSITION,
         CLASS_MANUAL_REVIEW, CLASS_COMPLETE_REBUILD, CLASS_ROLLBACK)]
 
     batch = models.ForeignKey(RemediationBatch, on_delete=models.PROTECT,
@@ -1942,24 +1959,43 @@ class ReseedLedger(models.Model):
     STAGE_STATEMENT = "STATEMENT_WRITTEN"
     #: `boilerplate_code` written and audited; the method declares an arity.
     STAGE_SIGNATURE = "SIGNATURE_WRITTEN"
-    #: Both writes landed. Reseed is done with this question — which is NOT
-    #: the same as the question being usable: it still has no cases, still
-    #: declares contract v1, and is still invisible to learners.
+    #: `execution_contract_version` chosen from that signature and audited
+    #: (M2 P2.7h-27). The question now declares the harness its future cases
+    #: will be authored against.
+    #:
+    #: This is deliberately NOT `COMPLETE`. Reseed's three writes have landed,
+    #: but the question still has no hidden cases, no oracle execution, no
+    #: approval and DRAFT/UNVERIFIED trust — it is invisible to learners and
+    #: ineligible for adaptive selection. Naming this stage COMPLETE would
+    #: make the ledger assert a readiness no other table agrees with.
+    STAGE_CONTRACT = "CONTRACT_SET"
+    #: Every reseed write landed. Still NOT the same as the question being
+    #: usable: it has no cases, no verified answer key, and is invisible to
+    #: learners. Whether anything should advance INTO this stage is an open
+    #: design question — see `ADVANCES`.
     STAGE_COMPLETE = "COMPLETE"
     #: A stage refused or failed. `last_error` says which and why.
     STAGE_FAILED = "FAILED"
 
     STAGE_CHOICES = [(s, s) for s in (
-        STAGE_PENDING, STAGE_STATEMENT, STAGE_SIGNATURE, STAGE_COMPLETE,
-        STAGE_FAILED)]
+        STAGE_PENDING, STAGE_STATEMENT, STAGE_SIGNATURE, STAGE_CONTRACT,
+        STAGE_COMPLETE, STAGE_FAILED)]
 
     #: The stage each write ADVANCES TO, given it succeeded. Used by the
     #: orchestrator to decide what remains; expressed here so the order lives
     #: with the model rather than in a command.
+    #:
+    #: `STAGE_CONTRACT` is a TERMINAL stage in this map, and that is a
+    #: deliberate omission rather than an oversight. Nothing advances out of
+    #: it, because the next thing that happens to a reseeded question — suite
+    #: authoring — is not a reseed write, does not run under a reseed role,
+    #: and has not been built. Wiring CONTRACT_SET -> COMPLETE now would let
+    #: the orchestrator mark questions finished on the strength of a stage
+    #: transition nothing has verified the semantics of.
     ADVANCES = {
         STAGE_PENDING: STAGE_STATEMENT,
         STAGE_STATEMENT: STAGE_SIGNATURE,
-        STAGE_SIGNATURE: STAGE_COMPLETE,
+        STAGE_SIGNATURE: STAGE_CONTRACT,
     }
 
     batch = models.ForeignKey(RemediationBatch, on_delete=models.PROTECT,

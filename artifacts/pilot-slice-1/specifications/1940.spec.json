@@ -1,0 +1,26 @@
+{
+  "author": "assistant-drafted, pending operator verification",
+  "author_confidence": "high",
+  "canonical_identity": {
+    "problem_number": "1945",
+    "slug": "sum-of-digits-of-string-after-convert",
+    "source": "leetcode_csv_2024_11_02"
+  },
+  "constraints": "The string holds between 1 and 100 letters. The number of rounds is between 1 and 10.",
+  "edge_cases": "Rounds continue even once the number is a single digit, in which case a further round leaves it unchanged. The conversion concatenates positions, so a letter whose position has two digits contributes two digits.",
+  "input_semantics": "Two parameters. The first, s, is a string of lowercase English letters. The second, k, is the number of digit-summing rounds to perform.",
+  "load_bearing": "The conversion concatenates alphabet positions rather than adding them. The digit-summing round runs exactly k times, no more and no fewer.",
+  "method_behaviour": "The method accepts the string and the round count and returns one integer. It does not print and does not return the intermediate text.",
+  "objective": "Convert a string of lowercase letters into a number, then repeatedly replace that number by the sum of its digits a fixed number of times, and report the result.",
+  "output_semantics": "A single integer, the value remaining after the final round.",
+  "provenance": "OPERATOR_SUPPLIED",
+  "question_id": 1940,
+  "required_operation": "Replace each letter by its position in the alphabet, where a is 1 and z is 26, then concatenate those positions into a single run of digits rather than adding them. Then perform k rounds, where each round replaces the current number by the sum of its decimal digits. Report the value after the final round.",
+  "specification_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac",
+  "verification_notes": "Specification describes the intended problem.",
+  "verification_source": "operator_manual_review",
+  "verified_at": "2026-08-24T07:42:35.593094+00:00",
+  "verified_by": "Suhas",
+  "verified_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac",
+  "written_at": "2026-08-23T19:34:10.471158+00:00"
+}

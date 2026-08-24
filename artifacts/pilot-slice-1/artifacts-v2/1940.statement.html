@@ -1,0 +1,6 @@
+<p>Given a string <code>s</code> consisting of lowercase English letters and an integer <code>k</code>, first replace each letter by its position in the alphabet (a=1, b=2, …, z=26) and concatenate those positions to form a decimal number. Then perform exactly <code>k</code> rounds; in each round replace the current number by the sum of its decimal digits. After the final round output the resulting integer.</p><p>Constraints: 1≤|s|≤100, 1≤k≤10.</p><p>Even if the number becomes a single digit before all rounds are finished, continue the rounds; summing the digits of a single‑digit number leaves it unchanged.</p><p>Note that a letter whose position has two digits (i.e., ten through twenty‑six) contributes two digits to the concatenated number.</p><p><code>def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int</code></p><h3>Example</h3><pre>s = "abc"
+k = 2
+# conversion: a→1, b→2, c→3 → "123" → number 123
+# first round sum of digits: 1+2+3 = 6
+# second round sum of digits: 6
+output = 6</pre>

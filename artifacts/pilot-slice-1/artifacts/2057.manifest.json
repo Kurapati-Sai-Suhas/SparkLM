@@ -1,0 +1,33 @@
+{
+  "applicable": false,
+  "artifact_digest": "c36815bad3643a9021993a6bacee0edc00522011506de468f144098c03d1413f",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "easy",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T19:58:33.256573+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "5b05dfcd47a28113fdd0b3f41ca48882f0a73131f77d90dda87cf0934ab4a692",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "2057.starter.py",
+    "statement": "2057.statement.html"
+  },
+  "prompt_template_version": "specification-formatter/v2",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 2057,
+  "refusals": [],
+  "regeneration_count": 0,
+  "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
+  "specification_provenance": "OPERATOR_SUPPLIED",
+  "status": "READY_FOR_REVIEW",
+  "title": "Check Whether Two Strings are Almost Equivalent",
+  "topic": "Hash Table"
+}

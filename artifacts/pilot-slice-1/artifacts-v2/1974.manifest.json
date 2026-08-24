@@ -1,0 +1,47 @@
+{
+  "applicable": false,
+  "artifact_digest": "eaa203f2891a3cc627846cc431b91a4a2ef1dd5fbf37a8a8f6af103442e5931d",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": [
+        "the statement omits load-bearing terms the specification uses: ['one', 'pair']. A dropped requirement is a different problem.",
+        "the statement substitutes ['both', 'distinct'] for ['one']; these carry the same kind of requirement, so this is a changed operation rather than a rewording."
+      ]
+    },
+    {
+      "attempt": 2,
+      "refusals": [
+        "the statement omits load-bearing terms the specification uses: ['exactly']. A dropped requirement is a different problem.",
+        "the statement substitutes ['at least', 'at most'] for ['exactly']; these carry the same kind of requirement, so this is a changed operation rather than a rewording."
+      ]
+    },
+    {
+      "attempt": 3,
+      "refusals": []
+    }
+  ],
+  "attempts": 3,
+  "batch_key": null,
+  "difficulty_band": "easy",
+  "frozen_batch": false,
+  "generated_at": "2026-08-24T06:49:28.745499+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "793d6dbd90cee5db4602d2d362b4ad14b3790de546fa314f9ba17d4649d19384",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "1974.starter.py",
+    "statement": "1974.statement.html"
+  },
+  "prompt_template_version": "specification-formatter/v4",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 1974,
+  "refusals": [],
+  "regeneration_count": 2,
+  "specification_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
+  "specification_provenance": "OPERATOR_SUPPLIED",
+  "status": "READY_FOR_REVIEW",
+  "title": "Find Greatest Common Divisor of Array",
+  "topic": "Array"
+}

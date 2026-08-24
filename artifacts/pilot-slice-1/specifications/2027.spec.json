@@ -1,0 +1,26 @@
+{
+  "author": "assistant-drafted, pending operator verification",
+  "author_confidence": "high",
+  "canonical_identity": {
+    "problem_number": "2038",
+    "slug": "remove-colored-pieces-if-both-neighbors-are-the-same-color",
+    "source": "leetcode_csv_2024_11_02"
+  },
+  "constraints": "The string holds between 1 and one hundred thousand characters and contains only the letters A and B.",
+  "edge_cases": "The first and last pieces can never be removed because they do not have a piece on both sides. A player may only remove a piece of their own colour, never the other player's.",
+  "input_semantics": "One parameter, colors, a string in which each character is either the letter A or the letter B.",
+  "load_bearing": "Both neighbours must match, not one. The piece removed must match its own neighbours in colour. Alice moves first, and a player who cannot move loses rather than passing.",
+  "method_behaviour": "The method accepts the string and returns a boolean. It does not print and does not return a count of moves.",
+  "objective": "Two players alternately remove letters from a row of coloured pieces under a strict neighbour condition; decide whether the first player wins when both play as well as possible.",
+  "output_semantics": "A boolean: true when Alice wins, false when Bob wins.",
+  "provenance": "OPERATOR_SUPPLIED",
+  "question_id": 2027,
+  "required_operation": "The row is given as text of the letters A and B. Alice moves first and may remove a piece coloured A only when both of the pieces immediately beside it are also coloured A. Bob may remove a piece coloured B only when both pieces immediately beside it are also coloured B. Players alternate and a player unable to make a legal removal loses immediately. Report whether Alice wins.",
+  "specification_digest": "f6937c82a0f38eec99bf5efaeac9f118f6f693dbf6244a494a3914c6e12b4536",
+  "verification_notes": "Specification approved. The generated artifact is NOT approved: its AABAA example is incorrect and must be regenerated.",
+  "verification_source": "operator_manual_review",
+  "verified_at": "2026-08-24T07:42:35.593094+00:00",
+  "verified_by": "Suhas",
+  "verified_digest": "f6937c82a0f38eec99bf5efaeac9f118f6f693dbf6244a494a3914c6e12b4536",
+  "written_at": "2026-08-23T19:34:10.471158+00:00"
+}

@@ -1,6 +1,6 @@
 import hashlib
 
-from django.db import models
+from django.db import DEFAULT_DB_ALIAS, models
 from django.contrib.auth.models import AbstractUser
 from datetime import timedelta, timezone
 from django.conf import settings
@@ -372,6 +372,37 @@ class Question(models.Model):
         (STATUS_BLOCKED, "Blocked"),
     ]
 
+    #: The legal status edges (M2 P2.7h-8).
+    #:
+    #: Until this milestone the four status values were a VOCABULARY with no
+    #: graph: nothing in the repository ever wrote `status`, and no rule said
+    #: which value may follow which. This is that graph, and it is deliberately
+    #: the smallest one that lets a verified question be published:
+    #:
+    #:     DRAFT ──> PENDING_REVIEW ──> PUBLISHED
+    #:                     <────────────────┘
+    #:
+    #: PENDING_REVIEW sits between DRAFT and PUBLISHED because `is_adaptive_
+    #: eligible` is `PUBLISHED and ORACLE_VERIFIED`. Going DRAFT -> PUBLISHED
+    #: first would make a question start teaching the adaptive model at the
+    #: moment `question_promote` runs — eligibility flipping as a side effect
+    #: of the trust write. Routing through PENDING_REVIEW (which satisfies the
+    #: DRAFT/ORACLE_VERIFIED CHECK just as well) makes promotion change nothing
+    #: observable, and leaves publication as the single deliberate act that
+    #: turns a question on.
+    #:
+    #: PUBLISHED -> PENDING_REVIEW is the withdrawal edge. It only ever REDUCES
+    #: eligibility, so it needs no evidence of its own, and without it the most
+    #: consequential switch in the system would be one-way.
+    #:
+    #: BLOCKED has no edges yet: `census` and `oracle_pipeline` READ it, nothing
+    #: writes it, and inventing a quarantine authority was out of scope.
+    STATUS_TRANSITIONS = {
+        ("DRAFT", "PENDING_REVIEW"),
+        ("PENDING_REVIEW", "PUBLISHED"),
+        ("PUBLISHED", "PENDING_REVIEW"),
+    }
+
     TRUST_UNVERIFIED = "UNVERIFIED"
     TRUST_ORACLE_VERIFIED = "ORACLE_VERIFIED"
     TRUST_CHOICES = [
@@ -418,6 +449,25 @@ class Question(models.Model):
             models.Index(
                 fields=["topic", "base_difficulty"],
                 name="question_topic_diff_idx",
+            ),
+        ]
+        constraints = [
+            # A DRAFT question cannot have a proven answer key (M2 P2.7g-3).
+            #
+            # The two axes are independent by design, but not ALL four
+            # combinations are meaningful: DRAFT means the question is still
+            # being written, and an answer key proven against a statement that
+            # is still changing proves nothing. Every other pairing is
+            # legitimate and stays legal — including BLOCKED + ORACLE_VERIFIED,
+            # which is a question with a trustworthy key withdrawn for an
+            # unrelated reason, and PUBLISHED + UNVERIFIED, which is every
+            # legacy question in the bank.
+            models.CheckConstraint(
+                condition=~(
+                    models.Q(status="DRAFT")
+                    & models.Q(trust_state="ORACLE_VERIFIED")
+                ),
+                name="question_draft_cannot_be_oracle_verified",
             ),
         ]
 
@@ -723,7 +773,12 @@ class ReferenceSolution(models.Model):
         if by is None or by.pk is None:
             raise ValidationError("approval requires a persisted approver")
         self.review_state = self.REVIEW_APPROVED
-        self.approved_by = by
+        # FK by ID, not by object. The reviewer is resolved on the default
+        # connection while the reference is read and written through the
+        # operator alias, and Django refuses to relate objects it believes live
+        # on different databases. Assigning the id states the same fact without
+        # asking the router's opinion — the same pattern `pre_image` uses.
+        self.approved_by_id = by.pk
         self.approved_at = timezone.now()
         self.source_hash = compute_source_hash(self.source_code)
         self.save(update_fields=["review_state", "approved_by", "approved_at",
@@ -1308,3 +1363,647 @@ class OracleExecution(models.Model):
                     "may be updated after creation. Record a NEW execution "
                     "instead of editing history.")
         super().save(*args, **kwargs)
+
+
+class GlickoSnapshot(models.Model):
+    """
+    The Glicko state that existed IMMEDIATELY BEFORE one interaction (M2 P2.9b).
+
+    P2.10b found the gap this closes: `LearnerTopicSkill` and `QuestionSkill`
+    store only CURRENT state with `updated_at`. Nothing records what a
+    learner's rating was at the moment they attempted a question, so a future
+    knowledge-tracing model cannot use "the learner's ability at that time" as
+    a feature — the value is simply not in the database, and never was.
+
+    ── Why reconstruction is not an option ─────────────────────────────────
+
+    Replaying the rating history from submissions looks tempting and is wrong.
+    `glicko.rate` takes `periods_inactive`, derived from wall-clock gaps at
+    update time; the periods actually applied were a function of when the
+    update RAN, which is not recorded. A replay would produce a plausible
+    history, not the one that happened, and a plausible history presented as
+    fact is worse than an admitted gap.
+
+    So: **every row predating this model is historical-unknown, permanently.**
+    No backfill, no default, no inferred value.
+
+    ── BEFORE and AFTER are separated on purpose ───────────────────────────
+
+    `*_before` is the state fed into the update. `*_after` is the state it
+    produced, and **`*_after` encodes the outcome** — a rating that went up
+    means the learner was correct. Feeding it to a model predicting that same
+    interaction is handing over the label.
+
+    Both are stored, because `rating_after(n) == rating_before(n+1)` exactly
+    for a given (learner, topic) — rating does not drift between updates, only
+    RD inflates — which makes a missing snapshot detectable rather than
+    invisible. The separation is enforced in `glicko_history.kt_features`,
+    which refuses to emit any `*_after` field.
+
+    ── Why `submission` is not a ForeignKey ────────────────────────────────
+
+    MEASURED, not assumed: `groups_codesubmission` is RANGE PARTITIONED by
+    `submitted_at`, so its primary key is `(id, submitted_at)` and there is no
+    unique constraint on `id` alone. PostgreSQL rejects
+    `REFERENCES groups_codesubmission(id)` with "there is no unique constraint
+    matching given keys for referenced table". The id is stored as a plain
+    column with its own uniqueness, alongside the partition key so a join can
+    reach the right partition.
+    """
+
+    #: The interaction. Not an FK — see the class docstring.
+    submission_id_value = models.BigIntegerField(unique=True)
+    #: The partition key, so joining back to CodeSubmission can prune.
+    submission_submitted_at = models.DateTimeField()
+
+    #: Denormalised for the KT query "this learner's history in this topic".
+    #: Derivable through submission -> question -> topic; stored so the lookup
+    #: is an index scan rather than a three-table join, the same argument
+    #: P2.7g-1 made for `reference_source_hash`.
+    user = models.ForeignKey(settings.AUTH_USER_MODEL,
+                             on_delete=models.CASCADE,
+                             related_name="glicko_snapshots")
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE,
+                              related_name="glicko_snapshots")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE,
+                                 related_name="glicko_snapshots")
+
+    # ── PRE-interaction state: the only half admissible as a KT feature ──
+    learner_rating_before = models.FloatField()
+    learner_rd_before = models.FloatField()
+    learner_volatility_before = models.FloatField()
+    #: Fractional rating periods of inactivity fed to `glicko.rate`. This IS
+    #: the rating-period information the update used; without it the update
+    #: cannot be re-derived from the snapshot.
+    learner_periods_inactive = models.FloatField()
+
+    question_rating_before = models.FloatField()
+    question_rd_before = models.FloatField()
+    question_volatility_before = models.FloatField()
+    question_periods_inactive = models.FloatField()
+
+    # ── POST-interaction state: AUDIT ONLY, never a feature ──
+    learner_rating_after = models.FloatField()
+    learner_rd_after = models.FloatField()
+    question_rating_after = models.FloatField()
+    question_rd_after = models.FloatField()
+
+    #: The `now` the update used, not the row's insert time. Two snapshots
+    #: written by one backfill-style replay would share an insert time but
+    #: differ here, and the update's clock is what the arithmetic used.
+    recorded_at = models.DateTimeField()
+    #: Which implementation produced these numbers. A tuning change to TAU or
+    #: the RD bounds makes older snapshots incomparable, and silently mixing
+    #: them would be invisible without this.
+    glicko_version = models.CharField(max_length=32)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            # The KT sequence query: one learner's history in one topic.
+            models.Index(fields=["user", "topic", "recorded_at"],
+                         name="glicko_snap_user_topic_idx"),
+            models.Index(fields=["submission_submitted_at"],
+                         name="glicko_snap_submitted_idx"),
+        ]
+
+    def __str__(self):
+        return (f"glicko snapshot sub={self.submission_id_value} "
+                f"u={self.user_id} t={self.topic_id} "
+                f"r={self.learner_rating_before:.1f}")
+
+    def save(self, *args, **kwargs):
+        """
+        Append-only. A snapshot is a statement about a moment that has passed.
+
+        No `update_fields` exemption exists, unlike `OracleExecution` — there
+        is no later decision to record here, so nothing about a snapshot may
+        change after it is written.
+        """
+        if self.pk is not None:
+            raise ValidationError(
+                "GlickoSnapshot is append-only: a snapshot records state that "
+                "existed at a past instant and can never be corrected. Record "
+                "a new interaction instead.")
+        super().save(*args, **kwargs)
+
+
+#: Single source of truth for the artifact schema version.
+#:
+#: Defined here rather than in `question_artifact` because that module imports
+#: this one; re-exported there as `ARTIFACT_SCHEMA_VERSION`, which is the name
+#: callers should use. Two independently-maintained copies of this number would
+#: eventually disagree, and a disagreement means an approval validated under a
+#: schema it was not computed under.
+_ARTIFACT_SCHEMA_VERSION = 1
+
+
+class QuestionApproval(models.Model):
+    """
+    "Operator X approved artifact digest Y for question Q at time T."
+
+    The missing link in the trust chain (M2 P2.7g-3). Reference approval
+    (P2.7d) attests to one artifact — a blob of source code. This attests to a
+    COMPOSITE: the statement, the harness, every hidden case, the reference
+    that produced the answers, the provenance proving it ran, and the quality
+    gate's verdict. `question_artifact` reduces all of that to `artifact_digest`.
+
+    ── This row does not promote anything ──────────────────────────────────
+
+    Creating it changes no question. `trust_state` is written only by
+    `question_promote`, which independently rebuilds the digest from live state
+    and refuses unless it matches. An approval is evidence that a human looked;
+    promotion is a separate act that re-proves the artifact has not moved since
+    they looked. Splitting them is what makes "approve" safe to perform: the
+    worst outcome of a mistaken approval is a row nobody acts on.
+
+    ── Append-only ─────────────────────────────────────────────────────────
+
+    An approval is a statement a person made at a moment. Editing it would
+    rewrite what they said. Superseding is expressed by recording a NEW
+    approval; `current_for` reads the latest.
+    """
+
+    #: Denormalised deliberately. Revocation (future P2.7g-7) asks "which
+    #: approvals rest on this reference revision?", and answering it by
+    #: parsing digests would be a full scan of opaque hashes. These columns
+    #: make it an indexed lookup. They are also INSIDE the digest, so they
+    #: cannot drift from what was approved without invalidating it.
+    question = models.ForeignKey(Question, on_delete=models.PROTECT,
+                                 related_name="approvals")
+    reference = models.ForeignKey(ReferenceSolution, on_delete=models.PROTECT,
+                                  related_name="question_approvals")
+    reference_source_hash = models.CharField(max_length=64)
+
+    artifact_digest = models.CharField(max_length=64)
+    artifact_schema_version = models.PositiveSmallIntegerField(
+        default=_ARTIFACT_SCHEMA_VERSION)
+
+    #: The quality verdict as it stood at approval, frozen.
+    #:
+    #: Re-running the P2.7h-1 gate needs Judge0, so requiring it at promotion
+    #: would make trust depend on an external service being reachable. Freezing
+    #: it here instead means promotion reuses the evidence that was actually
+    #: approved and cannot have fresh, unreviewed quality numbers substituted.
+    #: Suite drift is still caught: changing a hidden test changes its case
+    #: digest, and that IS in the artifact digest.
+    quality_outcome = models.JSONField(default=dict)
+
+    #: Three separately-recorded actors (M2 P2.7g-3, decision B5). Four-eyes
+    #: is NOT enforced today — approver and executor may be the same person —
+    #: but the columns exist so the rule can be added later as a constraint
+    #: rather than a schema migration plus a backfill of unknowable history.
+    executed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True,
+        blank=True, related_name="oracle_executions_operated")
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True,
+        blank=True, related_name="question_reviews")
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="question_approvals")
+
+    executed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField()
+
+    #: Set by `question_promote`, never by approval. Records that this specific
+    #: approval is the one trust was granted on.
+    promoted_at = models.DateTimeField(null=True, blank=True)
+    promoted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True,
+        blank=True, related_name="question_promotions")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    #: Only these may change after creation, and only via `question_promote`.
+    _MUTABLE_AFTER_CREATION = frozenset({"promoted_at", "promoted_by"})
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["question", "-approved_at"],
+                         name="approval_question_ts_idx"),
+            models.Index(fields=["reference_source_hash"],
+                         name="approval_source_hash_idx"),
+            models.Index(fields=["artifact_digest"],
+                         name="approval_digest_idx"),
+        ]
+
+    def __str__(self):
+        return (f"approval q{self.question_id} "
+                f"digest={self.artifact_digest[:12]} "
+                f"by={self.approved_by_id}"
+                f"{' PROMOTED' if self.promoted_at else ''}")
+
+    def clean(self):
+        """A reference may only ever approve its OWN question."""
+        super().clean()
+        if self.reference_id and self.question_id:
+            if self.reference.question_id != self.question_id:
+                raise ValidationError({
+                    "reference": (
+                        f"reference {self.reference_id} belongs to question "
+                        f"{self.reference.question_id}, not {self.question_id}; "
+                        f"an approval may not cross questions")
+                })
+
+    def save(self, *args, **kwargs):
+        """Append-only; only the promotion stamp may be added later."""
+        if self.pk is not None:
+            update_fields = kwargs.get("update_fields")
+            if update_fields is None or not set(update_fields).issubset(
+                    self._MUTABLE_AFTER_CREATION):
+                raise ValidationError(
+                    "QuestionApproval is append-only: only the promotion stamp "
+                    "may be added after creation. Record a NEW approval "
+                    "instead of editing what someone approved.")
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def current_for(cls, question, using=None):
+        """
+        The most recent approval, or None. Not necessarily still valid.
+
+        Read on the question's OWN connection by default: an approval fetched
+        from one database and acted on against a question read from another is
+        a judgement about something that may not be there.
+        """
+        alias = using or question._state.db or DEFAULT_DB_ALIAS
+        return (cls.objects.using(alias).filter(question=question)
+                .order_by("-approved_at", "-pk").first())
+
+
+# ═════════════════════════════════════════════════════════════
+# Pre-image capture and rollback (M2 P2.7, blocker J8)
+#
+# Nothing may write production grading truth until the prior state can be
+# restored exactly. These three models are that prerequisite. The logic lives
+# in `groups/pre_image.py`; what is here is storage, plus the immutability the
+# storage itself has to guarantee.
+# ═════════════════════════════════════════════════════════════
+
+#: Bumped whenever CAPTURED_FIELDS or the pre-image encoding changes. Emitted
+#: FIRST in the digest, so a pre-image taken under one field set can never be
+#: mistaken for one taken under another.
+PRE_IMAGE_SCHEMA_VERSION = 1
+
+
+class RemediationBatch(models.Model):
+    """
+    A named, frozen set of questions that one remediation may touch.
+
+    Membership is frozen before any modification. Without that, "roll back the
+    batch" has no fixed referent: a batch that can still grow after work began
+    cannot say what it would restore.
+    """
+
+    STATE_OPEN = "OPEN"
+    STATE_CAPTURED = "CAPTURED"
+    STATE_APPLIED = "APPLIED"
+    STATE_ROLLED_BACK = "ROLLED_BACK"
+    STATE_CHOICES = [
+        (STATE_OPEN, "Open - capturing"),
+        (STATE_CAPTURED, "Captured - membership frozen"),
+        (STATE_APPLIED, "Applied"),
+        (STATE_ROLLED_BACK, "Rolled back"),
+    ]
+
+    batch_key = models.CharField(max_length=64, unique=True)
+    purpose = models.TextField()
+    state = models.CharField(max_length=16, choices=STATE_CHOICES,
+                             default=STATE_OPEN)
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                   on_delete=models.PROTECT,
+                                   related_name="remediation_batches")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    frozen_at = models.DateTimeField(null=True, blank=True)
+    frozen_by = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                  on_delete=models.PROTECT, null=True,
+                                  blank=True,
+                                  related_name="remediation_batches_frozen")
+
+    def __str__(self):
+        return f"batch {self.batch_key} ({self.state})"
+
+
+class QuestionPreImage(models.Model):
+    """
+    A complete, immutable copy of one question before a remediation touched it.
+
+    The WHOLE prior value of every mutable field, not a diff. A diff is only
+    sufficient if its base is still available and unchanged, and both of those
+    fail precisely when rollback matters.
+
+    IMMUTABLE AFTER CAPTURE. `save()` refuses every update: a second
+    remediation of the same question must not be able to overwrite the record
+    of what the first one found, because that record is the only route back to
+    the original state.
+    """
+
+    batch = models.ForeignKey(RemediationBatch, on_delete=models.PROTECT,
+                              related_name="pre_images")
+    question = models.ForeignKey(Question, on_delete=models.PROTECT,
+                                 related_name="pre_images")
+
+    schema_version = models.PositiveSmallIntegerField(
+        default=PRE_IMAGE_SCHEMA_VERSION)
+
+    content = models.TextField()
+    status = models.CharField(max_length=20)
+    trust_state = models.CharField(max_length=20)
+    execution_contract_version = models.CharField(max_length=8)
+    boilerplate_code = models.JSONField(default=dict)
+    hidden_wrapper_code = models.JSONField(default=dict)
+    hidden_test_cases = models.JSONField(default=list)
+
+    #: [{case, input, expected}] using `provenance.case_identity` - the SAME
+    #: identity the oracle and the approved artifact use, so a case cannot be
+    #: one thing to provenance and another to rollback.
+    case_identities = models.JSONField(default=list)
+
+    #: Derived from status+trust_state at capture time. Stored as a cross-check
+    #: that a restore reproduces the trust boundary's own verdict.
+    was_adaptive_eligible = models.BooleanField(default=False)
+
+    state_digest = models.CharField(max_length=64)
+
+    captured_by = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                    on_delete=models.PROTECT,
+                                    related_name="pre_images_captured")
+    captured_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "question"],
+                name="pre_image_one_per_question_per_batch"),
+        ]
+        indexes = [
+            models.Index(fields=["question", "-captured_at"],
+                         name="pre_image_question_ts_idx"),
+            models.Index(fields=["state_digest"], name="pre_image_digest_idx"),
+        ]
+
+    def captured_state(self):
+        """The captured fields as a dict, in `CAPTURED_FIELDS` shape."""
+        return {
+            "content": self.content,
+            "status": self.status,
+            "trust_state": self.trust_state,
+            "execution_contract_version": self.execution_contract_version,
+            "boilerplate_code": self.boilerplate_code,
+            "hidden_wrapper_code": self.hidden_wrapper_code,
+            "hidden_test_cases": self.hidden_test_cases,
+        }
+
+    def save(self, *args, **kwargs):
+        """Write-once. There is no legitimate edit to a captured prior state."""
+        if self.pk is not None:
+            raise ValidationError(
+                "QuestionPreImage is immutable: a captured prior state is the "
+                "only route back to it. Capture a NEW pre-image in a NEW batch "
+                "instead of editing this one.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (f"pre-image q{self.question_id} batch={self.batch_id} "
+                f"digest={self.state_digest[:12]}")
+
+
+class RemediationAction(models.Model):
+    """
+    Append-only record of one applied remediation, or one rollback.
+
+    `post_digest` is what rollback compares live state against. If a question
+    has moved since the action, someone else edited it, and restoring blindly
+    would discard their work without saying so.
+    """
+
+    CLASS_CONTRACT_REPAIR = "CONTRACT_REPAIR"
+    CLASS_STATEMENT_REPAIR = "STATEMENT_REPAIR"
+    CLASS_BOILERPLATE_REPAIR = "BOILERPLATE_REPAIR"
+    CLASS_HIDDEN_TEST_REPAIR = "HIDDEN_TEST_REPAIR"
+    CLASS_EXPECTED_OUTPUT_REPAIR = "EXPECTED_OUTPUT_REPAIR"
+
+    #: The stored INPUT of a case changed — the question being asked, not the
+    #: answer being recorded (M2 P2.7, migration 0045).
+    #:
+    #: Distinct from HIDDEN_TEST_REPAIR ("the stored answer's FORM changed") and
+    #: from EXPECTED_OUTPUT_REPAIR ("the answer changed") even though all three
+    #: write `hidden_test_cases`. Recording an input change under either of the
+    #: others would make the audit trail describe the one thing this batch has
+    #: been most careful to keep separate: whether a repair moved the question
+    #: or moved the answer.
+    CLASS_INPUT_REPAIR = "INPUT_REPAIR"
+
+    #: Cases were ADDED to a suite, and existing cases were labelled with the
+    #: coverage category the quality gate reads (M2 P2.7h-3, migration 0046).
+    #:
+    #: A fourth class over `hidden_test_cases`, and the first that grows the
+    #: suite rather than correcting it. HIDDEN_TEST_REPAIR means "the stored
+    #: answer's FORM changed", INPUT_REPAIR "the question being asked changed",
+    #: EXPECTED_OUTPUT_REPAIR "the answer changed" — none of them says "there
+    #: are now more questions than there were", which is what a reader of the
+    #: audit trail most needs to know before trusting an oracle run: evidence
+    #: is scoped to case digests, and a suite that grew has cases no execution
+    #: covers.
+    CLASS_SUITE_EXPANSION = "SUITE_EXPANSION"
+
+    #: A stub's placeholder statement was replaced by a generated one
+    #: (M2 P2.7h-14, migration 0048).
+    #:
+    #: NOT `STATEMENT_REPAIR`. A repair replaces a defective statement with one
+    #: a human adjudicated; this replaces a templated placeholder that was
+    #: never a statement at all, with text a model produced and a human
+    #: approved. A reader of the audit trail needs to tell those apart —
+    #: "somebody fixed the wording" and "the wording was generated" carry
+    #: different weight when a learner later disputes what the question asked.
+    CLASS_STATEMENT_GENERATION = "STATEMENT_GENERATION"
+
+    #: A stub's `*args, **kwargs` starter was replaced by a declared signature
+    #: (M2 P2.7h-14, migration 0048).
+    #:
+    #: NOT `BOILERPLATE_REPAIR`, which is annotation-only by construction — it
+    #: refuses a renamed or reordered parameter, so it cannot express "this
+    #: method had no arity and now has one". That is a larger change and it
+    #: gets its own name: the declared signature is what every hidden case is
+    #: later bound against, so the audit trail must say when arity first
+    #: existed.
+    CLASS_SIGNATURE_DECLARATION = "SIGNATURE_DECLARATION"
+
+    #: A question moved along the status lifecycle (M2 P2.7h-8, migration
+    #: 0047).
+    #:
+    #: Recorded here rather than in a new table because `status` is already one
+    #: of the seven CAPTURED_FIELDS: the pre-image machinery holds the previous
+    #: value, `post_digest` holds the resulting one, and `preimage_rollback`
+    #: can already restore it. A separate status-history table would duplicate
+    #: all three and give rollback a second thing to know about.
+    #:
+    #: Distinct from every repair class because it changes no grading truth at
+    #: all. A reader of the audit trail needs "this question became publishable"
+    #: to look nothing like "this question's answers changed".
+    CLASS_STATUS_TRANSITION = "STATUS_TRANSITION"
+
+    CLASS_MANUAL_REVIEW = "MANUAL_REVIEW"
+    CLASS_COMPLETE_REBUILD = "COMPLETE_REBUILD"
+    CLASS_ROLLBACK = "ROLLBACK"
+    CLASS_CHOICES = [(c, c) for c in (
+        CLASS_CONTRACT_REPAIR, CLASS_STATEMENT_REPAIR,
+        CLASS_BOILERPLATE_REPAIR, CLASS_HIDDEN_TEST_REPAIR,
+        CLASS_EXPECTED_OUTPUT_REPAIR, CLASS_INPUT_REPAIR,
+        CLASS_SUITE_EXPANSION, CLASS_STATEMENT_GENERATION,
+        CLASS_SIGNATURE_DECLARATION, CLASS_STATUS_TRANSITION,
+        CLASS_MANUAL_REVIEW, CLASS_COMPLETE_REBUILD, CLASS_ROLLBACK)]
+
+    batch = models.ForeignKey(RemediationBatch, on_delete=models.PROTECT,
+                              related_name="actions")
+    question = models.ForeignKey(Question, on_delete=models.PROTECT,
+                                 related_name="remediation_actions")
+    pre_image = models.ForeignKey(QuestionPreImage, on_delete=models.PROTECT,
+                                  related_name="actions")
+
+    action_class = models.CharField(max_length=32, choices=CLASS_CHOICES)
+    detail = models.TextField(blank=True, default="")
+    post_digest = models.CharField(max_length=64)
+
+    applied_by = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                   on_delete=models.PROTECT,
+                                   related_name="remediation_actions")
+    applied_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["batch", "question"],
+                         name="action_batch_question_idx"),
+            models.Index(fields=["question", "-applied_at"],
+                         name="action_question_ts_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        """Append-only: what was done is not editable after the fact."""
+        if self.pk is not None:
+            raise ValidationError(
+                "RemediationAction is append-only: record a NEW action "
+                "instead of editing the record of what was done.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.action_class} q{self.question_id} batch={self.batch_id}"
+
+
+class ReseedLedger(models.Model):
+    """
+    How far one question got through a reseed slice (M2 P2.7h-14).
+
+    ── Why this exists at all ──────────────────────────────────────────────
+
+    Reseed's candidate selector is `content__icontains=PLACEHOLDER_MARKER`, and
+    reseed's first write REMOVES that marker. The selector therefore erases the
+    question from its own candidate set on success, so progress cannot be
+    derived from it: a question that received a statement but not a signature
+    is finished by the selector's reckoning and half-done in fact. Every other
+    remediation in this milestone targeted a hand-picked question and needed no
+    such record. A 50-question slice that can fail in the middle does.
+
+    ── What it is NOT ──────────────────────────────────────────────────────
+
+    Orchestration state. Nothing else may read it to decide anything.
+
+    It deliberately holds **no digest**. A resumable writer is exactly the
+    place a digest handshake could rot into "the ledger says this was the
+    value", so there is no field here for a command to trust instead of live
+    state. Every write re-reads the question, re-computes its digest and
+    compares against the operator's `--expect-digest` — the ledger can say
+    which stage to attempt, never what the row contained.
+
+    It also holds no `status`, no `trust_state`, no cases, no expected output,
+    no execution, approval or publication. A row here cannot make a question
+    trusted, published, servable or adaptive-eligible; those live behind their
+    own commands, roles and digests, and none of them consults this table.
+
+    ── Rollback does not need it ───────────────────────────────────────────
+
+    Restoration reads `QuestionPreImage` and compares captured state against
+    live state (`pre_image.differing_fields`). A question with no ledger row,
+    or a wrong one, rolls back identically. The ledger records what was
+    ATTEMPTED; the pre-image records what was TRUE, and only the second is
+    authoritative.
+    """
+
+    #: Nothing has been attempted for this question in this slice.
+    STAGE_PENDING = "PENDING"
+    #: `content` written and audited; the placeholder is gone.
+    STAGE_STATEMENT = "STATEMENT_WRITTEN"
+    #: `boilerplate_code` written and audited; the method declares an arity.
+    STAGE_SIGNATURE = "SIGNATURE_WRITTEN"
+    #: Both writes landed. Reseed is done with this question — which is NOT
+    #: the same as the question being usable: it still has no cases, still
+    #: declares contract v1, and is still invisible to learners.
+    STAGE_COMPLETE = "COMPLETE"
+    #: A stage refused or failed. `last_error` says which and why.
+    STAGE_FAILED = "FAILED"
+
+    STAGE_CHOICES = [(s, s) for s in (
+        STAGE_PENDING, STAGE_STATEMENT, STAGE_SIGNATURE, STAGE_COMPLETE,
+        STAGE_FAILED)]
+
+    #: The stage each write ADVANCES TO, given it succeeded. Used by the
+    #: orchestrator to decide what remains; expressed here so the order lives
+    #: with the model rather than in a command.
+    ADVANCES = {
+        STAGE_PENDING: STAGE_STATEMENT,
+        STAGE_STATEMENT: STAGE_SIGNATURE,
+        STAGE_SIGNATURE: STAGE_COMPLETE,
+    }
+
+    batch = models.ForeignKey(RemediationBatch, on_delete=models.PROTECT,
+                              related_name="reseed_ledger")
+    question = models.ForeignKey(Question, on_delete=models.PROTECT,
+                                 related_name="reseed_ledger")
+
+    stage = models.CharField(max_length=24, choices=STAGE_CHOICES,
+                             default=STAGE_PENDING)
+    #: Why the last attempt failed, verbatim. Blank while nothing has failed.
+    last_error = models.TextField(blank=True, default="")
+    #: How many times a stage has been attempted for this question. A retry
+    #: budget is an operator's concern, not a correctness one — recorded so a
+    #: question that keeps failing is visible rather than silently re-tried.
+    attempts = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "question"],
+                name="reseed_ledger_one_per_question_per_batch"),
+        ]
+        indexes = [
+            models.Index(fields=["batch", "stage"],
+                         name="reseed_ledger_batch_stage_idx"),
+        ]
+
+    def __str__(self):
+        return f"reseed q{self.question_id} {self.stage} batch={self.batch_id}"
+
+    @property
+    def is_resumable(self):
+        """Whether an orchestrator should attempt another stage."""
+        return self.stage in self.ADVANCES or self.stage == self.STAGE_FAILED
+
+    def next_stage(self):
+        """
+        The stage a successful write would advance to, or None.
+
+        FAILED does not advance on its own: a failed question is retried at
+        whatever stage it actually reached, which the orchestrator re-derives
+        from live state and the action trail — never from this row alone.
+        """
+        return self.ADVANCES.get(self.stage)

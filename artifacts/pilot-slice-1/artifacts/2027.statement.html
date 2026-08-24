@@ -1,0 +1,15 @@
+<h3>Objective</h3><p>Two players alternately remove letters from a row of coloured pieces under a strict neighbour condition; decide whether the first player (Alice) wins when both play optimally.</p>
+<h3>Operation</h3><p>Alice moves first and may remove a piece coloured <b>A</b> only when both of the pieces immediately beside it are also coloured <b>A</b>. Bob may remove a piece coloured <b>B</b> only when both pieces immediately beside it are also coloured <b>B</b>. Players alternate; a player unable to make a legal removal loses immediately.</p>
+<h3>Input</h3><p>The method receives one parameter <code>colors</code>, a string consisting solely of the letters <b>A</b> and <b>B</b>. The first and last pieces can never be removed because they do not have a piece on both sides.</p>
+<h3>Output</h3><p>The method returns a <b>boolean</b>: <code>true</code> when Alice wins, <code>false</code> when Bob wins.</p>
+<h3>Constraints</h3><ul><li>The length of <code>colors</code> is between 1 and 100 000 characters inclusive.</li><li>Each character is either <b>A</b> or <b>B</b>.</li></ul>
+<h3>Edge Cases</h3><ul><li>The first and last pieces can never be removed because they lack two neighbours.</li><li>A player may only remove a piece of their own colour, never the other player's.</li></ul>
+<h3>Load‑bearing rule</h3><p>Both neighbours must match the piece’s colour; a single matching neighbour is insufficient.</p>
+<h3>Method behaviour</h3><p>The method accepts the string <code>colors</code> and returns a boolean. It does not print and does not return a count of moves.</p>
+<h3>Worked example</h3><pre><code>colors = "AAABAAA"
+# Alice can remove the middle A (index 3) because its neighbours are A.
+# After removal the row becomes "AAAAAA".
+# Bob now has no B with two B neighbours, so he cannot move and loses.
+# The method should return true.
+</code></pre>
+<p><code>def removeColoredPiecesIfBothNeighborsAreTheSameColor(self, colors: str) -> bool:</code></p>

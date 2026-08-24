@@ -1,0 +1,33 @@
+{
+  "applicable": false,
+  "artifact_digest": "f899ae69039a1167823064c3b26ca7ca26757e9572c454c48051ad1fb39cce7c",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "medium",
+  "frozen_batch": false,
+  "generated_at": "2026-08-24T06:50:47.890316+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "7df92ef0d5d22122183802dcb5443ced74ebf07ed6cbd5ed350a26025be6cb29",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "2290.starter.py",
+    "statement": "2290.statement.html"
+  },
+  "prompt_template_version": "specification-formatter/v4",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 2290,
+  "refusals": [],
+  "regeneration_count": 0,
+  "specification_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20",
+  "specification_provenance": "OPERATOR_SUPPLIED",
+  "status": "READY_FOR_REVIEW",
+  "title": "Count Number of Ways to Place Houses",
+  "topic": "Dynamic Programming"
+}

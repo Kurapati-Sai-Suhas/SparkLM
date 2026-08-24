@@ -81,7 +81,7 @@ def output_identity(output):
 
 def record_execution(*, question, reference, stdin, produced_output, status,
                      execution_contract_version, executor=None,
-                     executed_at=None, is_authoritative=False):
+                     executed_at=None, is_authoritative=False, using=None):
     """
     Record one execution. Returns the created `OracleExecution`.
 
@@ -141,7 +141,14 @@ def record_execution(*, question, reference, stdin, produced_output, status,
         is_authoritative=is_authoritative,
     )
     execution.full_clean(exclude=["produced_output"])
-    execution.save()
+    # Routed to the SELECTED connection. A default save would write provenance
+    # to whatever `default` happens to be — on this deployment the read-only
+    # census role, and on any deployment a different connection from the one
+    # the question was read through.
+    if using:
+        execution.save(using=using)
+    else:
+        execution.save()
     return execution
 
 

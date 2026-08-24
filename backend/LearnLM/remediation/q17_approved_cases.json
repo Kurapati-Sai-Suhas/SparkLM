@@ -1,0 +1,18 @@
+[
+  {
+    "stdin": "23",
+    "expected_output": "[\"ad\",\"ae\",\"af\",\"bd\",\"be\",\"bf\",\"cd\",\"ce\",\"cf\"]"
+  },
+  {
+    "stdin": "",
+    "expected_output": "[]"
+  },
+  {
+    "stdin": "1",
+    "expected_output": "[]"
+  },
+  {
+    "stdin": "9",
+    "expected_output": "[\"w\",\"x\",\"y\",\"z\"]"
+  }
+]

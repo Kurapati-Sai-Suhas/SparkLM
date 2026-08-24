@@ -1,0 +1,7 @@
+<h3>Problem Description</h3><p>We are given an integer array <code>obstacles</code>. For each position <code>i</code> (0‑based) we want to know the length of the longest obstacle course that ends at <code>i</code>. An obstacle course is a subsequence of <code>obstacles[0..i]</code> that is non‑decreasing (each element is ≤ the next one) and must include <code>obstacles[i]</code> as its last element.</p><p>Return an array <code>answer</code> where <code>answer[i]</code> is the length of the longest valid obstacle course ending at position <code>i</code>.</p><h3>Input</h3><ul><li><code>obstacles</code>: a list of integers, the heights of the obstacles.</li></ul><h3>Output</h3><ul><li>A list of integers <code>answer</code> of the same length as <code>obstacles</code>.</li></ul><h3>Constraints</h3><ul><li>1 ≤ <code>len(obstacles)</code> ≤ 10⁵</li><li>1 ≤ <code>obstacles[i]</code> ≤ 10⁹</li></ul><h3>Example</h3><pre><code>Input: obstacles = [1,2,3,2]
+Output: [1,2,3,3]
+Explanation:
+- At i = 0, the only course is [1] → length 1.
+- At i = 1, we can take [1,2] → length 2.
+- At i = 2, we can take [1,2,3] → length 3.
+- At i = 3, a longest non‑decreasing subsequence ending at index 3 is [1,2,2] or [1,2,3,2] is not non‑decreasing, so the best length is 3.</code></pre><p><code>def findTheLongestValidObstacleCourseAtEachPosition(self, obstacles: list[int]) -> list[int]</code></p>

@@ -130,7 +130,25 @@ def test_a_new_submission_defaults_to_ineligible(topic, learner):
     (Question.STATUS_DRAFT, Question.TRUST_UNVERIFIED, False),
 ])
 def test_adaptive_eligibility_requires_both_axes(topic, status, trust, eligible):
-    assert make(topic, status, trust).is_adaptive_eligible is eligible
+    """
+    The property is pure, so it is checked on an UNSAVED instance.
+
+    Originally this persisted each combination. P2.7g-3 added a CHECK
+    constraint making DRAFT + ORACLE_VERIFIED unwritable, which would have
+    forced that row out of the table — but the property must stay correct for
+    it regardless. The two guards protect different things: the constraint
+    stops the state existing, and this stops the property mis-answering if it
+    ever did. Dropping the case because the database now forbids it would
+    remove the defence-in-depth reading of `is_adaptive_eligible` exactly
+    where it matters most.
+    """
+    question = Question(
+        title="Q", content="c", topic=topic, base_difficulty=1200.0,
+        hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
+        boilerplate_code={"python": "class Solution: pass"},
+        hidden_wrapper_code={}, status=status, trust_state=trust)
+
+    assert question.is_adaptive_eligible is eligible
 
 
 # ─────────────────────────────────────────────────────────────

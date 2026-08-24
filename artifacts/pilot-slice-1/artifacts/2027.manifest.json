@@ -1,0 +1,33 @@
+{
+  "applicable": false,
+  "artifact_digest": "8abd8274386a12502ce4f42a44522aeba43aae1b60cf072a791b6d8550d7514b",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "medium",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T19:58:10.257386+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "00d030c1948b3c8b374c950e137241a70e44cf31df3d849c8d5b25861d8f4033",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "2027.starter.py",
+    "statement": "2027.statement.html"
+  },
+  "prompt_template_version": "specification-formatter/v2",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 2027,
+  "refusals": [],
+  "regeneration_count": 0,
+  "specification_digest": "f6937c82a0f38eec99bf5efaeac9f118f6f693dbf6244a494a3914c6e12b4536",
+  "specification_provenance": "OPERATOR_SUPPLIED",
+  "status": "READY_FOR_REVIEW",
+  "title": "Remove Colored Pieces if Both Neighbors are the Same Color",
+  "topic": "Math"
+}

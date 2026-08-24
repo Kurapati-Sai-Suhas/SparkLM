@@ -33,7 +33,10 @@ from .hybrid_router import (
     HierarchicalEngine,
     compute_routing_telemetry, get_mastered_topic_names,
 )
-from .services import GradingService, GradingUnavailable, ProgressionService
+from .services import (
+    ExecutionContractError, GradingService, GradingUnavailable,
+    ProgressionService,
+)
 # `generate_test_cases` is deliberately NOT imported here (M2 P2.5). Grading
 # data must never be produced inside a learner request; see the note in
 # AdaptiveProblemView where the fallback used to live.
@@ -84,6 +87,34 @@ def _servable_questions():
     return Question.objects.exclude(
         content__icontains=Question.PLACEHOLDER_MARKER
     ).exclude(hidden_test_cases=[]).exclude(hidden_test_cases__isnull=True)
+
+
+def _servable_question(problem_id):
+    """
+    The question behind `problem_id` IF it is servable, else None (M2 P2.7h-13).
+
+    The recommendation path has always filtered on `_servable_questions()`,
+    but the direct-id endpoints re-fetched with a bare
+    `Question.objects.get(id=...)` — so knowing an integer was enough to reach
+    a question the selector deliberately excludes. Run built and executed its
+    wrapper; Submit graded against its hidden tests and wrote a
+    `CodeSubmission`. The quarantine was real for the recommendation path and
+    decorative everywhere else.
+
+    Derived from `_servable_questions()` rather than restating its exclusions,
+    so the predicate has ONE definition. Restating it is how the two paths
+    disagreed in the first place, and a future change to the serving rule
+    (P2.7h-12 left `status == PUBLISHED` open) must not need finding again.
+    """
+    try:
+        return _servable_questions().filter(pk=problem_id).first()
+    except (ValueError, TypeError):
+        # A malformed id is "not a servable question", not a 500. `None` needs
+        # no special case: Django renders it as `pk IS NULL`, which matches
+        # nothing. An explicit blank-id guard here as well would be a second
+        # mechanism for the same outcome — and a mutation sweep proved it
+        # unkillable, which is how a redundant check hides a missing one.
+        return None
 
 
 #: How long a failed question stays demoted (M2 P2.8a).
@@ -362,13 +393,18 @@ class CodeRunView(APIView):
         # hand — which is how the two drifted in the first place.
         executable_code = raw_code
         if problem_id:
-            try:
-                question = Question.objects.get(id=problem_id)
-            except (Question.DoesNotExist, ValueError, TypeError):
-                # Unknown or malformed id: run the source as written rather
-                # than 404. Run is a scratchpad; refusing to execute would be a
-                # behaviour regression for callers that omit a valid id.
-                question = None
+            # Unknown, malformed, OR not servable: run the source as written
+            # rather than 404 (M2 P2.7h-13). Run is a scratchpad, and refusing
+            # to execute would be a behaviour regression for callers that omit
+            # a valid id — so an unservable question degrades to exactly the
+            # unknown-id path that already existed, with no new status code
+            # and no client change.
+            #
+            # It matters because the question is what supplies the wrapper and
+            # starter used to build the executable: without this, a question
+            # the selector excludes could still have its harness executed by
+            # anyone who knew its id.
+            question = _servable_question(problem_id)
             if question is not None:
                 executable_code, _ = GradingService._build_executable(
                     question, language, raw_code
@@ -404,22 +440,28 @@ class CodeSubmitView(APIView):
         language   = clean['language']
         problem_id = clean['problem_id']
 
-        try:
-            question = Question.objects.get(id=problem_id)
-        except (Question.DoesNotExist, ValueError):
+        if not Question.objects.filter(pk=problem_id).exists():
             return Response({"error": "Question not found"}, status=404)
-        if not question.hidden_test_cases:
-            # 409, not 500 (M4 Phase B). A question with no test cases is a
+
+        # Servable, or refused — the SAME predicate the recommendation path
+        # uses (M2 P2.7h-13). Previously this re-fetched the row directly and
+        # checked only for empty hidden tests, so a placeholder question the
+        # selector excludes could still be graded by id.
+        question = _servable_question(problem_id)
+        if question is None:
+            # 409, not 500 (M4 Phase B). An unservable question is a
             # data-integrity condition, not a server fault: the code is
             # behaving correctly and the client can do nothing about it
             # either way. Reporting it as 500 polluted error metrics with a
             # content problem and made real faults harder to see.
             #
-            # _servable_questions() already excludes these from every
-            # recommendation path, so reaching this means the client asked
-            # for a specific unservable question by id.
+            # Reaching this means the client asked for a specific question by
+            # id that `_servable_questions()` excludes — no test cases, or a
+            # placeholder statement. The status and `detail` are unchanged
+            # from when this covered only the empty-suite case, so clients
+            # that already handle `question_not_gradable` need no change.
             return Response(
-                {"error": "Question misconfigured: no test cases",
+                {"error": "Question misconfigured: not available for grading",
                  "detail": "question_not_gradable"},
                 status=409,
             )
@@ -433,6 +475,30 @@ class CodeSubmitView(APIView):
             return Response(
                 {"error": "Code Execution Service Unavailable", "details": exc.details},
                 status=503,
+            )
+        except ExecutionContractError as exc:
+            # 409, for the same reason as the no-test-cases branch above: the
+            # question's stored test data cannot be executed as written, which
+            # is a data-integrity condition rather than a server fault. 48
+            # production questions store a list where text is required.
+            #
+            # ONLY this exception. A Judge0 outage stays 503 so the client
+            # keeps retrying something that will work later, and any other
+            # exception stays a 500 — laundering a genuine programming fault
+            # into a content-problem label would hide exactly the bugs this
+            # status is meant to stop hiding.
+            #
+            # `exc.details` names the failing case and is logged, never
+            # returned: it describes the hidden test data, and grading data
+            # never leaves the server (M2 P2.5).
+            logger.error(
+                "Execution contract failure on question %s (%s): %s",
+                question.pk, language, exc.details,
+            )
+            return Response(
+                {"error": "Question misconfigured: test data cannot be executed",
+                 "detail": "question_not_gradable"},
+                status=409,
             )
 
         submission, elo_result, profile = ProgressionService.apply_submission(

@@ -1,0 +1,26 @@
+{
+  "author": "assistant-drafted, pending operator verification",
+  "author_confidence": "high",
+  "canonical_identity": {
+    "problem_number": "2068",
+    "slug": "check-whether-two-strings-are-almost-equivalent",
+    "source": "leetcode_csv_2024_11_02"
+  },
+  "constraints": "Both strings have the same length, between 1 and 100 characters, and contain only lowercase English letters.",
+  "edge_cases": "A letter appearing in neither string has a difference of zero. A letter appearing in only one string is compared against a count of zero in the other. A difference of exactly three is still acceptable.",
+  "input_semantics": "Two parameters, word1 and word2, both strings of lowercase English letters and both of the same length.",
+  "load_bearing": "Every letter of the alphabet is checked, not only the letters that appear. The threshold is at most three, so three passes and four fails. The difference is a size and is never negative.",
+  "method_behaviour": "The method accepts both strings and returns a boolean. It does not print and does not return the differing letters.",
+  "objective": "Decide whether two equal-length strings use every letter of the alphabet at similar frequencies.",
+  "output_semantics": "A boolean: true when every letter's frequency difference is at most three, false as soon as any letter exceeds it.",
+  "provenance": "OPERATOR_SUPPLIED",
+  "question_id": 2057,
+  "required_operation": "For each of the twenty-six lowercase letters, count how many times it occurs in word1 and how many times it occurs in word2, and take the size of the difference between those two counts. The strings qualify when every one of those differences is at most three.",
+  "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
+  "verification_notes": "Specification describes the intended problem.",
+  "verification_source": "operator_manual_review",
+  "verified_at": "2026-08-24T07:42:35.593094+00:00",
+  "verified_by": "Suhas",
+  "verified_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
+  "written_at": "2026-08-23T19:34:10.471158+00:00"
+}

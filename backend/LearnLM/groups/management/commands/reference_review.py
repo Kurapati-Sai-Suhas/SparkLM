@@ -40,6 +40,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
+from groups.management.commands import _preimage_ops as ops
 from groups.models import ReferenceSolution
 
 #: Actions that change state. Everything else is read-only, which is the
@@ -51,6 +52,38 @@ MUTATING_ACTIONS = {"submit", "approve", "reject", "activate", "deactivate"}
 #: reopen (P2.7d: a reference is superseded, never edited), so both are one-way
 #: doors and get a second explicit confirmation.
 IRREVERSIBLE_ACTIONS = {"approve", "reject"}
+
+
+def _topic_name(question):
+    """
+    The topic's name, read through `default`.
+
+    NOT joined from the reference's own connection: the oracle role holds
+    SELECT on `groups_question` and nothing on `groups_topic`, so a
+    `select_related("question__topic")` made every read of a reference fail
+    with `permission denied for table groups_topic`. The id is on the row; the
+    name is a heading.
+    """
+    if not question.topic_id:
+        return "-"
+    from groups.models import Topic
+    topic = Topic.objects.filter(pk=question.topic_id).first()
+    return topic.name if topic else f"#{question.topic_id}"
+
+
+def _approver_name(reference):
+    """
+    The approver's username, read through `default`.
+
+    NOT through the reference's own connection: the oracle role holds no
+    privilege on the user table, so following the FK there would make an
+    ordinary listing fail on a permission error. The id is authoritative and
+    lives on the row; the name is a display convenience.
+    """
+    if not reference.approved_by_id:
+        return "-"
+    user = get_user_model().objects.filter(pk=reference.approved_by_id).first()
+    return user.username if user else f"#{reference.approved_by_id}"
 
 
 class Command(BaseCommand):
@@ -77,20 +110,40 @@ class Command(BaseCommand):
         parser.add_argument(
             "--state", type=str, default=None,
             help="Filter `list` by review state.")
+        parser.add_argument(
+            "--alias", default="default",
+            help="Database connection. `oracle` on production; the reference "
+                 "is read and written through it, with no fallback.")
+
 
     # ── entry point ──────────────────────────────────────────
 
     def handle(self, *args, **options):
         action = options["action"]
+        alias = options["alias"]
 
         if action == "list":
-            return self._list(options["state"])
+            return self._list(options["state"], alias)
 
         reference_id = options["reference_id"]
         if reference_id is None:
             raise CommandError(f"'{action}' needs a reference id.")
 
-        reference = self._get_reference(reference_id)
+        # The gate runs for the MUTATING actions only: `inspect` reads, and a
+        # reviewer must be able to read a candidate through any connection they
+        # are entitled to.
+        if action not in ("inspect",):
+            identity = ops.describe_target(alias)
+            if identity["is_production"]:
+                ops.gate_writing_role(alias, allowed=ops.ALLOWED_ORACLE_ROLES)
+                ops.gate_write_privilege(
+                    alias, required=ops.REFERENCE_WRITE_PROBE,
+                    forbidden=ops.ORACLE_FORBIDDEN)
+            else:
+                ops.gate_write_privilege(alias,
+                                         required=ops.REFERENCE_WRITE_PROBE)
+
+        reference = self._get_reference(reference_id, alias)
 
         # Authorisation for EVERY action but `list` — including `inspect`,
         # which can print grading truth to a terminal.
@@ -145,9 +198,12 @@ class Command(BaseCommand):
                 f"project already uses for admin surfaces.")
         return operator
 
-    def _get_reference(self, reference_id):
-        reference = (ReferenceSolution.objects
-                     .select_related("question", "question__topic", "approved_by")
+    def _get_reference(self, reference_id, alias="default"):
+        # `approved_by` is NOT select_related: the operator alias holds no
+        # privilege on the user table, and a join would make every read of a
+        # reference depend on one.
+        reference = (ReferenceSolution.objects.using(alias)
+                     .select_related("question")
                      .filter(pk=reference_id).first())
         if reference is None:
             raise CommandError(f"No reference solution with id {reference_id}.")
@@ -155,8 +211,9 @@ class Command(BaseCommand):
 
     # ── read-only ────────────────────────────────────────────
 
-    def _list(self, state):
-        queryset = ReferenceSolution.objects.select_related("question")
+    def _list(self, state, alias="default"):
+        queryset = ReferenceSolution.objects.using(alias).select_related(
+            "question")
         if state:
             queryset = queryset.filter(review_state=state.upper())
         rows = list(queryset.order_by("review_state", "pk"))
@@ -180,8 +237,7 @@ class Command(BaseCommand):
             provenance = ("intact" if reference.has_valid_approval_provenance
                           else ("-" if reference.review_state !=
                                 ReferenceSolution.REVIEW_APPROVED else "BROKEN"))
-            approver = (reference.approved_by.username
-                        if reference.approved_by_id else "-")
+            approver = _approver_name(reference)
             self.stdout.write(
                 f"{reference.pk:>6}  {reference.question_id:>8}  "
                 f"{reference.language:<12}{reference.review_state:<12}"
@@ -207,14 +263,13 @@ class Command(BaseCommand):
             f"\nReference {reference.pk} — question {question.pk}"))
         for label, value in [
             ("question", f"{question.pk} · {question.title}"),
-            ("topic", question.topic.name if question.topic_id else "-"),
+            ("topic", _topic_name(question)),
             ("language", reference.language),
             ("review state", reference.review_state),
             ("is_active", reference.is_active),
             ("canonical", reference.is_canonical),
             ("provenance intact", reference.has_valid_approval_provenance),
-            ("approved by", reference.approved_by.username
-             if reference.approved_by_id else "-"),
+            ("approved by", _approver_name(reference)),
             ("approved at", reference.approved_at or "-"),
             ("source hash", reference.source_hash or "-"),
             ("source length", f"{len(reference.source_code)} chars"),
@@ -288,7 +343,7 @@ class Command(BaseCommand):
 
         if action == "approve":
             self.stdout.write(
-                f"  approved_by  {reference.approved_by.username}\n"
+                f"  approved_by  {operator.username}\n"
                 f"  approved_at  {reference.approved_at}\n"
                 f"  source_hash  {reference.source_hash}")
             self.stdout.write(self.style.WARNING(

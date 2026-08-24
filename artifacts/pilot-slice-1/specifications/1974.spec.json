@@ -1,0 +1,26 @@
+{
+  "author": "assistant-drafted, pending operator verification",
+  "author_confidence": "high \u2014 this is the defect Phase 5 produced and the correction is the point of including it",
+  "canonical_identity": {
+    "problem_number": "1979",
+    "slug": "find-greatest-common-divisor-of-array",
+    "source": "leetcode_csv_2024_11_02"
+  },
+  "constraints": "The list holds between 2 and 1000 integers. Each value is between 1 and 1000 inclusive.",
+  "edge_cases": "When every value is identical the smallest and largest are the same number, and the answer is that number. A list containing 1 always yields 1 because 1 divides everything.",
+  "input_semantics": "One parameter, nums, a list of positive integers. The list is not sorted and may contain repeated values.",
+  "load_bearing": "Exactly two values participate: the smallest and the largest. Not all elements. Not any adjacent pair. The distinction changes the answer: for [3, 6, 4] the smallest is 3 and the largest is 6, giving 3, whereas the divisor common to all three values is 1.",
+  "method_behaviour": "The method accepts the list and returns one integer. It does not print, does not mutate the input, and does not return a list.",
+  "objective": "Given a list of positive integers, report the greatest common divisor of exactly two of them: the smallest value present and the largest value present.",
+  "output_semantics": "A single integer: the greatest common divisor of the smallest and largest values in nums.",
+  "provenance": "OPERATOR_SUPPLIED",
+  "question_id": 1974,
+  "required_operation": "Find the minimum element and the maximum element of the list, then compute the greatest common divisor of those two numbers only. The greatest common divisor of the whole list is NOT what is wanted and is a different quantity.",
+  "specification_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
+  "verification_notes": "Operator explicitly confirms the intended operation is GCD(min(nums), max(nums)) and NOT GCD(all nums).",
+  "verification_source": "operator_manual_review",
+  "verified_at": "2026-08-24T07:42:35.593094+00:00",
+  "verified_by": "Suhas",
+  "verified_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
+  "written_at": "2026-08-23T19:34:10.471158+00:00"
+}

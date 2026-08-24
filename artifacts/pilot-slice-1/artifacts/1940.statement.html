@@ -1,0 +1,25 @@
+<h3>Problem Statement</h3>
+<p>The method <code>sumOfDigitsOfStringAfterConvert</code> receives two parameters: a string <code>s</code> consisting of lowercase English letters, and an integer <code>k</code> indicating the number of digit‑summing rounds.</p>
+<p>First, convert each letter of <code>s</code> to its position in the alphabet (a=1, b=2, …, z=26). Concatenate these decimal positions to form a single integer. For example, “abz” becomes “1 2 26” → “1226”.</p>
+<p>Then perform exactly <code>k</code> rounds. In each round replace the current integer by the sum of its decimal digits. Rounds continue even if the number is already a single digit; a further round leaves it unchanged.</p>
+<p>Return the integer obtained after the final round.</p>
+<p><strong>Constraints</strong></p>
+<ul>
+<li>1&#8804;|s|&#8804;100</li>
+<li>1&#8804;k&#8804;10</li>
+</ul>
+<p><strong>Edge Cases</strong></p>
+<ul>
+<li>The digit‑summing rounds are executed exactly <code>k</code> times, no more, no less.</li>
+<li>Letters whose alphabet position has two digits (10‑26) contribute two digits to the concatenated number.</li>
+<li>If the number becomes a single digit before all rounds are finished, subsequent rounds leave it unchanged.</li>
+</ul>
+<p><strong>Worked Example</strong></p>
+<pre><code>s = "abc"
+k = 2
+Conversion: a→1, b→2, c→3 → "123" (integer 123)
+Round 1: 1+2+3 = 6
+Round 2: 6 (single digit remains 6)
+Result: 6
+</code></pre>
+<p><code>def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:</code></p>

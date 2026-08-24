@@ -11,7 +11,9 @@ item impossible or technically incorrect.
 announcement. Track B is pre-planned in §M10 and must be executed *before*
 users arrive, not after.
 
-**Totals:** 31 phases · 12 milestones · **~93.5 engineer-days** (Track A).
+**Totals:** 32 phases · 12 milestones · **~93.5 engineer-days** (Track A), plus
+P2.10 (neural knowledge tracing) which is DATA-GATED and carries no Track A
+budget — only its 2 ed research sub-phase (P2.10a) is executable at current volume.
 Track B adds ~52 ed when triggered.
 
 ---
@@ -161,6 +163,9 @@ The dependency is therefore **execution correctness → grading correctness → 
 | **P2.7d** Hidden-test generation + mutation | Oracle-generated outputs only. Tier-1 known-wrong 100%, Tier-2 ≥80% advisory | P2.7a/b/c, census |
 | **P2.8** Adaptive-learning signal integrity | Audit which learner signals are trustworthy; partial credit and outcome class replace the single boolean | P2.7 complete |
 | **P2.9** Adaptive routing algorithm | Research, then repair. Two-sided Elo, exploration, repeat-failure exclusion, curriculum gate | P2.8 |
+| **P2.9a** Shadow adaptive model | ✅ Two-sided Glicko-2 per topic, unarmed. `LearnerTopicSkill` / `QuestionSkill` | P2.8b |
+| **P2.9b** Point-in-time Glicko history | ✅ `GlickoSnapshot` records the rating/RD/period state each interaction actually consumed. Closes the gap P2.10b found: current-state-only storage made Glicko unusable as a KT feature. **Before/after separated; `*_after` structurally unreachable by any feature consumer.** Additive migration `0043`, **no backfill** — pre-P2.9b history is permanently unrecoverable | P2.9a, P2.10b |
+| **P2.10** Neural knowledge tracing (**data-gated**) | Transformer KT as a *shadow* learner-state estimator feeding the deterministic selector. Only P2.10a runs at Track A volume; every later sub-phase is gated on P4.1 and an interaction-count threshold | P2.9, **P4.1**, **P6.1** |
 
 **P2.2.2/P2.2.3 (badges), P2.3, P2.4 follow P2.9.** P2.2.1 (streaks) is independent of the judge and is already implemented (PR #13).
 
@@ -208,6 +213,138 @@ Automatic promotion is permitted for **one class only**: metadata that cannot
 change a verdict (title, prose `content`, `category` labels on existing cases).
 Anything touching `stdin`, `expected_output`, `boilerplate_code`,
 `hidden_wrapper_code` or the execution contract requires the approval gate.
+
+### P2.7 pilot ledger — reconciliation-only, question 1779
+
+**COMPLETE**
+
+| Item | Evidence |
+|---|---|
+| P2.7e production census | Neon `neondb`, 2,926 questions, all DRAFT+UNVERIFIED, 0 references/provenance/approvals, 6,478 unprovenanced expected_output |
+| Production migrations 0038–0043 | Applied 2026-08-13; catalogue-verified; zero data loss across 10 integrity checks |
+| Judge0 limit verification | `/config_info` 200; `cpu_time_limit=5.0` (max 20), `memory_limit=256000` (max 2048000); `enable_network: false` server-side |
+| pytest production isolation | `-p sparklm_test_isolation` redirects before Django loads; `conftest.py` aborts on a non-local host |
+| Final privilege verification | Write trace, column-level UPDATE design, identity-sequence finding (`deptype='i'` — **no sequence GRANT needed**) |
+| **`reference_create`** | 36 tests, mutation 14/15 (the survivor is a declared sanity mutant), AST guards |
+
+**BLOCKED / PARTIAL**
+
+`learnlm_pilot_rw` not created · pilot reference not authored · oracle provenance
+not recorded · reconciliation not run · P2.7h-1 unwired (zero non-test callers) ·
+QuestionApproval unreachable while 0/2,926 meet `MIN_HIDDEN_TESTS=12` ·
+promotion · reseed · P2.10b acquisition · P2.10c
+
+**NEXT:** operator creates `learnlm_pilot_rw` — after confirming the
+`approved_by_id` column name and locally verifying that table INSERT alone
+suffices for the identity columns.
+
+### P2.10 — Neural knowledge tracing (Transformer KT) — DATA-GATED
+
+- **Goal.** Estimate a learner's evolving, per-concept knowledge state from their
+  interaction sequence, and use it as **one additional signal** into the
+  deterministic selector — never as an authority.
+- **Status.** P2.10a is executable at Track A volume. **P2.10b onward are gated
+  and must not start** until the two counters in "Activation gates" below are
+  met. This is a placement, not a licence to build.
+- **Dependencies.** P2.9 (Glicko must exist to fuse with), **P4.1** (the eval
+  harness; principle 5 — no ML decision without the harness that can settle it),
+  **P6.1** (the rule-based baseline must be *measured* before anything claims to
+  beat it).
+
+#### Why this is gated rather than scheduled
+
+Three measured facts from this repository, not preferences:
+
+1. **Data.** 177 total `RecommendationLog` rows. Published Transformer KT results
+   (SAINT/SAINT+ on EdNet, AKT on ASSISTments/Algebra) sit at 10⁵–10⁸
+   interactions. That is a five-to-six order-of-magnitude gap. A Transformer
+   fitted here would model noise.
+2. **Label trust.** `CodeSubmission.adaptive_eligible` defaults FALSE and no
+   question has ever reached `ORACLE_VERIFIED`, so the count of *trustworthy*
+   training labels is currently **zero**, not 177. P2.7g-3 built the promotion
+   path; nothing has traversed it.
+3. **Runtime.** The web tier is Render free plan, 512 MB, measured RSS ~202 MiB,
+   and is **deliberately torch-free** (`render.yaml:15`, `requirements.txt:53`).
+   P1.1 exists to delete the previous deep-learning stack precisely because it
+   "cannot execute on the web tier". Re-introducing torch at request time would
+   recreate the failure P1.1 is removing.
+
+**Consequence for the architecture, not just the schedule:** training is offline
+and out-of-process; serving is a **precomputed score table** read by the existing
+ORDER BY. No torch import is ever added to the web tier's dependency set. This
+is a hard constraint, and it is what distinguishes P2.10 from the stack P1.1
+deletes.
+
+#### Activation gates (both required)
+
+| Gate | Threshold | Why |
+|---|---|---|
+| **G1 — volume** | ≥ 50,000 `adaptive_eligible` submissions across ≥ 500 learners with ≥ 20 interactions each | Below this, a Transformer cannot beat a well-tuned Glicko baseline; the literature's own ablations show attention models converging to item-difficulty priors on sparse data |
+| **G2 — measured baseline** | P6.1 has produced a committed report with confidence intervals for the rule-based and Glicko policies | "Beats the baseline" is meaningless until the baseline has a number |
+
+If G1 is unmet when P2.9 completes, **P2.10 stays parked and P6.x proceeds.**
+A negative or "not yet" result here is a valid outcome, exactly as P6.1 states.
+
+#### Trust boundary — unchanged
+
+```
+GRADING TRUTH → ReferenceSolution → Oracle → Provenance
+              → Quality Gate → Human Question Approval → ORACLE_VERIFIED
+```
+
+**Transformer KT sits entirely outside this chain.** It consumes the chain's
+output (`adaptive_eligible` submissions) and produces learner-model estimates.
+
+- **MUST NOT** influence: `expected_output`, `hidden_test_cases`, correctness,
+  grading verdicts, `Question.status`, `Question.trust_state`,
+  `adaptive_eligible`, reference approval, question publication, or any
+  `UserTopicMastery` / `LearnerTopicSkill` row.
+- **MAY** produce (after validation): per-concept knowledge estimates,
+  P(correct) predictions, ranking scores, uncertainty estimates.
+- **Remains deterministic and authoritative:** eligibility, solved-question
+  exclusion, the 24 h failure cooldown, curriculum/prerequisite gates, topic
+  scoping, and every safety filter in `_candidate_questions`. The model may
+  reorder a candidate set; it may never add a question to it.
+
+#### Sub-phases
+
+| Sub-phase | Objective | Offline? | Prod data? | Migration? |
+|---|---|---|---|---|
+| **P2.10a** Research + architecture + gate instrumentation | ✅ **COMPLETE.** `kt_readiness`/`kt_leakage`/`kt_features` + `kt_data_readiness`. Gate reads **NOT_READY** (0 eligible interactions). See `P2_10A_KT_FOUNDATION.md` | Yes | No | No |
+| **P2.10b** Interaction dataset pipeline | ✅ **PIPELINE COMPLETE**, dataset acquisition **BLOCKED on an operator licence decision**. `kt_dataset/` + `kt_dataset_build`; derived projection, **no table, no migration**. See `P2_10B_KT_DATASET.md` §2 | Yes | Read-only | **No** |
+| **P2.10c** Baselines (majority, item-difficulty, BKT, Glicko-only, logistic/IRT) | The numbers a Transformer must beat | Yes | No | No |
+| **P2.10d** DKT/SAKT reference implementation | Cheap sequence models first; if these do not beat P2.10c, stop | Yes | No | No |
+| **P2.10e** Transformer KT (SAINT-style, question/response streams separated) | The candidate model | Yes | No | No |
+| **P2.10f** Glicko × KT fusion | Glicko rating + RD as input features; KT state + Glicko as parallel selector inputs | Yes | No | No |
+| **P2.10g** Offline evaluation via P4.1 | AUC, log-loss, Brier, calibration, cold-start slices, temporal generalisation | Yes | No | No |
+| **P2.10h** Shadow mode | Precomputed scores logged beside the live decision; zero learner effect | No | Yes | Yes (additive) |
+| **P2.10i** Controlled integration | Flag-gated re-rank *within* the deterministic candidate set only | No | Yes | No |
+| **P2.10j** Monitoring, drift, calibration, rollback | Registry + drift alarms; one-flag revert | No | Yes | No |
+
+#### Integration criteria (all required before P2.10i)
+
+1. Beats the best P2.10c/P2.10d baseline on AUC by a margin exceeding the
+   bootstrap CI, on a **temporal** split.
+2. Calibration (Brier / reliability curve) no worse than the baseline —
+   a better-ranking, worse-calibrated model is unusable for zone targeting.
+3. ≥ 30 days of shadow logging with disagreement analysis.
+4. Cold-start slices (< 5 interactions) show no regression against the
+   deterministic fallback.
+5. Serving path proven to add no torch dependency to the web tier.
+
+#### Rollback
+
+One feature flag returns selection to the P2.8a/P2.9 ordering. The score table
+is additive and read-only to the selector, so disabling the flag makes it inert
+rather than requiring a migration. No learner state is written by the model, so
+there is nothing to unwind.
+
+#### Success criteria
+
+A committed report showing either (a) a validated, calibrated improvement in
+difficulty-appropriateness and time-to-mastery over the Glicko baseline, or
+(b) **evidence that the deterministic + Glicko system is sufficient**, which is
+an equally valid and cheaper outcome.
 
 ### P2.2 — Streaks and badges inside the transaction
 - **Goal.** Make gamification actually award something.

@@ -27,7 +27,7 @@ from typing import Optional
 from django.db import transaction
 from django.utils import timezone
 
-from groups import glicko
+from groups import glicko, glicko_history
 from groups.models import LearnerTopicSkill, Question, QuestionSkill
 from groups.services import LEARNER_EVIDENCE_STATUSES
 
@@ -155,12 +155,19 @@ def apply_submission(submission, now=None):
     q_rating, q_rd, q_vol = (q_skill.rating, q_skill.rating_deviation,
                              q_skill.volatility)
 
+    # Computed once and reused, because these exact values are BOTH fed to
+    # `rate` and recorded in the snapshot. Calling `_periods_since` a second
+    # time for the snapshot would re-read the clock and could record a
+    # different number than the arithmetic used.
+    l_periods = _periods_since(learner.last_evidence_at, now)
+    q_periods = _periods_since(q_skill.last_evidence_at, now)
+
     new_l = glicko.rate(
         l_rating, l_rd, l_vol, [(q_rating, q_rd, score)],
-        periods_inactive=_periods_since(learner.last_evidence_at, now))
+        periods_inactive=l_periods)
     new_q = glicko.rate(
         q_rating, q_rd, q_vol, [(l_rating, l_rd, 1.0 - score)],
-        periods_inactive=_periods_since(q_skill.last_evidence_at, now))
+        periods_inactive=q_periods)
 
     learner.rating, learner.rating_deviation, learner.volatility = new_l
     learner.evidence_count += 1
@@ -175,6 +182,27 @@ def apply_submission(submission, now=None):
     q_skill.save(update_fields=["rating", "rating_deviation", "volatility",
                                 "evidence_count", "last_evidence_at",
                                 "updated_at"])
+
+    # ── Point-in-time snapshot (M2 P2.9b) ────────────────────────────────
+    #
+    # From the LOCALS captured above, never re-read from the rows — those have
+    # just been overwritten, so a re-read would return the AFTER state and
+    # every snapshot would silently encode its own outcome.
+    #
+    # Inside the caller's atomic block (`record_submission_safely`), so a
+    # snapshot cannot survive a rolled-back rating update or vice versa: the
+    # history either matches the ratings or neither exists.
+    #
+    # Costs one INSERT and one existence check. No extra SELECT for the state
+    # itself, because the update already had to read it.
+    glicko_history.record_snapshot(
+        submission=submission,
+        topic=topic,
+        before=((l_rating, l_rd, l_vol), (q_rating, q_rd, q_vol)),
+        after=((new_l[0], new_l[1]), (new_q[0], new_q[1])),
+        periods=(l_periods, q_periods),
+        recorded_at=now,
+    )
 
     return learner, q_skill
 

@@ -1,0 +1,31 @@
+{
+  "applicable": false,
+  "artifact_digest": "dc67e5019f8e027e65925b56b3a4d2d18805964d8157f8fad9455bc09a42e0d2",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "hard",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T18:48:24.636399+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "8eac7fd9bb495b68160d87f1c19577f2b4ccc63f6fc999107a48528a08dca448",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "1959.starter.py",
+    "statement": "1959.statement.html"
+  },
+  "prompt_template_version": "statement-and-signature/v1",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 1959,
+  "refusals": [],
+  "regeneration_count": 0,
+  "status": "READY_FOR_REVIEW",
+  "title": "Find the Longest Valid Obstacle Course at Each Position",
+  "topic": "Array"
+}

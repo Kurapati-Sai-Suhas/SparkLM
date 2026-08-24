@@ -180,13 +180,28 @@ def tier2(n_killed=8, n_survived=2, n_equivalent=0, n_not_applicable=0,
     return out
 
 
+#: The gate now REQUIRES an ExecutionPlan (M2 P2.7 follow-up), so these
+#: synthetic tests supply a pass-through double: `source` here is a label
+#: rather than real code, and `stdin` is already the literal text the fake
+#: runner parses, so wrapping or re-preparing either would be meaningless.
+#:
+#: It lives in the TEST file deliberately. Production has exactly one plan —
+#: `GradingService.quality_execution_plan` — and no default, because a default
+#: is how the bypass this parameter closes would come back. The real seam is
+#: exercised in `test_quality_gate_seam.py`.
+PASS_THROUGH_PLAN = q.ExecutionPlan(
+    build_executable=lambda source, language: source,
+    prepare_stdin=lambda stdin, language: stdin,
+)
+
+
 def assess(cases=None, mutants=None, contract=CONTRACT, substitutions=(),
-           run=runner):
+           run=runner, plan=PASS_THROUGH_PLAN):
     return evaluate_suite(
         cases if cases is not None else good_suite(),
         mutants if mutants is not None else
         (tier1("t1-off-by-one", "t1-duplicates", "t1-init") + tier2()),
-        run, contract, substitutions=substitutions)
+        run, contract, plan=plan, substitutions=substitutions)
 
 
 # ═════════════════════════════════════════════════════════════
@@ -668,7 +683,7 @@ def test_realistic_wrong_algorithms_are_actually_detected():
         weak_cases[i]["category"] = category
 
     report = evaluate_suite(weak_cases, tier1("t1-duplicates") + tier2(),
-                            runner, CONTRACT)
+                            runner, CONTRACT, plan=PASS_THROUGH_PLAN)
 
     assert report.verdict == q.FAIL
     assert report.tier1_survived == 1

@@ -1,0 +1,29 @@
+Given a set of points in the plane, find the minimum area of any rectangle formed from these points, with sides not necessarily parallel to the coordinate axes. The four vertices must be among the given points. If no such rectangle exists, return 0.
+
+Example 1:
+Input: [[1,2],[2,1],[1,0],[0,1]]
+Output: 2
+Explanation: The four points form a square rotated 45 degrees, with side length sqrt(2) and area 2.
+
+Example 2:
+Input: [[0,0],[0,1],[1,0],[1,1],[2,1],[2,0]]
+Output: 1
+Explanation: The unit square (0,0), (0,1), (1,0), (1,1) has area 1.
+
+Constraints:
+- 1 <= points.length <= 5000
+- 0 <= points[i][j] <= 5000
+
+### Examples
+
+**Input 1:** `[[1,2],[2,1],[1,0],[0,1]]
+`
+**Output 1:** `2`
+
+**Input 2:** `[[0,0],[0,1],[1,0],[1,1],[2,1],[2,0]]
+`
+**Output 2:** `1`
+
+**Input 3:** `[[3,4],[3,5],[4,5],[4,6],[5,4],[5,5],[5,6]]
+`
+**Output 3:** `1`

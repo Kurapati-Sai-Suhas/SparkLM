@@ -69,10 +69,25 @@ import os
 CONTRACT_V1 = "v1"
 CONTRACT_V2 = "v2"
 
+# v3 is v1's harness driven by a CANONICAL STDIN ENVELOPE (M2 P2.7 follow-up).
+#
+# It introduces no new template. The v1 wrapper already splats a JSON array
+# positionally, which is a complete calling convention, so `execution_adapter`
+# builds the arguments server-side from the declared signature and hands the
+# unchanged harness a JSON array. That is the whole difference:
+#
+#     v1   stdin "110"          -> wrapper guesses -> int 110
+#     v3   stdin '["110"]'      -> wrapper splats  -> str "110"
+#
+# ZERO questions declare v3. Adoption is per question, after oracle
+# verification — never a bulk migration, because switching a question's
+# contract changes what its stored expected outputs mean.
+CONTRACT_V3 = "v3"
+
 #: Every version the harness can execute. A question naming anything else is a
 #: data error and must not be graded — silently falling back to a default is
 #: how a question ends up graded by a contract it was not written for.
-KNOWN_CONTRACTS = (CONTRACT_V1, CONTRACT_V2)
+KNOWN_CONTRACTS = (CONTRACT_V1, CONTRACT_V2, CONTRACT_V3)
 
 DEFAULT_CONTRACT = CONTRACT_V1
 

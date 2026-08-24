@@ -1,0 +1,117 @@
+{
+  "blockers": [],
+  "mutant_identifiers": [
+    "t1-count-not-index",
+    "t1-empty-needle-not-found",
+    "t1-last-occurrence",
+    "t1-off-by-one-window",
+    "t2-comparison-inverted",
+    "t2-empty-branch-removed",
+    "t2-missing-returns-length",
+    "t2-returns-start-plus-one",
+    "t2-scan-starts-at-one",
+    "t2-window-one-short"
+  ],
+  "provenance": {
+    "case_count": 12,
+    "case_identities": [
+      "6ca413d16f54aba12ce7fceb3feeceaa7a9462df527fdaa1324a5c5b7abf6002",
+      "e0a952d37ce455da8397d20b9fdeb3629794b478972ae2a75a53a9cce2220579",
+      "90c714a5fa7528c2da3f3a8236e02ca1b2f8e699e681f23e6efe3bec169ae316",
+      "439083f38956ba51ece90631552c6ea23c5c29570d3d5710e408e77e01ba7375",
+      "530912cd7d9f36e046f069f36d3447e3cce45c972517b5e71ea6a33baf94ae8c",
+      "1958ef6f7fededf493768f1447db06dee559bd32dd59772de3c9aaa59a3e3eed",
+      "99b4ae0e261695ce9cb3912cdb821b687ad3ee28746333d2c49c9a141576d800",
+      "fd813ed57f84274dd5d3babfd5986aa0744fe93ae1849f9ac4ddd700a48a3c98",
+      "5fc0871c49d2317188af400a56aae7c1c37c961ab0ac9c64d389b710642fa9e2",
+      "a9def2291dd088d06803ee45a2732890f2ab71df41d8b189a0c95d15aaf9dff4",
+      "aa2b69d56a813ae7ca2835ba1343f179a1c748b19070d62d1c7d11e4860f0327",
+      "9a0f0a3796c369b8a4cde72cd05d9ad4855f68a86700ac0d7db1a75b65538892"
+    ],
+    "categories": [
+      "duplicate_values",
+      "empty_input",
+      "first_occurrence",
+      "match_at_start",
+      "maximum_boundary",
+      "minimum_boundary",
+      "needle_longer_than_haystack",
+      "no_match",
+      "overlapping_prefixes",
+      "partial_match_backtrack",
+      "singleton",
+      "typical"
+    ],
+    "execution_contract_version": "v3",
+    "question_id": 3309,
+    "question_state_digest": "ebb26e7f0f1ff127abfd99adc6903c66f9b4660c6df9b3c3d99a265d4f23a61e",
+    "reference_id": 2,
+    "reference_language": "python",
+    "reference_source_hash": "18ad8f390642c315ef78e52fecaf97ab31fd6fc69fca2a02b3114e03d77a341b",
+    "results": [
+      {
+        "identifier": "t1-count-not-index",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-empty-needle-not-found",
+        "killed_by_case": 4,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-last-occurrence",
+        "killed_by_case": 9,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-off-by-one-window",
+        "killed_by_case": 7,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t2-comparison-inverted",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-empty-branch-removed",
+        "killed_by_case": null,
+        "outcome": "EQUIVALENT",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-missing-returns-length",
+        "killed_by_case": 2,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-returns-start-plus-one",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-scan-starts-at-one",
+        "killed_by_case": 3,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-window-one-short",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "tier1_kill_rate": 1.0,
+  "tier2_kill_rate": 1.0
+}

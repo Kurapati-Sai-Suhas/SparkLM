@@ -244,7 +244,36 @@ class QualityReport:
 # Execution
 # ═════════════════════════════════════════════════════════════
 
-def _run_case(runner, mutant, case):
+@dataclass(frozen=True)
+class ExecutionPlan:
+    """
+    How a candidate solution and a stored case become a real execution.
+
+    REQUIRED, with no default (M2 P2.7 follow-up). The gate used to call
+
+        runner(mutant.source, mutant.language, case.get("stdin", ""))
+
+    which bypassed the shared seam on BOTH halves: the mutant was never wrapped
+    by `GradingService._build_executable`, and the stored stdin never passed
+    through `prepare_stdin`. Tier-1 and Tier-2 kill rates were therefore
+    measured against semantics no learner ever experiences — a suite could pass
+    the gate while the grader treated the same inputs differently.
+
+    A default would have quietly restored that, so there is none. Production
+    builds this through `GradingService.quality_execution_plan(question)`; the
+    two callables it holds are the same seam the grader and the oracle use.
+
+    Kept as plain callables rather than an ORM object so this module stays pure
+    — it still imports no models and reaches no database.
+    """
+
+    #: (source, language) -> the source that will actually be executed.
+    build_executable: Callable[[str, str], str]
+    #: (stored stdin, language) -> the bytes actually written to stdin.
+    prepare_stdin: Callable[[str, str], str]
+
+
+def _run_case(runner, plan, mutant, case):
     """
     (matched, detail). `matched` is None when the runner could not execute.
 
@@ -253,7 +282,18 @@ def _run_case(runner, mutant, case):
     grader would pass suites the grader then fails.
     """
     try:
-        verdict = runner(mutant.source, mutant.language, case.get("stdin", ""))
+        # Both halves of the seam, in the grader's own order: decide what runs,
+        # then decide what it is fed. `prepare_stdin` raises for a question
+        # whose stored case cannot be executed under its declared contract, and
+        # that is an EXECUTION_ERROR — an unmeasured mutant, never a silent
+        # pass.
+        source = plan.build_executable(mutant.source, mutant.language)
+        stdin = plan.prepare_stdin(case.get("stdin", ""), mutant.language)
+    except Exception as exc:                                  # noqa: BLE001
+        return None, f"execution contract: {type(exc).__name__}: {exc}"
+
+    try:
+        verdict = runner(source, mutant.language, stdin)
     except Exception as exc:                                  # noqa: BLE001
         return None, f"runner raised {type(exc).__name__}: {exc}"
 
@@ -278,9 +318,9 @@ def _run_case(runner, mutant, case):
     return actual == expected, ""
 
 
-def evaluate_mutant(runner, mutant, cases):
+def evaluate_mutant(runner, plan, mutant, cases):
     """
-    Run one mutant against the whole suite.
+    Run one mutant against the whole suite, through `plan`.
 
     A mutant dies the moment ANY case disagrees with the stored expected
     output. Surviving every case is what needs explaining.
@@ -290,7 +330,7 @@ def evaluate_mutant(runner, mutant, cases):
                             NOT_APPLICABLE, mutant.not_applicable_reason)
 
     for index, case in enumerate(cases):
-        matched, detail = _run_case(runner, mutant, case)
+        matched, detail = _run_case(runner, plan, mutant, case)
         if matched is None:
             return MutantResult(mutant.identifier, mutant.tier,
                                 mutant.description, EXECUTION_ERROR,
@@ -397,14 +437,19 @@ def normalized_duplicate_indexes(cases):
     return duplicates
 
 
-def evaluate_suite(cases, mutants, runner, contract,
+def evaluate_suite(cases, mutants, runner, contract, *, plan,
                    substitutions=(), floor=hidden_tests.MIN_HIDDEN_TESTS):
     """
     The whole gate, deterministically.
 
     Nothing here writes. `cases` is read, `mutants` are executed through the
-    caller's runner, and a report comes back. The same inputs always produce
-    the same report — no randomness, no iteration-order dependence, no clock.
+    caller's runner VIA `plan`, and a report comes back. The same inputs always
+    produce the same report — no randomness, no iteration-order dependence, no
+    clock.
+
+    `plan` is keyword-only and has no default on purpose: a gate that can be
+    called without one is a gate that can silently measure the wrong semantics,
+    which is exactly the defect this parameter exists to close.
     """
     cases = list(cases or [])
     report = QualityReport(total_cases=len(cases), duplicate_count=0,
@@ -447,7 +492,7 @@ def evaluate_suite(cases, mutants, runner, contract,
             + ", ".join(missing))
 
     # 5-6. Mutants. Sorted by identifier so the report is order-independent.
-    results = [evaluate_mutant(runner, m, cases)
+    results = [evaluate_mutant(runner, plan, m, cases)
                for m in sorted(mutants, key=lambda m: (m.tier, m.identifier))]
     report.results = results
 

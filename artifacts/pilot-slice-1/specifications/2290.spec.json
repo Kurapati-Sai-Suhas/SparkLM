@@ -1,0 +1,26 @@
+{
+  "author": "assistant-drafted, pending operator verification",
+  "author_confidence": "high",
+  "canonical_identity": {
+    "problem_number": "2320",
+    "slug": "count-number-of-ways-to-place-houses",
+    "source": "leetcode_csv_2024_11_02"
+  },
+  "constraints": "The plot count is between 1 and ten thousand.",
+  "edge_cases": "Leaving every plot empty is itself a valid arrangement and is counted. The two sides are independent, so the total is the count for one side multiplied by itself.",
+  "input_semantics": "One parameter, n, the number of plots on each side of the street.",
+  "load_bearing": "The adjacency restriction applies only within a side, never across the street. Both sides are counted together. The result is reduced modulo 1000000007 rather than reported exactly.",
+  "method_behaviour": "The method accepts the plot count and returns one integer already reduced by the modulus. It does not print.",
+  "objective": "Count the arrangements of houses along both sides of a street when no two houses on the same side may sit on neighbouring plots.",
+  "output_semantics": "A single integer, the number of arrangements reduced modulo 1000000007.",
+  "provenance": "OPERATOR_SUPPLIED",
+  "question_id": 2290,
+  "required_operation": "The street has n plots on each side, facing each other. A plot may hold a house or stay empty. Two houses on the same side may not occupy adjacent plots. A house on one side places no restriction on the plot opposite it. Count every distinct arrangement across both sides and report that count reduced modulo one thousand million and seven.",
+  "specification_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20",
+  "verification_notes": "Specification describes the intended problem.",
+  "verification_source": "operator_manual_review",
+  "verified_at": "2026-08-24T07:42:35.593094+00:00",
+  "verified_by": "Suhas",
+  "verified_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20",
+  "written_at": "2026-08-23T19:34:10.471158+00:00"
+}

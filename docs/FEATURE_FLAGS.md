@@ -73,6 +73,9 @@ belongs to M6's decision about whether the routing engine earns further ML inves
 | `JUDGE0_URL` | unset | Overrides the Judge0 base URL. Defaults from `JUDGE0_API_HOST`. | Self-hosting Judge0 (roadmap M15+). |
 | `JUDGE0_CPU_TIME_LIMIT` | unset | Seconds sent as `cpu_time_limit` on every submission. **Unset means the field is omitted**, which is what production has always done. Judge0 enforces `max_cpu_time_limit` server-side and REJECTS anything above it — a rejected submission becomes `GradingUnavailable`, i.e. a 503 for every learner. Set only after confirming the deployed instance's ceiling. | Pinning a reproducible TLE boundary once the Judge0 deployment's limits are known (M2 P2.6). |
 | `JUDGE0_MEMORY_LIMIT` | unset | KB sent as `memory_limit`. Same omit-by-default rule and the same rejection risk as above. | As above. |
+| `JUDGE0_PYTHON_LANGUAGE_ID` | `92` (Python 3.11.2) | Judge0 language id used for **every** Python execution — learner submissions, oracle runs, the quality gate and hidden-test reconciliation all resolve it from `common.languages`. Was `71` (Python 3.8.1), which cannot parse PEP 585 subscripted generics (`list[list[str]]` raises `TypeError: 'type' object is not subscriptable` at class-definition time); 772 of 2,926 Python starters use that syntax and could not execute at all. 3.11 is the oldest available option that supports PEP 585, chosen to minimise drift from 3.8. A non-integer value raises at import rather than falling back. | Rolling the runtime back (set `71`) or forward (`100` = 3.12.5, `109` = 3.13.2, `113` = 3.14.0) — all on the same Judge0 deployment and key, so this is a selection, not an upgrade. Verify equivalence on already-verified questions before changing it: q3309 reproduces all 12 stored outputs identically under both 71 and 92. |
+| `RESEED_GEMINI_MODEL` | `gemini-2.5-flash` | Model id used by the reseed content generator's Gemini provider (`groups/reseed_generation.py`). A model id is configuration, not code: `ai_services.py` hard-codes `llama-3.3-70b-versatile` at two call sites and that model has since been withdrawn, so every Groq path in the app now 404s and fixing it needs a code change. `probe_provider()` reports whether the configured id is actually offered by the key, by listing models rather than generating. | A provider retiring the model, or moving to a cheaper/stronger one. Free tier is 20 requests/day — exhausted by four questions at three attempts. |
+| `RESEED_GROQ_MODEL` | `openai/gpt-oss-120b` | Model id used by the reseed content generator's Groq provider. Default chosen because it is what the current key actually offers — verified by listing, not assumed. | As above. The generator fails fast on 404/429 rather than retrying, so a withdrawn model is reported once per question instead of three times. |
 
 ---
 
@@ -118,6 +121,30 @@ belongs to M6's decision about whether the routing engine earns further ML inves
 
 ---
 
+## Test-database isolation (M2 P2.7e)
+
+`pytest` must never reach production. `pytest.ini` loads
+`-p sparklm_test_isolation`, which rewrites `POSTGRES_*` to a local database
+**before** pytest-django configures Django; the rootdir `conftest.py` then
+asserts the redirect held and aborts the session if it did not.
+
+This exists because `.env` carries production Neon credentials for the P2.7e
+census. Without the redirect, pytest derives its test database from those
+credentials and attempts `CREATE DATABASE test_neondb` **on production** — which
+failed only because the census role is read-only, and would have succeeded with
+a write-capable role.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `TEST_POSTGRES_HOST` | Test database host. Default `127.0.0.1`. | Must be loopback. A remote value is refused by `conftest.pytest_configure`, which exits the session rather than running. |
+| `TEST_POSTGRES_DB` | Test database name. Default `learnlm_db` (pytest prefixes `test_`). | A mismatch with the conftest expectation aborts the run. |
+| `TEST_POSTGRES_USER` | Test role. Default `postgres`, per `docker-compose.yml`. | Needs CREATE DATABASE locally; a read-only role cannot run the suite. |
+| `TEST_POSTGRES_PASSWORD` | Password for the local test role. Default is the committed docker-compose value — not a secret. | Never put a production credential here. |
+| `TEST_POSTGRES_PORT` | Default `5432`. | — |
+
+**These are test-only.** They are read by `sparklm_test_isolation.py` and
+`conftest.py`, never by application code, and they are not set in Render.
+
 ## Known gap — media storage is ephemeral
 
 Not a flag, recorded here because it is configuration-shaped and it **blocks approved
@@ -142,6 +169,263 @@ object storage (`STORAGES` default backend → S3-compatible), which is new infr
 and therefore Milestone 5 scope.
 
 ---
+
+## Pre-image capture connection (M2 P2.7, blocker J8)
+
+A SEPARATE database alias, `preimage`, used only by `preimage_capture` /
+`preimage_inspect` / `preimage_rollback` via `--alias preimage`. Defined in
+`settings.py` only when `PREIMAGE_USER` is set; absent it, the alias does not
+exist and the commands fail loudly rather than falling back to `default` — which
+is the read-only census role and would fail mid-batch instead.
+
+The role is `learnlm_preimage_rw`, audited to hold read and append rights on the
+three pre-image tables — and nothing that can modify or remove a row — plus
+read access to `groups_question` so a pre-image can be copied. It holds **no**
+write privilege on any grading-truth or learner table, so a capture run through
+it cannot alter grading truth even if the code tried.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `PREIMAGE_USER` | Capture role. Its presence is what creates the `preimage` alias. | Unset means the alias is missing and the capture commands error. Setting it to a broadly-privileged role defeats the least-privilege property — the operator gate additionally refuses anything but `learnlm_preimage_rw` on production. |
+| `PREIMAGE_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `PREIMAGE_DB` | Database name. Default `neondb`. | A different database means pre-images land where the app does not grade from. |
+| `PREIMAGE_HOST` | Neon endpoint for the capture connection. | A different endpoint or branch captures a copy of the data rather than the data. |
+| `PREIMAGE_PORT` | Default `5432`. | — |
+
+**Capture only.** These credentials must not be used for remediation writes,
+migrations, or anything reading learner state.
+
+## Remediation connection (M2 P2.7)
+
+A THIRD alias, `remediate`, used only by `remediate_statement` via
+`--alias remediate`. Defined in `settings.py` only when `REMEDIATE_USER` is set.
+
+The role is `learnlm_remediate_rw`, audited to hold read access to
+`groups_question` plus column-scoped write on `content` alone — one column of
+eleven. It cannot modify hidden tests, status, trust state, the contract, the
+boilerplate or the wrapper, and it cannot add or remove a question. It appends
+to the remediation audit table and can only read the batch and pre-image
+tables, so it cannot alter the pre-image that would restore its own work.
+
+Separate from `PREIMAGE_*` on purpose: the capture role preserves a question
+and must not be able to change it; the remediation role changes one column and
+must not be able to append pre-images.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `REMEDIATE_USER` | Remediation role. Its presence is what creates the `remediate` alias. | A broadly-privileged value defeats the least-privilege property. The command additionally refuses any role but `learnlm_remediate_rw` on production, and refuses a role holding more than the operation needs. |
+| `REMEDIATE_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `REMEDIATE_DB` | Database name. Default `neondb`. | A different database repairs a copy rather than the data. |
+| `REMEDIATE_HOST` | Neon endpoint for the remediation connection. | A different endpoint or branch repairs a fork. |
+| `REMEDIATE_PORT` | Default `5432`. | — |
+
+**Statement repair only.** Key repair, contract migration and hidden-test
+repair each need their own review and their own column grants.
+
+## Hidden-test remediation connection (M2 P2.7)
+
+A FOURTH alias, `hiddentest`, used only by `remediate_hidden_tests` via
+`--alias hiddentest`. Defined in `settings.py` only when `HIDDENTEST_USER` is
+set.
+
+The role is `learnlm_hidden_test_rw`, audited to hold read access to
+`groups_question` plus column-scoped write on `hidden_test_cases` alone. It is
+the **mirror image** of `learnlm_remediate_rw`: that role can change a statement
+and not a key, this one a key and not a statement. Neither can change status,
+trust state, the contract, the boilerplate or the wrapper, and neither can add
+or remove a question.
+
+That mirroring is the point. The remediation design fixed an order — statement
+first, keys second — and two column-scoped roles make it a privilege boundary
+rather than an instruction an operator has to remember.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `HIDDENTEST_USER` | Hidden-test repair role. Its presence is what creates the `hiddentest` alias. | A broadly-privileged value defeats the least-privilege property. The command additionally refuses any role but `learnlm_hidden_test_rw` on production, and refuses a role that also holds `content` UPDATE — an over-granted role is rejected, not used. |
+| `HIDDENTEST_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `HIDDENTEST_DB` | Database name. Default `neondb`. | A different database repairs a copy rather than the data. |
+| `HIDDENTEST_HOST` | Neon endpoint for the hidden-test connection. | A different endpoint or branch repairs a fork. |
+| `HIDDENTEST_PORT` | Default `5432`. | — |
+
+**Hidden-test repair only**, and only of stored *form*: the command cannot
+change, add or remove a case `stdin`.
+
+## Contract remediation connection (M2 P2.7)
+
+A FIFTH alias, `contract`, used only by `remediate_contract` via
+`--alias contract`. Defined in `settings.py` only when `CONTRACT_USER` is set.
+
+The role is `learnlm_contract_rw`, holding read access to `groups_question`
+plus column-scoped write on `execution_contract_version` alone.
+
+A contract migration is a third kind of authority over the same row: it changes
+neither what is asked nor what answer is recorded, but **how the stored inputs
+are delivered to the learner's code**. Sharing a role with statement or
+hidden-test repair would mean whoever can edit a text can also re-point the
+question at a different harness.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `CONTRACT_USER` | Contract-repair role. Its presence is what creates the `contract` alias. | A broadly-privileged value defeats the least-privilege property. The command additionally refuses any role but `learnlm_contract_rw` on production, and refuses a role that also holds `content`, `hidden_test_cases`, `boilerplate_code` or `hidden_wrapper_code` UPDATE. |
+| `CONTRACT_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `CONTRACT_DB` | Database name. Default `neondb`. | A different database migrates a copy rather than the data. |
+| `CONTRACT_HOST` | Neon endpoint for the contract connection. | A different endpoint or branch migrates a fork. |
+| `CONTRACT_PORT` | Default `5432`. | — |
+
+**Migration to v3 only.** The command refuses any other target, and refuses a
+question whose stored cases do not all bind cleanly under v3 — including one
+that binds only by guessing an undeclared parameter type.
+
+## Boilerplate remediation connection (M2 P2.7)
+
+A SIXTH alias, `boilerplate`, used only by `remediate_boilerplate` via
+`--alias boilerplate`. Defined in `settings.py` only when `BOILERPLATE_USER` is
+set.
+
+The role is `learnlm_boilerplate_rw`, holding read access to `groups_question`
+plus column-scoped write on `boilerplate_code` alone.
+
+This is the column with the widest reach per byte: the starter is the code every
+learner is **handed**, and it is also the declaration the execution adapter
+binds arguments from. A role able to edit it decides both what a learner starts
+from and how their submission is called, which is why it is separate from the
+roles that edit the text, the keys and the contract version.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `BOILERPLATE_USER` | Boilerplate-repair role. Its presence is what creates the `boilerplate` alias. | A broadly-privileged value defeats the least-privilege property. The command additionally refuses any role but `learnlm_boilerplate_rw` on production, and refuses a role that also holds `content`, `hidden_test_cases`, `status`, `trust_state`, `execution_contract_version` or `hidden_wrapper_code` UPDATE. |
+| `BOILERPLATE_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `BOILERPLATE_DB` | Database name. Default `neondb`. | A different database repairs a copy rather than the data. |
+| `BOILERPLATE_HOST` | Neon endpoint for the boilerplate connection. | A different endpoint or branch repairs a fork. |
+| `BOILERPLATE_PORT` | Default `5432`. | — |
+
+**Annotation repair only.** The command compares the before and after starters
+as syntax trees and refuses anything but a change to parameter annotations — no
+renamed method, no altered body, no new import, no added return annotation, and
+no other language's starter touched.
+
+## Oracle / reference connection (M2 P2.7)
+
+A SEVENTH alias, `oracle`, used by `reference_create`, `reference_review` and
+`oracle_execute` via `--alias oracle`. Defined in `settings.py` only when
+`ORACLE_USER` is set.
+
+The role is `learnlm_oracle_rw`: SELECT on `groups_question`,
+SELECT/INSERT/UPDATE on `groups_referencesolution` (the review lifecycle moves
+`review_state`, `is_active` and the provenance fields on an existing row), and
+SELECT/INSERT on `groups_oracleexecution`.
+
+It is the first operator role whose writes are not `groups_question` at all, and
+that is the point: an oracle run reads a question, executes an approved
+implementation against it, and records what happened. It cannot rewrite a key, a
+statement or a contract, cannot approve a question, and cannot touch the
+remediation audit trail or a pre-image.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `ORACLE_USER` | Oracle role. Its presence is what creates the `oracle` alias. | A broadly-privileged value defeats the least-privilege property. The commands additionally refuse any role but `learnlm_oracle_rw` on production, and refuse a role holding UPDATE on `groups_question` or any privilege on `groups_questionapproval`, `groups_remediationaction` or `groups_questionpreimage`. |
+| `ORACLE_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `ORACLE_DB` | Database name. Default `neondb`. | A different database records provenance about a copy. |
+| `ORACLE_HOST` | Neon endpoint for the oracle connection. | A different endpoint or branch records provenance for a fork. |
+| `ORACLE_PORT` | Default `5432`. | — |
+
+**Provenance only.** No command on this connection can write `expected_output`,
+`status` or `trust_state` — the writer does not exist, and the grant would
+refuse it if it did.
+
+## Question-approval connection (M2 P2.7h-6)
+
+An EIGHTH alias, `approve`, used by `question_approve --alias approve`. Defined
+in `settings.py` only when `APPROVE_USER` is set.
+
+The role is `learnlm_approve_rw`, and it is the narrowest of the eight: INSERT
+on `groups_questionapproval`, SELECT on the three tables an artifact is
+assembled from (`groups_question`, `groups_referencesolution`,
+`groups_oracleexecution`), and column-scoped SELECT on `groups_user(id)` — the
+FK check Django performs in `full_clean` needs the id and nothing else, so the
+role cannot read an email or a password hash.
+
+It holds **no write privilege on `groups_question` at all**. An approver states
+a judgement and is structurally unable to enact it; promotion is a separate role
+(`learnlm_promote_rw`) on a separate alias. The grant list lives in
+`_preimage_ops.APPROVAL_ROLE_GRANTS`, the production DDL is generated from it,
+and the test suite proves it both sufficient (a role holding exactly these
+completes a real approval over a real second connection) and minimal (dropping
+any one line makes the approval fail).
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `APPROVE_USER` | Approval role. Its presence is what creates the `approve` alias. | A broadly-privileged value defeats the least-privilege property. `question_approve` additionally refuses any role but `learnlm_approve_rw` on production, and refuses a role holding INSERT/UPDATE/DELETE on `groups_question`, UPDATE/DELETE on `groups_questionapproval`, or any write on `groups_referencesolution` or `groups_oracleexecution`. |
+| `APPROVE_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `APPROVE_DB` | Database name. Default `neondb`. | A different database records approval of a copy. |
+| `APPROVE_HOST` | Neon endpoint for the approval connection. | A different endpoint or branch approves a fork. |
+| `APPROVE_PORT` | Default `5432`. | — |
+
+**One row, never a trust state.** `question_approve` writes a single
+`QuestionApproval` and nothing else. `trust_state` has exactly one writer in the
+codebase — `question_promote` — and this role cannot perform it.
+
+## Trust-promotion connection (M2 P2.7h-7)
+
+A NINTH alias, `promote`, used by `question_promote --alias promote`. Defined in
+`settings.py` only when `PROMOTE_USER` is set.
+
+The role is `learnlm_promote_rw`, and it is the mirror image of the approval
+role. It holds `UPDATE (trust_state)` on `groups_question` — **one column** —
+and `UPDATE (promoted_at, promoted_by_id)` on `groups_questionapproval`, plus
+SELECT on the four tables the artifact is re-derived from. It has **no INSERT on
+`groups_questionapproval`**, so a promoter cannot author the judgement it acts
+on, and **no UPDATE on `groups_question.status`**, because promotion does not
+publish.
+
+The grant list lives in `_preimage_ops.PROMOTION_ROLE_GRANTS`, the production
+DDL is generated from it, and the test suite proves it sufficient and minimal
+over a real second connection.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `PROMOTE_USER` | Promotion role. Its presence is what creates the `promote` alias. | A broadly-privileged value defeats the least-privilege property. `question_promote` additionally refuses any role but `learnlm_promote_rw` on production, and refuses a role holding INSERT/DELETE on `groups_questionapproval`, UPDATE on any approval column other than the two stamp columns, or UPDATE on any `groups_question` column other than `trust_state` — `status` included. |
+| `PROMOTE_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `PROMOTE_DB` | Database name. Default `neondb`. | A different database promotes a copy. |
+| `PROMOTE_HOST` | Neon endpoint for the promotion connection. | A different endpoint or branch promotes a fork. |
+| `PROMOTE_PORT` | Default `5432`. | — |
+
+**Promotion is not publication.** `is_adaptive_eligible` requires PUBLISHED
+**and** ORACLE_VERIFIED. Promoting a question that is not published changes no
+learner's experience; it makes the question eligible to be published as trusted.
+
+## Question-status connection (M2 P2.7h-8)
+
+A TENTH alias, `status`, used by `question_status --alias status`. Defined in
+`settings.py` only when `STATUS_USER` is set.
+
+The role is `learnlm_status_rw`, the first and only writer of
+`Question.status` — a column that had no writer at all until this milestone.
+Shaped like the four repair roles: SELECT on the question plus `UPDATE (status)`
+and nothing else on it, SELECT on the batch and pre-image tables, SELECT+INSERT
+on the action table, and SELECT on the approval chain that the publication edge
+re-derives.
+
+It is denied `UPDATE (trust_state)` explicitly, and `learnlm_promote_rw` is
+denied `UPDATE (status)`. `is_adaptive_eligible` is PUBLISHED **and**
+ORACLE_VERIFIED, so a role holding both columns could turn a question on by
+itself; no role holds both. It is also denied UPDATE/DELETE on
+`groups_remediationaction` — a role that can rewrite the record of what it did
+is not audited — and any write on the pre-image tables that make its own change
+reversible.
+
+| Variable | What it does | Risk if wrong |
+|---|---|---|
+| `STATUS_USER` | Status role. Its presence is what creates the `status` alias. | A broadly-privileged value defeats the least-privilege property. `question_status` additionally refuses any role but `learnlm_status_rw` on production, and refuses one holding UPDATE on any other `groups_question` column (`trust_state` first among them), any write on the approval, reference or execution tables, any UPDATE/DELETE on the audit trail, or any write on the pre-image. |
+| `STATUS_PASSWORD` | Password for that role. | Never commit it; `.env` is gitignored. |
+| `STATUS_DB` | Database name. Default `neondb`. | A different database publishes a copy. |
+| `STATUS_HOST` | Neon endpoint for the status connection. | A different endpoint or branch publishes a fork. |
+| `STATUS_PORT` | Default `5432`. | — |
+
+**The legal graph** is `Question.STATUS_TRANSITIONS`: `DRAFT → PENDING_REVIEW`,
+`PENDING_REVIEW → PUBLISHED`, and `PUBLISHED → PENDING_REVIEW` for withdrawal.
+`Question.STATUS_BLOCKED` is read by the census and the oracle pipeline and has
+no writer.
 
 ## Adding configuration
 

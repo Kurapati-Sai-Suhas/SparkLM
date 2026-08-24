@@ -181,10 +181,14 @@ class OracleService:
         executable, _stored = GradingService._build_executable(
             question, reference.language, reference.source_code
         )
-        # The same literal-\n conversion GradingService applies, so an input
-        # means the same thing to the oracle as it will to the grader.
+        # The SAME stdin preparation the grader applies — not a copy of it.
+        # This was `(stdin or "").replace("\\n", "\n")`, which happened to agree
+        # with the grader; a duplicated rule agrees only until one side is
+        # edited. An answer key minted under different input semantics from the
+        # grading is the exact failure this module exists to prevent.
         verdict = self._runner(
-            executable, reference.language, (stdin or "").replace("\\n", "\n")
+            executable, reference.language,
+            GradingService.prepare_stdin(question, reference.language, stdin)
         )
 
         if "error" in verdict:

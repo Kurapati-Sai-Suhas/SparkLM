@@ -70,6 +70,15 @@ TAU = 0.5
 #: One rating period. Inactivity of N days inflates RD by N periods.
 RATING_PERIOD_DAYS = 1.0
 
+#: Identifies the parameter set and implementation that produced a rating.
+#:
+#: Recorded on every `GlickoSnapshot` (M2 P2.9b). Changing TAU, the RD bounds,
+#: the rating period or the update itself makes older snapshots incomparable
+#: with newer ones, and mixing both in one training set would be invisible
+#: without a version stamped on each row. Bump this whenever any constant in
+#: this module changes.
+IMPLEMENTATION_VERSION = "glicko2-v1"
+
 CONVERGENCE = 1e-6
 MAX_ITERATIONS = 100
 

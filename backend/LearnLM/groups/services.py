@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from django.db import transaction
 
 from common import languages
-from groups import execution_contract
+from groups import execution_adapter, execution_contract
 from .engines.agentic_coach import trigger_agentic_coach
 from .engines.elo_engine import EloEngine
 from .engines.hlr_engine import HLREngine
@@ -293,6 +293,27 @@ class GradingUnavailable(Exception):
         self.details = details
 
 
+class ExecutionContractError(Exception):
+    """
+    A stored test case cannot be executed as written (M2 P2.7 follow-up).
+
+    Raised INSTEAD of the accidental `AttributeError` that 48 production
+    questions currently trigger by storing a list where `stdin` or
+    `expected_output` must be text. Both produce a failed request; the
+    difference is that this one names the defect and cannot be mistaken for a
+    Judge0 outage or a learner's wrong answer.
+
+    Deliberately not a verdict. Marking the submission `wrong_answer` would
+    tell a learner their correct solution was incorrect, and marking it
+    `accepted` would mint grading truth from a test case nobody can run. The
+    question's data is broken and the honest response is to refuse.
+    """
+
+    def __init__(self, details):
+        super().__init__(details)
+        self.details = details
+
+
 @dataclass
 class GradeResult:
     """Outcome of grading one submission against its hidden test cases."""
@@ -353,12 +374,21 @@ class GradingService:
         test_cases = question.hidden_test_cases
 
         for i, tc in enumerate(test_cases):
-            # Convert literal \n in AI-generated test cases to actual newlines.
-            verdict = self._runner(executable_code, language, tc.get('stdin', '').replace('\\n', '\n'))
+            # Both fields read WITHOUT assuming they are text. This used to be
+            # `tc.get('stdin', '').replace(...)` and `.strip()`, which raises
+            # AttributeError on the 48 questions storing a list in either one.
+            raw_stdin, raw_expected, problem = execution_adapter.read_test_case(tc)
+            if problem:
+                raise ExecutionContractError(
+                    f"question {question.pk} test case {i + 1}: {problem}")
+
+            verdict = self._runner(
+                executable_code, language,
+                self.prepare_stdin(question, language, raw_stdin))
             if "error" in verdict:
                 raise GradingUnavailable(verdict["error"])
 
-            expected = tc.get('expected_output', '').strip()
+            expected = raw_expected.strip()
 
             raw_actual = verdict.get('stdout')
             if raw_actual is None:
@@ -417,6 +447,67 @@ class GradingService:
         )
 
     @staticmethod
+    def prepare_stdin(question, language, raw_stdin):
+        """
+        The bytes actually written to the process's stdin (M2 P2.7 follow-up).
+
+        The SECOND half of the shared execution seam. `_build_executable`
+        decides what code runs; this decides what it is fed. Both the grader
+        and the oracle call both, so there is one parser and no way for the
+        answer key to be minted under different semantics from the grading.
+
+        v1 and v2 are BYTE-FOR-BYTE unchanged — the literal-`\\n` expansion and
+        nothing else. Every production question is v1, so this method changes
+        no existing grading. Only v3 gets the canonical envelope, and zero
+        questions declare v3.
+        """
+        expanded = (raw_stdin or "").replace("\\n", "\n")
+
+        version = execution_contract.contract_version(question)
+        if version != execution_contract.CONTRACT_V3:
+            return expanded
+
+        if (language or "").lower() != "python":
+            raise ExecutionContractError(
+                f"question {getattr(question, 'pk', '?')} declares v3, which is "
+                f"defined for python only; {language!r} was requested")
+
+        starter = (getattr(question, "boilerplate_code", None) or {})
+        source = starter.get("python") if isinstance(starter, dict) else None
+        invocation = execution_adapter.build_invocation(raw_stdin, source or "")
+        if not invocation.ok:
+            raise ExecutionContractError(
+                f"question {getattr(question, 'pk', '?')}: "
+                f"{invocation.outcome} — {invocation.detail}")
+        return invocation.envelope()
+
+    @staticmethod
+    def quality_execution_plan(question):
+        """
+        The execution seam, packaged for the hidden-test quality gate
+        (M2 P2.7 follow-up).
+
+        The gate used to call its runner with `mutant.source` and the RAW
+        stored stdin, wrapping nothing and preparing nothing. Its Tier-1 and
+        Tier-2 kill rates were therefore computed under semantics no learner
+        experiences: a suite could pass the gate while the grader fed the same
+        question different arguments.
+
+        This hands the gate the same two functions the grader and the oracle
+        use, so a mutant is wrapped exactly as a submission is and is fed
+        exactly what a submission is fed. Imported lazily so the pure gate
+        module never needs to know services exists.
+        """
+        from groups.hidden_test_quality import ExecutionPlan
+
+        return ExecutionPlan(
+            build_executable=lambda source, language: (
+                GradingService._build_executable(question, language, source)[0]),
+            prepare_stdin=lambda stdin, language: (
+                GradingService.prepare_stdin(question, language, stdin)),
+        )
+
+    @staticmethod
     def _build_executable(question, language, raw_code):
         """
         Returns (executable_code, stored_code). Only the database wrapper is
@@ -453,6 +544,9 @@ class GradingService:
             # writes a complete program, so there is nothing to wrap.
             return raw_code, raw_code
 
+        # v3 falls through to here on purpose: it reuses v1's harness verbatim
+        # and differs ONLY in the stdin it is fed (see `prepare_stdin`). No new
+        # template exists, so there is no new template to get wrong.
         if lang_key == "python":
             executable_code = GENERIC_PYTHON_WRAPPER.replace("{user_code}", raw_code)
         elif lang_key == "java":

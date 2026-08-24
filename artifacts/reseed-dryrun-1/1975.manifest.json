@@ -1,0 +1,31 @@
+{
+  "applicable": false,
+  "artifact_digest": "6bebd5bf364868c06ebd3039bc6380919a889aa28eac09a4ca87c0772532cceb",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "medium",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T18:48:45.456423+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "5feb5142e9ee0600885fa2f45473bea4747418f65ffadf774425e23730db2d02",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "1975.starter.py",
+    "statement": "1975.statement.html"
+  },
+  "prompt_template_version": "statement-and-signature/v1",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 1975,
+  "refusals": [],
+  "regeneration_count": 0,
+  "status": "READY_FOR_REVIEW",
+  "title": "Find Unique Binary String",
+  "topic": "Array"
+}

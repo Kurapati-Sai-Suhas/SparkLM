@@ -56,13 +56,30 @@ class QuestionAdmin(admin.ModelAdmin):
     list_display = ['title', 'topic', 'base_difficulty', 'status', 'trust_state']
     list_filter = ['topic', 'status', 'trust_state']
 
-    # Read-only (M2 P2.7c). Publishing a question and declaring its answers
-    # oracle-verified are the outputs of a pipeline — static reconciliation,
-    # an approved reference solution, oracle agreement, the mutation gate and
-    # human approval. A form field would let any staff account assert all of
-    # that with a dropdown, which is the single easiest way to reintroduce
-    # untrusted grading truth.
-    readonly_fields = ['status', 'trust_state']
+    # Read-only (M2 P2.7c, extended P2.7g-3).
+    #
+    # `status` and `trust_state` are the outputs of a pipeline — static
+    # reconciliation, an approved reference solution, oracle agreement, the
+    # mutation gate and human approval. A form field would let any staff
+    # account assert all of that with a dropdown, which is the single easiest
+    # way to reintroduce untrusted grading truth.
+    #
+    # P2.7g-3 adds the GRADING ARTIFACT itself. Locking the two flags while
+    # leaving the artifact editable protected the label and not the thing it
+    # labels: a staff account could approve a question, then edit its hidden
+    # tests through this form, and the approval would still read as valid to
+    # anyone looking at the row. The digest catches that at promotion — but
+    # only at promotion, and only if someone tries. Making the inputs readonly
+    # means the artifact can change through exactly one path: the review and
+    # approval workflow, which records who, what and when.
+    #
+    # This is a narrowing, and it is deliberate. Editing a question's content
+    # now requires a code path that leaves evidence.
+    readonly_fields = [
+        'status', 'trust_state',
+        'content', 'hidden_test_cases', 'boilerplate_code',
+        'hidden_wrapper_code', 'execution_contract_version',
+    ]
 
 
 @admin.register(CodeSubmission)

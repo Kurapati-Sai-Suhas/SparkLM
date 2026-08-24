@@ -1,0 +1,21 @@
+<p>Given two strings <i>haystack</i> and <i>needle</i>, find the index of the first occurrence of <i>needle</i> in <i>haystack</i>. If <i>needle</i> is an empty string, return 0. If <i>needle</i> is not found in <i>haystack</i>, return -1.</p><p>Input Format: The first line contains the string <i>haystack</i>, and the second line contains the string <i>needle</i>.</p><p>Output Format: The index of the first occurrence of <i>needle</i> in <i>haystack</i>.</p><p>Constraints: 0 &le; |<i>haystack</i>| &le; 10<sup>4</sup>, 0 &le; |<i>needle</i>| &le; 10<sup>4</sup>, where |<i>string</i>| denotes the length of <i>string</i>.</p>
+
+### Examples
+
+**Input 1:** `hello
+ll
+`
+**Output 1:** `2`
+**Explanation:** The index of the first occurrence of 'll' in 'hello' is 2
+
+**Input 2:** `aaaaa
+bba
+`
+**Output 2:** `-1`
+**Explanation:** The string 'bba' is not found in 'aaaaa'
+
+**Input 3:** `abc
+a
+`
+**Output 3:** `0`
+**Explanation:** The index of the first occurrence of 'a' in 'abc' is 0

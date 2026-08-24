@@ -1,0 +1,15 @@
+<p>Given the edges of a directed graph where edges[i] = [from<sub>i</sub>, to<sub>i</sub>], find the city that is the destination of all paths starting from some city.</p><p>Input: path = [[&quot;London&quot;,&quot;New York&quot;],[&quot;New York&quot;,&quot;Paris&quot;],[&quot;Paris&quot;,&quot;Rome&quot;]]</p><p>Output: &quot;Rome&quot;</p><p>Input Format: List of pairs where the first element in each pair represents the source city and the second element represents the destination city.</p><p>Output Format: The destination city.</p><p>Constraints: The graph is guaranteed to have a destination city, and it is the city that is the last stop for all paths.</p>
+
+### Examples
+
+**Input 1:** `[["London","New York"],["New York","Paris"],["Paris","Rome"]]`
+**Output 1:** `Rome`
+**Explanation:** Rome is the destination of all paths
+
+**Input 2:** `[["B","D"],["A","B"],["C","D"]]`
+**Output 2:** `D`
+**Explanation:** There are multiple paths but all of them end at D
+
+**Input 3:** `[["A","Z"]]`
+**Output 3:** `Z`
+**Explanation:** Single city path

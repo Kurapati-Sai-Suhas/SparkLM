@@ -185,6 +185,285 @@ DATABASES = {
     }
 }
 
+# ── Pre-image capture alias (M2 P2.7, blocker J8) ────────────────────────
+#
+# A SEPARATE alias for `learnlm_preimage_rw`, present only when PREIMAGE_* is
+# configured. Defined as its own alias rather than by repointing `default`
+# because the difference is the whole safety property: this connection can
+# INSERT into the three pre-image tables and holds no privilege at all on
+# groups_question, so a capture run through it cannot touch grading truth even
+# if the code tried.
+#
+# `preimage_capture --alias preimage` selects it. Absent PREIMAGE_*, the alias
+# does not exist and the command fails loudly rather than silently falling back
+# to `default` — which is the census role, and would fail mid-batch instead.
+#
+# No pool: this alias serves short operator commands, not requests.
+# ── Remediation alias (M2 P2.7) ──────────────────────────────────────────
+#
+# `learnlm_remediate_rw` — column-level UPDATE on groups_question.content and
+# nothing else that mutates. A THIRD alias rather than reusing `preimage`,
+# because capture and remediation are different privileges: the capture role
+# preserves a question and must not be able to change it, and the remediation
+# role changes one column and must not be able to append pre-images.
+#
+# Present only when REMEDIATE_USER is configured; absent it the alias does not
+# exist and `remediate_statement --alias remediate` fails loudly.
+if os.getenv("REMEDIATE_USER"):
+    DATABASES['remediate'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('REMEDIATE_DB', 'neondb'),
+        'USER': os.getenv('REMEDIATE_USER'),
+        'PASSWORD': os.getenv('REMEDIATE_PASSWORD', ''),
+        'HOST': os.getenv('REMEDIATE_HOST', ''),
+        'PORT': os.getenv('REMEDIATE_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+if os.getenv("PREIMAGE_USER"):
+    DATABASES['preimage'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('PREIMAGE_DB', 'neondb'),
+        'USER': os.getenv('PREIMAGE_USER'),
+        'PASSWORD': os.getenv('PREIMAGE_PASSWORD', ''),
+        'HOST': os.getenv('PREIMAGE_HOST', ''),
+        'PORT': os.getenv('PREIMAGE_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        # Django requires these keys on every alias; the capture commands
+        # never create a test database for it.
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+# ── Hidden-test remediation alias (M2 P2.7) ──────────────────────────────
+#
+# `learnlm_hidden_test_rw` — column-level UPDATE on
+# groups_question.hidden_test_cases and nothing else that mutates. A FOURTH
+# alias, and the MIRROR IMAGE of `remediate`: that role can change a statement
+# and not a key, this one a key and not a statement.
+#
+# That is the whole reason there are two. The remediation design fixed an order
+# — statement first, keys second — and two column-scoped roles make it a
+# privilege boundary rather than an instruction an operator has to remember.
+#
+# Present only when HIDDENTEST_USER is configured; absent it the alias does not
+# exist and `remediate_hidden_tests --alias hiddentest` fails loudly.
+if os.getenv("HIDDENTEST_USER"):
+    DATABASES['hiddentest'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('HIDDENTEST_DB', 'neondb'),
+        'USER': os.getenv('HIDDENTEST_USER'),
+        'PASSWORD': os.getenv('HIDDENTEST_PASSWORD', ''),
+        'HOST': os.getenv('HIDDENTEST_HOST', ''),
+        'PORT': os.getenv('HIDDENTEST_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+# ── Contract remediation alias (M2 P2.7) ─────────────────────────────────
+#
+# `learnlm_contract_rw` — column-level UPDATE on
+# groups_question.execution_contract_version and nothing else that mutates.
+#
+# A FIFTH alias because a contract migration is a third kind of authority over
+# the same row: it does not change what is asked or what answer is recorded, it
+# changes how the stored inputs are DELIVERED to the learner's code. Giving it
+# to the statement or hidden-test role would mean the role that edits a text
+# could also re-point the question at a different harness.
+#
+# Present only when CONTRACT_USER is configured; absent it the alias does not
+# exist and `remediate_contract --alias contract` fails loudly.
+if os.getenv("CONTRACT_USER"):
+    DATABASES['contract'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('CONTRACT_DB', 'neondb'),
+        'USER': os.getenv('CONTRACT_USER'),
+        'PASSWORD': os.getenv('CONTRACT_PASSWORD', ''),
+        'HOST': os.getenv('CONTRACT_HOST', ''),
+        'PORT': os.getenv('CONTRACT_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+# ── Boilerplate remediation alias (M2 P2.7) ──────────────────────────────
+#
+# `learnlm_boilerplate_rw` — column-level UPDATE on
+# groups_question.boilerplate_code and nothing else that mutates.
+#
+# A SIXTH alias, and the one with the widest blast radius per byte: the starter
+# is the code every learner is handed AND the declaration the execution adapter
+# binds arguments from. A role able to edit it could change what a learner
+# starts from and how their submission is called, so it is kept apart from the
+# roles that edit the text, the keys and the contract version.
+#
+# Present only when BOILERPLATE_USER is configured; absent it the alias does not
+# exist and `remediate_boilerplate --alias boilerplate` fails loudly.
+if os.getenv("BOILERPLATE_USER"):
+    DATABASES['boilerplate'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('BOILERPLATE_DB', 'neondb'),
+        'USER': os.getenv('BOILERPLATE_USER'),
+        'PASSWORD': os.getenv('BOILERPLATE_PASSWORD', ''),
+        'HOST': os.getenv('BOILERPLATE_HOST', ''),
+        'PORT': os.getenv('BOILERPLATE_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+# ── Oracle / reference alias (M2 P2.7) ───────────────────────────────────
+#
+# `learnlm_oracle_rw` — the only role permitted to author a reference solution,
+# move it through review, and record what an execution produced.
+#
+# A SEVENTH alias, and the first one whose tables are not `groups_question` at
+# all. It holds SELECT on the question and NOTHING that can modify it: an
+# oracle run reads a question, executes an approved implementation against it,
+# and writes only provenance. It cannot rewrite a key, a statement or a
+# contract, and it cannot approve a question — the boundary this milestone
+# exists to defend, expressed as a grant rather than a convention.
+#
+# Present only when ORACLE_USER is configured; absent it the alias does not
+# exist and `--alias oracle` fails loudly rather than falling back to the
+# read-only census connection.
+if os.getenv("ORACLE_USER"):
+    DATABASES['oracle'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('ORACLE_DB', 'neondb'),
+        'USER': os.getenv('ORACLE_USER'),
+        'PASSWORD': os.getenv('ORACLE_PASSWORD', ''),
+        'HOST': os.getenv('ORACLE_HOST', ''),
+        'PORT': os.getenv('ORACLE_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+# ── Question-approval alias (M2 P2.7h-6) ─────────────────────────────────
+#
+# `learnlm_approve_rw` — the only role permitted to record a human's approval
+# of a question's grading artifact.
+#
+# An EIGHTH alias, and the narrowest yet: it INSERTs one row into one table and
+# holds SELECT on exactly the three tables the artifact is assembled from. It
+# deliberately cannot write `groups_question` at all, so an approver can state
+# a judgement and is structurally unable to enact it — the separation the whole
+# review/approve/promote split exists to create, expressed as a grant.
+#
+# Present only when APPROVE_USER is configured; absent it the alias does not
+# exist and `question_approve --alias approve` fails loudly rather than falling
+# back to the read-only census connection.
+if os.getenv("APPROVE_USER"):
+    DATABASES['approve'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('APPROVE_DB', 'neondb'),
+        'USER': os.getenv('APPROVE_USER'),
+        'PASSWORD': os.getenv('APPROVE_PASSWORD', ''),
+        'HOST': os.getenv('APPROVE_HOST', ''),
+        'PORT': os.getenv('APPROVE_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+# ── Trust-promotion alias (M2 P2.7h-7) ───────────────────────────────────
+#
+# `learnlm_promote_rw` — the only role permitted to move a question's
+# `trust_state`, which is the single most consequential write in the system:
+# after it, a wrong answer key stops being a bad practice question and starts
+# corrupting learner models.
+#
+# A NINTH alias, and the mirror of `approve`. That role INSERTs the judgement
+# and cannot touch the question; this one enacts the judgement and cannot
+# author it — no INSERT on groups_questionapproval, and UPDATE there scoped to
+# the two promotion-stamp columns. On the question it holds UPDATE on
+# `trust_state` and nothing else, `status` included: promotion does not
+# publish.
+#
+# Present only when PROMOTE_USER is configured; absent it the alias does not
+# exist and `question_promote --alias promote` fails loudly rather than falling
+# back to the read-only census connection.
+if os.getenv("PROMOTE_USER"):
+    DATABASES['promote'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('PROMOTE_DB', 'neondb'),
+        'USER': os.getenv('PROMOTE_USER'),
+        'PASSWORD': os.getenv('PROMOTE_PASSWORD', ''),
+        'HOST': os.getenv('PROMOTE_HOST', ''),
+        'PORT': os.getenv('PROMOTE_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
+# ── Question-status alias (M2 P2.7h-8) ───────────────────────────────────
+#
+# `learnlm_status_rw` — the only role permitted to write `Question.status`,
+# which until this milestone had no writer at all.
+#
+# A TENTH alias, and the fifth of the remediation family in shape: SELECT on
+# the question plus UPDATE on exactly one column, SELECT on the batch and
+# pre-image tables, SELECT+INSERT on the action table. The column is `status`,
+# and `trust_state` is explicitly forbidden to it — `is_adaptive_eligible` is
+# PUBLISHED and ORACLE_VERIFIED, so a role holding both columns could turn a
+# question on by itself.
+#
+# Present only when STATUS_USER is configured; absent it the alias does not
+# exist and `question_status --alias status` fails loudly rather than falling
+# back to the read-only census connection.
+if os.getenv("STATUS_USER"):
+    DATABASES['status'] = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('STATUS_DB', 'neondb'),
+        'USER': os.getenv('STATUS_USER'),
+        'PASSWORD': os.getenv('STATUS_PASSWORD', ''),
+        'HOST': os.getenv('STATUS_HOST', ''),
+        'PORT': os.getenv('STATUS_PORT', '5432'),
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'TIME_ZONE': None,
+        'OPTIONS': {},
+        'TEST': {'MIRROR': 'default'},
+    }
+
 # Cache — the DAG graph cache (hybrid_router) and DRF throttles live here.
 # With the default per-process LocMemCache, cache invalidation only reaches
 # the worker that made the change; set REDIS_URL in production so all

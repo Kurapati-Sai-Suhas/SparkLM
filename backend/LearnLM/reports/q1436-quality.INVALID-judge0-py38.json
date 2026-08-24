@@ -1,0 +1,135 @@
+{
+  "blockers": [],
+  "mutant_identifiers": [
+    "t1-alphabetically-last",
+    "t1-first-edge-destination",
+    "t1-last-edge-destination",
+    "t1-most-frequent-city",
+    "t1-most-incoming-edges",
+    "t1-source-not-destination",
+    "t2-empty-string",
+    "t2-first-edge-only",
+    "t2-inclusive-source-set",
+    "t2-returns-list",
+    "t2-single-successor-traversal",
+    "t2-skip-first-edge",
+    "t2-swapped-pair-order"
+  ],
+  "provenance": {
+    "case_count": 13,
+    "case_identities": [
+      "27d637edaf67a4d55677aeff027ef1ea6e9fc46f732c076a571017132c8b2f59",
+      "991a0528a61ec16f6efa1819ca1696a61a171236e9171c18891cd7f60181c970",
+      "34928cbd31f148f52df0ce86e941683940197327d576bc7234cc986d51a0de13",
+      "9d4f0fb3d9288ecef7864a4e57e988fff99dc618f0f382ac76a9bd658212eadd",
+      "e119c4822a150ba7499673fe5c063d0bac292f2d593b2b9873ecc6551c6fabd2",
+      "2978c895bea61618d17d66d9e987e8b112faa7809eeb9811c67644cfc3befb22",
+      "7db1b0447a8d3749fc0a4687a2438ed78c1652912610207682d797855fcab042",
+      "96cc8dddaa6cf263a15bf7679c37eebfe30520020f63e9f8a99c54b18ce58bac",
+      "18b08c768fc56ee147284cb0a51474bd3450a264f0efc771ff353288b4b15bc6",
+      "8215e6cf71534b0d89f742e862c54a94f6fa2ae114c3d2ea1d7a0e7b7ad83b4d",
+      "d6059cc5d318a60e87f730c255306f8bc7673a16980c58fbc802a6d6d4adf00c",
+      "0654532b27d48924811f27ac6f5d346ebad296e0545189c8fb3b4b09d76dcd8d",
+      "78e59f78aaab1597f3bbf7fbd407c7bd66c276629cd9ce0bf94698b08416d3f6"
+    ],
+    "categories": [
+      "alphabetical_trap",
+      "branching_convergent",
+      "duplicate_values",
+      "long_chain",
+      "singleton",
+      "terminal_edge_not_last",
+      "typical_chain",
+      "unordered_edges"
+    ],
+    "execution_contract_version": "v3",
+    "question_id": 1436,
+    "question_state_digest": "4f5748806c5212f5c2be26ac915956c1ed4bfa6bfa6d12ba237aadaea7dd3002",
+    "reference_id": 3,
+    "reference_language": "python",
+    "reference_source_hash": "2e0551949f7ca6ba6b5fa117b36e428b74e22e008c358937a0123e4ef889f10e",
+    "results": [
+      {
+        "identifier": "t1-alphabetically-last",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-first-edge-destination",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-last-edge-destination",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-most-frequent-city",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-most-incoming-edges",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-source-not-destination",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t2-empty-string",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-first-edge-only",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-inclusive-source-set",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-returns-list",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-single-successor-traversal",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-skip-first-edge",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-swapped-pair-order",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "tier1_kill_rate": 1.0,
+  "tier2_kill_rate": 1.0
+}

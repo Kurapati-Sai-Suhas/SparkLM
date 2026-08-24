@@ -1,0 +1,114 @@
+{
+  "question": 1436,
+  "provenance": {
+    "question_digest": "4f5748806c5212f5c2be26ac915956c1ed4bfa6bfa6d12ba237aadaea7dd3002",
+    "authored_for": "M2 P2.7h-10, Destination City",
+    "reference_id": 3,
+    "reference_source_sha256": "2e0551949f7ca6ba6b5fa117b36e428b74e22e008c358937a0123e4ef889f10e",
+    "authored_against": "the 13-case suite after SUITE_EXPANSION (P2.7h-11); the spec itself was written against the 4-case suite and is unchanged apart from this digest"
+  },
+  "input_contract": {
+    "accepts_empty_input": false,
+    "is_sequence": true,
+    "has_size_bounds": false,
+    "allows_duplicates": true,
+    "order_sensitive": false,
+    "numeric": false,
+    "overflow_sensitive": false,
+    "description": "a non-empty list of [source, destination] string pairs describing a directed acyclic graph; the statement GUARANTEES exactly one destination city exists, which is what makes empty input inadmissible. No size bounds are stated. Cities repeat freely as sources and destinations, so duplicates apply. Crucially the answer does NOT depend on edge order -- Example 2 supplies the edges out of path order on purpose -- so the ordering categories do not apply and an order-dependent solution is wrong rather than merely lucky."
+  },
+  "substitutions": [
+    {
+      "replaces": "already_sorted",
+      "name": "unordered_edges",
+      "reason": "the contract is order-insensitive, so already_sorted/reverse_sorted describe nothing about this problem. The failure mode that matters instead is edges supplied out of path order (Example 2), which is exactly the defective chain-following interpretation this question was repaired away from."
+    },
+    {
+      "replaces": "reverse_sorted",
+      "name": "branching_convergent",
+      "reason": "the mirror substitution. The other structural failure mode is a graph that is a tree converging on one sink rather than a single chain, which breaks any implementation that assumes one outgoing edge per city."
+    }
+  ],
+  "mutants": [
+    {
+      "identifier": "t1-alphabetically-last",
+      "tier": 1,
+      "description": "returns the alphabetically greatest city name. A pattern-matched answer from the worked examples rather than a computed one -- and it happens to be right on every example in the statement.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        cities = set()\n        for source, destination in paths:\n            cities.add(source)\n            cities.add(destination)\n        return max(cities)\n"
+    },
+    {
+      "identifier": "t1-first-edge-destination",
+      "tier": 1,
+      "description": "returns the destination of the FIRST edge -- 'the destination is the second element of the pair', applied to whichever pair is seen first.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        return paths[0][1]\n"
+    },
+    {
+      "identifier": "t1-last-edge-destination",
+      "tier": 1,
+      "description": "returns the destination of the LAST edge, reading the edge list as if it were already in path order.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        return paths[-1][1]\n"
+    },
+    {
+      "identifier": "t1-most-frequent-city",
+      "tier": 1,
+      "description": "returns the city that appears most often anywhere in the edge list -- 'the destination is the one you see the most'.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        counts = {}\n        for source, destination in paths:\n            counts[source] = counts.get(source, 0) + 1\n            counts[destination] = counts.get(destination, 0) + 1\n        best, best_count = '', -1\n        for city, count in counts.items():\n            if count > best_count:\n                best, best_count = city, count\n        return best\n"
+    },
+    {
+      "identifier": "t1-most-incoming-edges",
+      "tier": 1,
+      "description": "returns the city with the most incoming edges -- 'the destination is where the most paths lead'. Correct only when the sink happens to have a strict majority of in-edges; ties resolve arbitrarily.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        counts = {}\n        for _source, destination in paths:\n            counts[destination] = counts.get(destination, 0) + 1\n        best, best_count = '', -1\n        for city, count in counts.items():\n            if count > best_count:\n                best, best_count = city, count\n        return best\n"
+    },
+    {
+      "identifier": "t1-source-not-destination",
+      "tier": 1,
+      "description": "returns the START city instead of the destination -- the city that is never a DESTINATION rather than never a SOURCE. The commonest confusion of the two ends of the graph.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        destinations = {destination for _source, destination in paths}\n        for source, _destination in paths:\n            if source not in destinations:\n                return source\n        return ''\n"
+    },
+    {
+      "identifier": "t2-empty-string",
+      "tier": 2,
+      "description": "mechanical: always returns the empty string.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        return ''\n"
+    },
+    {
+      "identifier": "t2-first-edge-only",
+      "tier": 2,
+      "description": "mechanical: applies the correct rule but examines only the first edge, returning '' whenever the answer is anywhere else.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        sources = {source for source, _destination in paths}\n        source, destination = paths[0]\n        if destination not in sources:\n            return destination\n        return ''\n"
+    },
+    {
+      "identifier": "t2-inclusive-source-set",
+      "tier": 2,
+      "description": "mechanical: builds the source set from every city rather than from sources only, so nothing is ever outside it and the fallback always fires.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        cities = set()\n        for source, destination in paths:\n            cities.add(source)\n            cities.add(destination)\n        for _source, destination in paths:\n            if destination not in cities:\n                return destination\n        return ''\n"
+    },
+    {
+      "identifier": "t2-returns-list",
+      "tier": 2,
+      "description": "mechanical: returns every candidate rather than the single guaranteed answer, so the output shape is wrong even when the set is right.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        sources = {source for source, _destination in paths}\n        return str([destination for _source, destination in paths\n                    if destination not in sources])\n"
+    },
+    {
+      "identifier": "t2-single-successor-traversal",
+      "tier": 2,
+      "description": "walks forward from the source of the first edge using a single-successor map, so a city with two outgoing edges silently loses one of them.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        successor = {}\n        for source, destination in paths:\n            successor[source] = destination\n        city = paths[0][0]\n        while city in successor:\n            city = successor[city]\n        return city\n",
+      "equivalence_argument": "Provably equivalent under the statement's guarantee, and moved out of Tier 1 for that reason. The walk stops at the first city that is not a key of the successor map -- that is, the first city that is not a source. The statement guarantees exactly one such city (the destination) and guarantees every path ends there, so the graph is acyclic and the walk terminates. Losing one of a city's outgoing edges to the last-wins overwrite changes WHICH path is walked, never where it ends: every edge leads forward and the only terminal node is the sink. No input satisfying the contract can distinguish it from the reference, so no hidden test could ever kill it. It is a correct alternative algorithm that happens to look lossy, not a wrong one."
+    },
+    {
+      "identifier": "t2-skip-first-edge",
+      "tier": 2,
+      "description": "mechanical: off-by-one, building the source set from paths[1:] so the first edge's source is never excluded.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        sources = {source for source, _destination in paths[1:]}\n        for _source, destination in paths:\n            if destination not in sources:\n                return destination\n        return ''\n"
+    },
+    {
+      "identifier": "t2-swapped-pair-order",
+      "tier": 2,
+      "description": "mechanical: reads each pair as [destination, source], inverting every edge.",
+      "source": "class Solution:\n    def destCity(self, paths: list[list[str]]) -> str:\n        sources = {destination for _source, destination in paths}\n        for source, _destination in paths:\n            if source not in sources:\n                return source\n        return ''\n"
+    }
+  ],
+  "rationale": "Tier 1 is five wrong readings a learner can actually hold about Destination City: confusing the two ends of the graph, treating the edge list as ordered (from either end), counting in-edges, and pattern-matching the worked examples alphabetically -- plus one on raw city frequency. None was invented to reach a threshold. Tier 2 is mechanical corruptions of the correct set-difference solution, plus the single-successor traversal, which was drafted as a Tier-1 misconception and demoted once it was shown to be equivalent: the gate treats a Tier-1 EQUIVALENT as a survivor precisely so that an uncatchable 'misconception' cannot be waved through, and the honest response is to admit it is not a wrong solution."
+}

@@ -1,0 +1,126 @@
+{
+  "question": 3309,
+  "provenance": {
+    "authored_by": "Suhas (operator), drafted in P2.7h-4",
+    "written_against": "the repaired q3309 statement and the final 12-case suite",
+    "question_digest": "ebb26e7f0f1ff127abfd99adc6903c66f9b4660c6df9b3c3d99a265d4f23a61e",
+    "reference_id": 2,
+    "reference_source_hash": "18ad8f390642c315ef78e52fecaf97ab31fd6fc69fca2a02b3114e03d77a341b",
+    "note": "Tier-1 entries are misconceptions a learner could plausibly hold; each carries the reason and the case expected to expose it. No mutant was added to raise a score."
+  },
+  "input_contract": {
+    "accepts_empty_input": true,
+    "is_sequence": true,
+    "has_size_bounds": true,
+    "allows_duplicates": true,
+    "order_sensitive": true,
+    "numeric": false,
+    "overflow_sensitive": false,
+    "description": "two strings, haystack and needle; the repaired statement permits 0 <= |s| <= 10^4 for both"
+  },
+  "mutants": [
+    {
+      "identifier": "t1-last-occurrence",
+      "tier": 1,
+      "description": "returns the LAST occurrence instead of the first",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        return haystack.rfind(needle)\n"
+    },
+    {
+      "identifier": "t1-count-not-index",
+      "tier": 1,
+      "description": "returns how MANY times the needle occurs, not where",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        return haystack.count(needle)\n"
+    },
+    {
+      "identifier": "t1-off-by-one-window",
+      "tier": 1,
+      "description": "scans range(len(haystack) - len(needle)) and so never tries the last valid start position",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        for start in range(len(haystack) - len(needle)):\n            if haystack[start:start + len(needle)] == needle:\n                return start\n        return -1\n"
+    },
+    {
+      "identifier": "t1-empty-needle-not-found",
+      "tier": 1,
+      "description": "treats an empty needle as 'not found' instead of returning 0",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return -1\n        return haystack.find(needle)\n"
+    },
+    {
+      "identifier": "t2-comparison-inverted",
+      "tier": 2,
+      "description": "window comparison == flipped to !=",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        for start in range(len(haystack) - len(needle) + 1):\n            if haystack[start:start + len(needle)] != needle:\n                return start\n        return -1\n"
+    },
+    {
+      "identifier": "t2-returns-start-plus-one",
+      "tier": 2,
+      "description": "returns start + 1 instead of start",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        for start in range(len(haystack) - len(needle) + 1):\n            if haystack[start:start + len(needle)] == needle:\n                return start + 1\n        return -1\n"
+    },
+    {
+      "identifier": "t2-window-one-short",
+      "tier": 2,
+      "description": "compares a window one character shorter than the needle",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        for start in range(len(haystack) - len(needle) + 1):\n            if haystack[start:start + len(needle) - 1] == needle:\n                return start\n        return -1\n"
+    },
+    {
+      "identifier": "t2-scan-starts-at-one",
+      "tier": 2,
+      "description": "loop starts at index 1, skipping position 0",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        for start in range(1, len(haystack) - len(needle) + 1):\n            if haystack[start:start + len(needle)] == needle:\n                return start\n        return -1\n"
+    },
+    {
+      "identifier": "t2-missing-returns-length",
+      "tier": 2,
+      "description": "returns len(haystack) instead of -1 when absent",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        if needle == '':\n            return 0\n        for start in range(len(haystack) - len(needle) + 1):\n            if haystack[start:start + len(needle)] == needle:\n                return start\n        return len(haystack)\n"
+    },
+    {
+      "identifier": "t2-empty-branch-removed",
+      "tier": 2,
+      "description": "the explicit empty-needle branch is deleted",
+      "source": "class Solution:\n    def strStr(self, haystack: str, needle: str) -> int:\n        for start in range(len(haystack) - len(needle) + 1):\n            if haystack[start:start + len(needle)] == needle:\n                return start\n        return -1\n",
+      "equivalence_argument": "With an empty needle the loop runs over range(len(haystack) + 1) and its first comparison is haystack[0:0] == '', which is True, so it returns 0 — exactly what the deleted branch returned. The branch is documentation of the statement's rule, not behaviour, and no input can distinguish the two versions. Structural, not 'it passed the tests'."
+    }
+  ],
+  "rationale": {
+    "t1-last-occurrence": {
+      "why_plausible": "`find` and `rfind` differ by one letter and a learner who reaches for the wrong one gets a solution that passes every single-occurrence test",
+      "expected_kill": "case 9 (aaaa/aa) kills it first — rfind gives 2, the answer is 0. Case 10 (abcabc/abc) was the case designed to expose it and would also kill it; the earlier case simply reaches it sooner."
+    },
+    "t1-count-not-index": {
+      "why_plausible": "misreading 'first occurrence' as 'occurrences'; the two agree by accident whenever the answer is 0 or 1",
+      "expected_kill": "case 1 (hello/ll): count is 1, the index is 2"
+    },
+    "t1-off-by-one-window": {
+      "why_plausible": "the classic missing +1: the number of start positions is len(h) - len(n) + 1, and the off-by-one is invisible unless a match sits at the very end",
+      "expected_kill": "case 7 (a/a): range(0) is empty, so -1 instead of 0. Case 8 would also kill it — the 10^4 match sits exactly at the excluded position"
+    },
+    "t1-empty-needle-not-found": {
+      "why_plausible": "the ORIGINAL statement said 1 <= |needle|, so a learner reading it never handles the empty case — this is the exact misconception the statement repair addressed",
+      "expected_kill": "case 4 (empty/empty): -1 instead of 0"
+    },
+    "t2-comparison-inverted": {
+      "why_plausible": "mechanical mutation",
+      "expected_kill": "case 1: the first window 'he' is not 'll', so it returns 0"
+    },
+    "t2-returns-start-plus-one": {
+      "why_plausible": "mechanical mutation",
+      "expected_kill": "case 1: 3 instead of 2"
+    },
+    "t2-window-one-short": {
+      "why_plausible": "mechanical mutation",
+      "expected_kill": "case 1: a shorter slice can never equal the needle, so -1 instead of 2"
+    },
+    "t2-scan-starts-at-one": {
+      "why_plausible": "mechanical mutation",
+      "expected_kill": "case 3 (abc/a): the only match is at 0, which is skipped"
+    },
+    "t2-missing-returns-length": {
+      "why_plausible": "mechanical mutation",
+      "expected_kill": "case 2 (aaaaa/bba): 5 instead of -1"
+    },
+    "t2-empty-branch-removed": {
+      "why_plausible": "mechanical mutation",
+      "expected_kill": "none — behaviourally identical, documented as EQUIVALENT"
+    }
+  }
+}

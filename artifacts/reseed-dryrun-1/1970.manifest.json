@@ -1,0 +1,31 @@
+{
+  "applicable": false,
+  "artifact_digest": "8ef1062ef8245618ef1de85b52b99f16d2c86e281285daff5934ab34b7bb3f95",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "medium",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T18:48:28.974938+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "19ed59c142760efeed35985cfd56fa50148e9a3e6df3555b303f355256806a24",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "1970.starter.py",
+    "statement": "1970.statement.html"
+  },
+  "prompt_template_version": "statement-and-signature/v1",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 1970,
+  "refusals": [],
+  "regeneration_count": 0,
+  "status": "READY_FOR_REVIEW",
+  "title": "Maximum Matrix Sum",
+  "topic": "Array"
+}

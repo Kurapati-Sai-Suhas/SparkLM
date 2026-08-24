@@ -7,6 +7,8 @@ version of this file hit the live Judge0 API on every run and asserted a
 response key ('agentic_coach') that the view never returned.
 """
 
+import logging
+
 import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -146,6 +148,186 @@ def test_judge0_unavailable_returns_503(api_client, user, question, monkeypatch)
     response = submit(api_client, question)
 
     assert response.status_code == 503
+
+
+# ─────────────────────────────────────────────────────────────
+# Execution-contract failures (M2 P2.7 follow-up)
+#
+# 48 production questions store a LIST where `stdin` or `expected_output` must
+# be text. `GradingService.grade` used to call `.strip()` on them and raise
+# AttributeError; it now raises `ExecutionContractError`. Either way the
+# learner receives no verdict — the question's data is broken, not their code.
+#
+# These drive the REAL view, so they measure the HTTP status a learner would
+# actually get rather than the exception a unit test can see.
+# ─────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def question_with_broken_test_data(db, question):
+    """A question whose stored expected_output is a list, as 48 real ones are."""
+    question.hidden_test_cases = [{"stdin": "1", "expected_output": ["1"]}]
+    question.save(update_fields=["hidden_test_cases"])
+    return question
+
+
+@pytest.mark.django_db
+def test_broken_test_data_is_a_409_not_a_500(
+        api_client, user, question_with_broken_test_data, monkeypatch):
+    """
+    Same category as the `question_not_gradable` 409 twenty lines above it in
+    the view: a data-integrity condition, not a server fault. The comment there
+    gives the reason — reporting content problems as 500 pollutes error metrics
+    and buries real faults.
+    """
+    monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_mock(stdout="1"))
+    api_client.force_authenticate(user=user)
+
+    # raise_request_exception=False so an unhandled exception becomes the 500 a
+    # learner would really see, instead of blowing up inside the test client.
+    api_client.raise_request_exception = False
+    response = submit(api_client, question_with_broken_test_data)
+
+    assert response.status_code == 409
+    assert response.data["detail"] == "question_not_gradable"
+
+
+@pytest.mark.django_db
+def test_a_broken_question_records_no_submission(
+        api_client, user, question_with_broken_test_data, monkeypatch):
+    """
+    Refusing must not leave learner state behind. A submission row here would
+    become evidence about a learner drawn from a question nobody can grade.
+    """
+    monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_mock(stdout="1"))
+    api_client.force_authenticate(user=user)
+    api_client.raise_request_exception = False
+
+    submit(api_client, question_with_broken_test_data)
+
+    assert not CodeSubmission.objects.filter(user=user).exists()
+    assert not UserTopicMastery.objects.filter(user=user).exists()
+
+
+@pytest.mark.django_db
+def test_judge0_outage_is_still_503_not_409(
+        api_client, user, question, monkeypatch):
+    """
+    The boundary that matters. A Judge0 outage is a SERVER fault and must stay
+    retryable — collapsing it into 409 would tell the client the question is
+    broken and stop them retrying something that would work in a minute.
+    """
+    monkeypatch.setattr(coding_views, "_run_on_judge0",
+                        judge0_mock(error="Judge0 timed out. Try again."))
+    api_client.force_authenticate(user=user)
+
+    response = submit(api_client, question)
+
+    assert response.status_code == 503
+
+
+@pytest.mark.django_db
+def test_an_unexpected_error_is_still_a_500(
+        api_client, user, question, monkeypatch):
+    """
+    The other boundary. A genuine programming fault must NOT be laundered into
+    a 409 — that would hide real bugs behind a content-problem label, which is
+    the exact failure mode the 409 mapping exists to prevent in reverse.
+    """
+    def exploding_runner(*args, **kwargs):
+        raise RuntimeError("unexpected programming fault")
+
+    monkeypatch.setattr(coding_views, "_run_on_judge0", exploding_runner)
+    api_client.force_authenticate(user=user)
+    api_client.raise_request_exception = False
+
+    response = submit(api_client, question)
+
+    assert response.status_code == 500
+
+
+@pytest.mark.django_db
+def test_the_409_body_leaks_no_hidden_test_detail(
+        api_client, user, question_with_broken_test_data, monkeypatch):
+    """
+    `exc.details` names the failing case and describes the stored test data.
+    It is logged, never returned — grading data never leaves the server
+    (M2 P2.5), and "expected_output is a list" is a fact about the answer key.
+    """
+    monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_mock(stdout="1"))
+    api_client.force_authenticate(user=user)
+    api_client.raise_request_exception = False
+
+    response = submit(api_client, question_with_broken_test_data)
+
+    body = str(response.data).lower()
+    for leaked in ("expected_output", "stdin", "test case 1", "list, not text"):
+        assert leaked not in body, f"response leaked {leaked!r}"
+
+
+@pytest.mark.django_db
+def test_the_409_is_logged_for_diagnosis(
+        api_client, user, question_with_broken_test_data, monkeypatch, caplog):
+    """
+    A 409 that says nothing is worse than the 500 it replaced: the 500 at least
+    produced a traceback. The question id and the failing case must reach the
+    log or the defect becomes invisible to operators.
+    """
+    monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_mock(stdout="1"))
+    api_client.force_authenticate(user=user)
+    api_client.raise_request_exception = False
+
+    with caplog.at_level(logging.ERROR, logger="groups.coding_views"):
+        submit(api_client, question_with_broken_test_data)
+
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert str(question_with_broken_test_data.pk) in logged
+    assert "expected_output" in logged
+
+
+def test_the_submit_view_catches_only_the_two_intended_exceptions():
+    """
+    Structural, by AST. `except Exception` here would launder every programming
+    fault into a content-problem 409 — and it would do so INVISIBLY, because
+    the handler happens to crash on `exc.details` for anything lacking that
+    attribute, which produces a 500 by accident and makes a behavioural test
+    pass for the wrong reason. Only the shape of the code rules it out.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(
+        inspect.getsource(coding_views.CodeSubmitView.post)))
+    caught = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        if node.type is None:
+            caught.append("BARE_EXCEPT")
+        elif isinstance(node.type, ast.Name):
+            caught.append(node.type.id)
+        elif isinstance(node.type, ast.Tuple):
+            caught.extend(e.id for e in node.type.elts if isinstance(e, ast.Name))
+
+    # The lookup handler above catches (Question.DoesNotExist, ValueError) and
+    # is legitimate. What must never appear is an over-broad catch.
+    over_broad = {"BARE_EXCEPT", "Exception", "BaseException"} & set(caught)
+    assert not over_broad, f"over-broad exception handling: {over_broad}"
+    assert "GradingUnavailable" in caught
+    assert "ExecutionContractError" in caught
+
+
+@pytest.mark.django_db
+def test_a_healthy_question_still_grades_normally(
+        api_client, user, question, monkeypatch):
+    """The mapping must not touch the path that works."""
+    monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_mock(stdout="1"))
+    api_client.force_authenticate(user=user)
+
+    response = submit(api_client, question)
+
+    assert response.status_code == 200
+    assert response.data["status"] == "accepted"
 
 
 @pytest.mark.django_db

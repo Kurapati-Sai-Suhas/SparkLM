@@ -1,0 +1,45 @@
+{
+  "applicable": false,
+  "artifact_digest": "60778d2b84b27c4e56c5f2726ab0ba8cf2e6ba25e7459ba5877a9e9098efc086",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": [
+        "the statement omits load-bearing terms the specification uses: ['first']. A dropped requirement is a different problem."
+      ]
+    },
+    {
+      "attempt": 2,
+      "refusals": [
+        "the statement omits load-bearing terms the specification uses: ['first']. A dropped requirement is a different problem."
+      ]
+    },
+    {
+      "attempt": 3,
+      "refusals": []
+    }
+  ],
+  "attempts": 3,
+  "batch_key": null,
+  "difficulty_band": "easy",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T20:00:56.733642+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "b0526cf63e43219a5460764e00fc2aca31d0b5c4ba52fc5c2cf176e315b7a489",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "1940.starter.py",
+    "statement": "1940.statement.html"
+  },
+  "prompt_template_version": "specification-formatter/v2",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 1940,
+  "refusals": [],
+  "regeneration_count": 2,
+  "specification_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac",
+  "specification_provenance": "OPERATOR_SUPPLIED",
+  "status": "READY_FOR_REVIEW",
+  "title": "Sum of Digits of String After Convert",
+  "topic": "String"
+}

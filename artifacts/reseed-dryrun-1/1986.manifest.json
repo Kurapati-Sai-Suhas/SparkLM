@@ -1,0 +1,31 @@
+{
+  "applicable": false,
+  "artifact_digest": "cc7e2370ebed829add8d7510228c766aa75e2ef69fddba5e9aec8fa0b0a712bf",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "easy",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T18:49:00.997210+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "acb312b3c78ea13acdb11e586ca3ca5733d0390179543d0384de6c2c127d3f12",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "1986.starter.py",
+    "statement": "1986.statement.html"
+  },
+  "prompt_template_version": "statement-and-signature/v1",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 1986,
+  "refusals": [],
+  "regeneration_count": 0,
+  "status": "READY_FOR_REVIEW",
+  "title": "Find the Middle Index in Array",
+  "topic": "Array"
+}

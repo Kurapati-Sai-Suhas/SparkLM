@@ -1,0 +1,18 @@
+[
+  {
+    "stdin": "code",
+    "expected_output": "false"
+  },
+  {
+    "stdin": "aabbccee",
+    "expected_output": "true"
+  },
+  {
+    "stdin": "abcba",
+    "expected_output": "true"
+  },
+  {
+    "stdin": "carerac",
+    "expected_output": "true"
+  }
+]

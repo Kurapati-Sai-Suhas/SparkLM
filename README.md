@@ -3,7 +3,9 @@
 [![CI](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions/workflows/ci.yml/badge.svg)](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions)
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://spark-lm-3y3e.vercel.app)
 
-SparkLM is an adaptive coding-practice platform: it models a student's skill (Elo, weighted by runtime/memory efficiency) and memory (a spaced-repetition half-life curve), then routes them through a prerequisite curriculum DAG using a hybrid statistical/ML engine — a Wald–Wolfowitz runs-test streakiness check backing a RandomForest classifier — rather than a static problem list. Code runs in a sandboxed Judge0 pipeline across 4 languages; every recommendation ships with a real explainability payload (SHAP over a trained GCN, when enabled). Built on Django REST Framework + Channels, React/TypeScript, and PostgreSQL with pgvector, covered by a 104-test suite that mocks every third party (Judge0, Groq, Gemini) for a fully offline CI run.
+SparkLM is an adaptive coding-practice platform: it models a student's skill (Elo, weighted by runtime/memory efficiency) and memory (a spaced-repetition half-life curve), then routes them through a prerequisite curriculum DAG using a hybrid statistical/ML engine — a Wald–Wolfowitz runs-test streakiness check backing a RandomForest classifier — rather than a static problem list. Code runs in a sandboxed Judge0 pipeline across 4 languages; every recommendation ships with a real explainability payload (SHAP over a trained GCN, when enabled). Built on Django REST Framework + Channels, React/TypeScript, and PostgreSQL with pgvector, covered by a ~3,000-test suite that mocks every third party (Judge0, Groq, Gemini) for a fully offline CI run.
+
+**The current engineering focus is not the adaptive engine — it is the evidence the engine learns from.** Milestone 2 / P2.7 exists because an adaptive system trained on unverified answer keys learns confidently wrong things. So the platform now carries an explicit **content-trust architecture**: a question lifecycle, a trust lifecycle, an approved-reference oracle, a mutation-tested hidden-test quality gate, and column-scoped database roles so that no single credential can both change a question and declare it verified. Today **2 of 2,926 questions are `ORACLE_VERIFIED`**, and only verified questions may teach the learner model. Everything else is served, graded, and deliberately ignored by the adaptive layer.
 
 ---
 
@@ -28,7 +30,8 @@ Platforms like LeetCode treat every user identically. SparkLM makes three bets:
 | **Content pipeline** | 2,900+ problem bank maintained by quota-aware, idempotent LLM batch commands (generation, validation gates, multi-language starter code, backfill, restore) |
 | **Collaboration** | JWT-authenticated WebSocket group chat, CRDT (Yjs) collaborative editor, study groups, quizzes, document RAG, visual search |
 | **Auth** | Google Sign-In (server-verified ID token, account linked by email) alongside password auth with enforced complexity (length + uppercase + number + symbol), case-insensitive unique username/email |
-| **Ops discipline** | 104-test offline suite (all third parties mocked, incl. threaded race tests), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), Sentry error tracking + per-request access log, environment-driven config, tested backup/restore |
+| **Content trust** *(current focus)* | Question lifecycle (DRAFT → PENDING_REVIEW → PUBLISHED), trust lifecycle (UNVERIFIED → ORACLE_VERIFIED), approved-reference oracle with two-agreeing-runs provenance, mutation-tested hidden-test quality gate, ten column-scoped Postgres roles, pre-image capture and rollback for every content write |
+| **Ops discipline** | ~3,000-test offline suite (all third parties mocked, incl. threaded race tests), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), Sentry error tracking + per-request access log, environment-driven config, tested backup/restore |
 
 ## Architecture
 
@@ -51,6 +54,228 @@ flowchart LR
 ```
 
 ---
+
+## Content trust architecture (Milestone 2 / P2.7) — CURRENT
+
+> **Read this first if you are touching question content.** The adaptive engine
+> is only as good as the answer keys it grades against, and most of this
+> repository's recent work is about establishing which questions are trustworthy
+> rather than making the recommender cleverer.
+
+### The pipeline
+
+```mermaid
+flowchart TD
+    subgraph authoring["Authoring — operator-driven"]
+        SPEC["Operator-written specification<br/>(frozen + digested)"]
+        GEN["LLM as FORMATTER<br/>reseed_generate"]
+        SPEC --> GEN
+    end
+
+    subgraph gates["Offline gates — no DB writes"]
+        STRUCT["Structural + signature<br/>validation"]
+        CONF["Specification conformance<br/>requirement-loss detector"]
+        PRES["Presentation gate<br/>no spec labels / meta-commentary"]
+        EX["Early example check<br/>NOT oracle evidence"]
+        GEN --> STRUCT --> CONF --> PRES --> EX
+    end
+
+    subgraph write["Production writes — one column per role"]
+        ST["reseed_statement<br/>content"]
+        SIG["declare_signature<br/>boilerplate_code"]
+        CTR["remediate_contract<br/>execution_contract_version"]
+        HT["expand_hidden_tests<br/>hidden_test_cases"]
+        EX -.human review.-> ST --> SIG --> CTR --> HT
+    end
+
+    subgraph trust["Trust — separate authorities"]
+        QG["quality_gate<br/>Tier-1 + Tier-2 mutants"]
+        OR["oracle_execute<br/>approved reference, 2 agreeing runs"]
+        AP["question_approve"]
+        PR["question_promote<br/>trust_state"]
+        PU["question_status<br/>status"]
+        HT --> QG --> OR --> AP --> PR --> PU
+    end
+
+    PU --> SERVE["PUBLISHED + ORACLE_VERIFIED<br/>= adaptive_eligible"]
+```
+
+### Question lifecycle — CURRENT
+
+`DRAFT → PENDING_REVIEW → PUBLISHED` (plus `BLOCKED`), written only by
+`question_status`. A database CHECK constraint forbids `DRAFT` +
+`ORACLE_VERIFIED`; the rest is enforced procedurally by that single writer.
+
+### Trust lifecycle — CURRENT
+
+`UNVERIFIED → ORACLE_VERIFIED`, written only by `question_promote`. Status and
+trust have **different writers and different database roles on purpose**: a
+role that could set both could publish a question *and* declare it verified,
+which is the separation this milestone exists to create.
+
+### Reference-solution lifecycle — CURRENT
+
+`DRAFT → IN_REVIEW → APPROVED` (or `REJECTED`), plus a separate `is_active`
+flag. A reference is **canonical** when it is approved, active, and its
+approval provenance is intact — and only a canonical reference may mint
+answers. `ReferenceSolution.is_canonical` is what the oracle checks, and a
+database constraint keeps `review_state`, `approved_by`, `approved_at` and
+`source_hash` moving together.
+
+### Hidden-test quality gate — CURRENT
+
+`python manage.py quality_gate` scores a suite by **mutation testing**, not by
+counting cases:
+
+| Requirement | Value |
+|---|---|
+| Tier-1 (misconception mutants) kill rate | **1.0** — every one must die |
+| Tier-2 (mechanical mutants) effective kill rate | **≥ 0.80** |
+| Minimum hidden tests | 12 (`hidden_tests.MIN_HIDDEN_TESTS`; a hard floor for `validate_suite`, advisory in the oracle pipeline) |
+| `EQUIVALENT` exclusion | only with a written `equivalence_argument` |
+
+An **equivalent-mutant canary** — a provably correct mutant — is included as a
+validity control: if the canary is reported "killed", the harness itself is
+broken. That check is what caught the Judge0 Python 3.8 incident below.
+
+### Oracle architecture — CURRENT
+
+`oracle_execute` runs each hidden case against the canonical reference
+**twice**; disagreement is `NONDETERMINISTIC` and fails — no majority vote, no
+first-wins. Every run is recorded as an `OracleExecution`, including failures,
+so a later reviewer can distinguish "we never tried" from "we tried and it
+would not settle".
+
+**Early example check ≠ full oracle verification.** A separate offline module
+(`groups/reseed_example_check.py`) executes a *generated example* against an
+unreviewed `REFERENCE_CANDIDATE` to catch obviously wrong examples before
+anything is written. It is deliberately not evidence:
+
+| | full oracle | early example check |
+|---|---|---|
+| reference | APPROVED, ACTIVE, provenance intact | `REFERENCE_CANDIDATE`, unreviewed |
+| coverage | every hidden case | one example |
+| determinism | two agreeing runs required | one run; not established |
+| provenance | `OracleExecution` rows written | **nothing written, anywhere** |
+| can support `ORACLE_VERIFIED` | yes | **no — nothing in the lifecycle** |
+
+Its verdict strings (`EXAMPLE_PASS`, `EXAMPLE_WRONG_OUTPUT`, …) are tested to
+collide with **no** lifecycle value, so an early result cannot be fed into
+approval or promotion by mistake.
+
+### Serving and adaptive boundary — CURRENT
+
+Two different boundaries, often confused:
+
+- **Serving** currently excludes only placeholder content and questions with
+  no hidden tests. It is **not** gated on `PUBLISHED` — that decision was taken
+  deliberately while the verified population is tiny. Both the recommender and
+  the direct-id endpoints share one `_servable_questions()` definition.
+- **Adaptive eligibility** *is* strict: `is_adaptive_eligible` requires
+  `PUBLISHED` **and** `ORACLE_VERIFIED`.
+
+`CodeSubmission.adaptive_eligible` is **frozen onto the row at submission
+time** and never recomputed — so verifying a question later cannot
+retroactively turn past evidence into trusted evidence.
+
+### Reseed architecture — IN PROGRESS
+
+1,141 questions still carry a templated placeholder instead of a statement.
+The reseed pipeline replaces them, and its central design decision is that
+**the LLM is a formatter, not a source of truth**:
+
+`operator-verified specification` → `reseed_generate` (statement + signature,
+one call, so prose and parameters cannot drift) → structural, conformance and
+presentation gates → human review → `reseed_statement` → `declare_signature` →
+`remediate_contract` → `expand_hidden_tests` → `quality_gate` →
+`oracle_execute` → `question_approve` → `question_promote` → `question_status`.
+
+**Why an operator specification at all?** A title-only generator was measured
+at **3/5 semantically correct**: it produced "GCD of all elements" where the
+question wanted "GCD of the smallest and largest", and widened "two adjacent
+cells" to "any cell". A census of every local source (database, pre-M2 backup,
+git history, the seed CSVs) found **no authoritative specification anywhere**,
+and the canonical upstream is not accessible to automation. So specifications
+are written by an operator, frozen, digested, and verified by a human before
+anything is generated from them.
+
+### Reseed safety architecture — CURRENT
+
+| Mechanism | What it guarantees |
+|---|---|
+| **Pre-image capture** (`preimage_capture`) | Every content write is preceded by an immutable snapshot; `preimage_rollback` restores it. No pre-image, no write. |
+| **`ReseedLedger`** | Orchestration state only — which stage to attempt next. Carries **no digest, no status, no trust_state**, and no trust or serving code imports it. A test asserts a lying ledger changes nothing. |
+| **Ten column-scoped roles** | `learnlm_remediate_rw` writes `content`; `learnlm_boilerplate_rw` writes `boilerplate_code`; `learnlm_hidden_test_rw`, `learnlm_contract_rw`, `learnlm_oracle_rw`, `learnlm_approve_rw`, `learnlm_promote_rw`, `learnlm_status_rw`, `learnlm_preimage_rw`, plus read-only `learnlm_census_ro`. Each gate refuses an **over-granted** role, not just an under-granted one. |
+| **`learnlm_reseed_rw`** | Coordinates the ledger and can write *nothing else* — no question column, no audit action. The coordinator is the least privileged participant. |
+| **No `expected_output` writer** | `EXPECTED_OUTPUT_REPAIR` is a declared action class with **no command that writes it**, deliberately. Expected outputs come from the oracle or not at all. A test asserts no writer exists. |
+| **No LLM hidden tests** | The reseed authoring step writes `content` and `boilerplate_code` only. Hidden tests are authored later, by a different authority, and bound against the declared signature. |
+| **Append-only audit** | `RemediationAction` is append-only in the model *and* in the database — UPDATE/DELETE are forbidden to every role that appends to it. |
+
+### Discoveries worth knowing — CURRENT
+
+- **Judge0 Python runtime.** Execution was on Python 3.8.1 (`language_id 71`),
+  which cannot parse PEP 585 generics (`list[list[str]]`) — 772 of 2,926
+  starters used that syntax and could not run at all. Now **3.11.2
+  (`language_id 92`)**, configurable via `JUDGE0_PYTHON_LANGUAGE_ID`. It was a
+  *selection*, not an upgrade: 3.11 was already available on the same endpoint.
+- **Generated examples can be wrong while every gate passes.** q2027 shipped
+  `colors = "AABAA" → true`; the middle character is `B`, so the first player
+  has no legal move and the answer is `false`. Structural, conformance and
+  presentation validation all passed it. This is why the early example check
+  exists — and why example *explanations* are still reviewed by a human.
+- **Contract v1 cannot bind a single-container argument.** q1974 declares
+  `findGreatestCommonDivisorOfArray(nums: list[int])`; the v1 generic harness
+  sees a JSON list and splats it, calling the method with three arguments.
+  Any reseeded question whose method takes a single list **needs contract v3**
+  (which wraps arguments in a canonical envelope) before an example or a hidden
+  test can execute.
+
+### Verified pilot questions — CURRENT
+
+| Question | Status | Trust | Contract | Hidden tests | Adaptive-eligible |
+|---|---|---|---|---|---|
+| **q3309** | `PUBLISHED` | `ORACLE_VERIFIED` | v3 | 12 | yes |
+| **q1436** | `PUBLISHED` | `ORACLE_VERIFIED` | v3 | 13 | yes |
+
+These two are the entire verified population: they walked the full lifecycle —
+reference approval, suite expansion, quality gate, oracle, approval, promotion,
+publication — and exist to prove the path works end to end.
+
+### Reseed status — IN PROGRESS, not started in production
+
+| | |
+|---|---|
+| Architecture, migrations, generator | implemented; migration `0048` applied |
+| Five pilot specifications | **operator-verified**, digests frozen |
+| Offline artifacts | generated and gated |
+| Early example verifier | ready |
+| **Production reseed** | **NOT STARTED** |
+| Production `Question` rows changed | **0** |
+| `ReseedLedger` rows | **0** |
+
+Still required before a production reseed: a **contract census** (how many
+candidates declare a single-container parameter and therefore need v3), and
+**human review of reference implementations** — the ones used offline are
+LLM-written and can reject an example but never bless one.
+
+---
+
+## Learner modelling — what is live, and what is not
+
+Stated plainly, because it is easy to over-read the roadmap:
+
+| Component | Status | Notes |
+|---|---|---|
+| **Elo skill rating** | **CURRENT — live** | Still the rating the UI shows and the selector matches on. Efficiency multipliers, anti-farming clamp, inactivity decay. |
+| **Half-life regression (memory)** | **CURRENT — live** | `P(t) = 2^(−t/h)`, review queue, graph decay. |
+| **Hybrid Traffic Cop router** | **CURRENT — live** | Runs-test streakiness + RandomForest over logged outcomes. |
+| **SHAP / GCN explainability** | **CURRENT — feature-flagged** | Torch-free heuristic fallback with an identical schema. |
+| **Glicko-2 two-sided rating** | **IN PROGRESS — shadow, UNARMED** | `groups/shadow.py` runs beside production on the same evidence so the two can be compared. It reaches no learner: the selector, the displayed rating and mastery are untouched. Consumes only `adaptive_eligible` submissions. |
+| **Transformer / Graph / Memory-and-Forgetting Knowledge Tracing** | **RESEARCH — NOT IMPLEMENTED** | No model exists. `kt_readiness` / `kt_data_readiness` answer one question — *how many interactions are actually eligible for training?* — and gate on `NOT_READY` / `RESEARCH_READY` / `TRAINING_READY`. With 2 verified questions and 0 adaptive-eligible submissions, the honest answer today is **not ready**, and that is a successful outcome for that phase rather than a failure. |
+
+> **Do not read the KT modules as a trained system.** They are a data-readiness
+> contract written *before* any model, precisely so that nobody trains a
+> Transformer on verdicts produced by answer keys nobody has checked.
 
 ## Tech stack — what, and why
 
@@ -958,6 +1183,14 @@ npm run dev                   # http://localhost:5173
 | `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | prod | SPA origin(s); API origin for admin-over-HTTPS |
 | `GOOGLE_CLIENT_ID` (+ `VITE_GOOGLE_CLIENT_ID` on the frontend) | optional | Google Sign-In; button hidden and endpoint 503s without it |
 | `VITE_API_URL`, `VITE_WS_URL` | frontend | Backend origins at build time |
+| `JUDGE0_PYTHON_LANGUAGE_ID` | optional | Judge0 language id for **every** Python execution. Defaults to `92` (Python 3.11.2). `71` is 3.8.1 and cannot parse PEP 585 generics. |
+| `RESEED_GEMINI_MODEL`, `RESEED_GROQ_MODEL` | optional | Model ids for the reseed content generator. Explicit and overridable so a withdrawn model is a config change, not a code change. |
+| `<ROLE>_USER/PASSWORD/HOST/PORT/DB` | content ops only | Per-role database aliases — `REMEDIATE_*`, `BOILERPLATE_*`, `HIDDENTEST_*`, `CONTRACT_*`, `ORACLE_*`, `APPROVE_*`, `PROMOTE_*`, `STATUS_*`, `PREIMAGE_*`. **Each alias exists only if its `_USER` variable is set** — absent variable, absent alias, no fallback to a wider role. |
+
+Every variable the backend reads is catalogued in
+[`docs/FEATURE_FLAGS.md`](docs/FEATURE_FLAGS.md), and a test fails the build if
+code reads one that is not documented there. **No secrets belong in this
+README** — `.env` is the only home for values.
 
 ## Content pipeline
 
@@ -966,7 +1199,7 @@ The problem bank is maintained by idempotent management commands — all dry-run
 | Command | Purpose |
 |---|---|
 | `seed_dsa_dag` | (Re)build the curriculum DAG over existing topics — never cascades into question data |
-| `reseed_questions --topic "Tree" --delay 2` | Generate full content + test cases + 4-language starter code for placeholder questions |
+| `reseed_questions --topic "Tree" --delay 2` | **SUPERSEDED — do not use for new work.** The original one-shot LLM generator: it writes content, hidden tests and starters together, from the title alone. That is exactly the design P2.7 replaced (see *Content trust architecture*). Retained for history; the current path is `reseed_generate` → human review → `reseed_statement` → `declare_signature`. |
 | `backfill_boilerplate` | Add missing language stubs to already-seeded questions (~5× cheaper than regeneration) |
 | `restore_questions` | Re-import missing rows for named topics from the canonical CSV |
 | `cleanup_question_bank --apply` | Remove junk topics with their questions (dry-run by default) |
@@ -974,14 +1207,65 @@ The problem bank is maintained by idempotent management commands — all dry-run
 | `retrain_ai` | Retrain the routing classifier on real recommendation outcomes (≥100 required) |
 | `ensure_submission_partitions` | Keep monthly partitions of the submissions table ahead of the calendar; relocates any rows stranded in the DEFAULT partition (idempotent, run monthly) |
 
+### Content-trust commands (P2.7)
+
+Every one of these is **dry-run by default** and requires `--apply --confirm`
+to write. Each also names the database alias it must run under, and refuses to
+start if that role holds more privilege than the operation needs.
+
+| Command | Writes | Role / alias |
+|---|---|---|
+| `question_bank_census` | nothing (read-only) | `default` |
+| `preimage_capture` / `preimage_inspect` / `preimage_rollback` | `QuestionPreImage`; rollback restores captured columns | `preimage` |
+| `reseed_generate` | **files only** — statement, starter, manifest. Refused on production if the connection can write anything. | `default` (read-only) |
+| `reseed_statement` | `content` (records `STATEMENT_GENERATION`) | `remediate` |
+| `remediate_statement` | `content` (records `STATEMENT_REPAIR`; refuses placeholder-bearing questions) | `remediate` |
+| `declare_signature` | `boilerplate_code` (records `SIGNATURE_DECLARATION`) | `boilerplate` |
+| `remediate_boilerplate` | `boilerplate_code` — **annotation-only**, refuses renamed/reordered/added parameters | `boilerplate` |
+| `remediate_contract` | `execution_contract_version` | `contract` |
+| `expand_hidden_tests` / `remediate_hidden_tests` | `hidden_test_cases` | `hiddentest` |
+| `quality_gate` | nothing — reports Tier-1/Tier-2 kill rates | `default` |
+| `reference_create` / `reference_review` | `ReferenceSolution` lifecycle | `oracle` |
+| `oracle_execute` | `OracleExecution` provenance only | `oracle` |
+| `question_approve` | `QuestionApproval` | `approve` |
+| `question_promote` | `trust_state` | `promote` |
+| `question_status` | `status` | `status` |
+| `reseed_orchestrate` | `ReseedLedger` only — stages 1–2, stops at `COMPLETE` | `reseed` |
+| `kt_data_readiness` / `kt_dataset_build` | nothing (read-only) | `default` |
+
+**No command writes `expected_output`.** That is deliberate and tested.
+
 ## Testing
 
 ```bash
 cd backend/LearnLM
-python -m pytest groups common # 104 tests, fully offline (Judge0 + LLMs mocked)
+python -m pytest --ignore=scripts -q     # ~3,000 tests, fully offline (Judge0 + LLMs mocked)
 ```
 
+`--ignore=scripts` is required: `scripts/test_judge*.py` are ad-hoc Judge0
+probes that match pytest's discovery pattern and touch the database at import
+without a `django_db` marker, so they abort collection. They are not part of
+the suite.
+
 The suite covers routing telemetry and thresholds, mastery rules, grading statuses, the anti-farming guard, coach escalation, XAI schema guarantees, cache invalidation (including queryset deletes), every content-ops command, and the physical schema itself (partition routing, index catalog, partition maintenance). CI runs it against a real Postgres service container on every push. After pulling schema changes, refresh your local test database once with `--create-db` (the default `--reuse-db` keeps the old schema).
+
+**Do not run two pytest sessions at once.** Several content-trust tests create
+and drop real Postgres roles against the shared `--reuse-db` database;
+concurrent runs produce spurious `duplicate key … auth_permission` errors that
+look like real failures and are not.
+
+### Mutation testing
+
+Structural coverage is not the standard used for the trust-critical paths.
+Every gate in the content-trust architecture is **mutation-tested**: a harness
+edits the source to reintroduce a specific defect and asserts the suite goes
+red. A surviving mutant is treated as a missing test, and several real gaps
+were found that way — including a conformance check that had been written but
+never composed into `validate_artifact`, so removing it changed nothing any
+test could see.
+
+The sweeps live in the scratch directory rather than the repository, and their
+results are recorded per phase in `docs/P2_7_*.md`.
 
 ## Deployment
 
@@ -989,12 +1273,37 @@ Everything is configuration, not code. The zero-cost stack — **Neon** (Postgre
 
 A full Software Requirements Specification lives in [`docs/SparkLM_SRS_v2.docx`](docs/SparkLM_SRS_v2.docx) — architecture, every adaptive-learning formula, the full API/data model, security model, and real engineering case studies.
 
-## Roadmap
+## Project status
 
-- Elo-matched 1v1 duels; post-solve LLM code review feeding the IRT latents
-- Router prediction-accuracy dashboard on the existing recommendation/outcome logs
-- Async grading queue (Celery) with per-test-case progress over WebSockets
-- Migration off the deprecated `google-generativeai` SDK; generated-question verification harness
+| Area | Status | Notes |
+|---|---|---|
+| Adaptive routing, Elo, half-life memory, XAI | **COMPLETE** | Live and serving |
+| Grading pipeline (Judge0, 4 languages) | **COMPLETE** | Python on 3.11.2 |
+| Question / trust / reference lifecycles | **COMPLETE** | Single writer per column |
+| Hidden-test quality gate (mutation-tested) | **COMPLETE** | Tier-1 = 1.0, Tier-2 ≥ 0.80 |
+| Oracle + provenance | **COMPLETE** | Two agreeing runs; q3309 and q1436 verified |
+| Ten column-scoped database roles | **COMPLETE** | Gates refuse over-granted roles |
+| Pre-image capture / rollback | **COMPLETE** | No pre-image, no write |
+| `ReseedLedger` + migration `0048` | **COMPLETE** | Applied; 0 rows |
+| Reseed generator + conformance + presentation gates | **COMPLETE** | Offline, file-only |
+| Early example verifier | **COMPLETE** | Explicitly not oracle evidence |
+| Five pilot specifications | **COMPLETE** | Operator-verified, digests frozen |
+| Glicko-2 shadow rating | **IN PROGRESS** | Unarmed; reaches no learner |
+| **Production reseed of 1,141 candidates** | **BLOCKED** | Needs a contract census (v3 for single-container signatures) and human-reviewed reference implementations |
+| Bulk specification authoring | **BLOCKED** | No authoritative source exists; each specification needs an operator |
+| Transformer / Graph / Memory-and-Forgetting KT | **PLANNED (research)** | No model exists; readiness gate says *not ready* at 2 verified questions |
+| Elo-matched 1v1 duels; post-solve LLM code review | **PLANNED** | |
+| Router prediction-accuracy dashboard | **PLANNED** | On the existing recommendation/outcome logs |
+| Async grading queue (Celery) with per-test-case progress | **PLANNED** | |
+| Migration off the deprecated `google-generativeai` SDK | **PLANNED** | Also: `ai_services.py` hard-codes a withdrawn Groq model and currently 404s |
+
+### Phase records
+
+The P2.7 work is documented phase by phase in [`docs/`](docs/) — architecture
+decisions, mutation results, and the findings that changed the design:
+`P2_7_RESEED_ARCHITECTURE_DECISION.md`, `P2_7_AUTHORITATIVE_SOURCE_CENSUS.md`,
+`P2_7_SPECIFICATION_PILOT.md`, `P2_7_PRESENTATION_GATE.md`,
+`P2_7_SPECIFICATION_VERIFICATION.md`, `P2_7_EARLY_ORACLE_BOUNDARY.md`.
 
 ## Author
 

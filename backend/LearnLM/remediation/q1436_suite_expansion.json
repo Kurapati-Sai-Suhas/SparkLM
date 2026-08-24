@@ -1,0 +1,65 @@
+{
+  "question": 1436,
+  "labels": {
+    "1": "typical_chain",
+    "2": "unordered_edges",
+    "3": "singleton",
+    "4": "branching_convergent"
+  },
+  "additions": [
+    {
+      "stdin": "[[\"Zurich\",\"Amsterdam\"]]",
+      "expected_output": "Amsterdam",
+      "explanation": "A single edge whose destination sorts BEFORE its source. The answer is Amsterdam because Zurich has an outgoing edge and Amsterdam does not; alphabetical order has nothing to do with it. Every worked example in the statement happens to have an alphabetically-greatest answer, which is a coincidence of the city names chosen, not a property of the problem.",
+      "category": "alphabetical_trap"
+    },
+    {
+      "stdin": "[[\"B\",\"C\"],[\"A\",\"B\"]]",
+      "expected_output": "C",
+      "explanation": "Two edges listed in reverse path order: A goes to B, B goes to C, so the destination is C. The LAST edge in the list ends at B, which is not the answer, so reading the final pair's destination fails here.",
+      "category": "terminal_edge_not_last"
+    },
+    {
+      "stdin": "[[\"C\",\"D\"],[\"B\",\"C\"],[\"A\",\"B\"]]",
+      "expected_output": "D",
+      "explanation": "A three-edge chain supplied entirely backwards. The answer D appears as a destination in the FIRST pair and never as a source.",
+      "category": "unordered_edges"
+    },
+    {
+      "stdin": "[[\"B\",\"D\"],[\"A\",\"B\"],[\"D\",\"E\"]]",
+      "expected_output": "E",
+      "explanation": "A→B→D→E given out of order. B is both a destination and a source, so any implementation that builds its source set from a slice of the list rather than all of it will mistake B for the end of the line.",
+      "category": "unordered_edges"
+    },
+    {
+      "stdin": "[[\"Hub\",\"A\"],[\"Hub\",\"B\"],[\"A\",\"End\"],[\"B\",\"End\"]]",
+      "expected_output": "End",
+      "explanation": "Hub appears twice as a source and End twice as a destination: the same city names repeat across pairs. Hub and End each appear exactly twice in the whole list, so counting appearances cannot separate the start from the finish.",
+      "category": "duplicate_values"
+    },
+    {
+      "stdin": "[[\"Hub\",\"A\"],[\"Hub\",\"B\"],[\"Hub\",\"C\"],[\"A\",\"End\"],[\"B\",\"End\"],[\"C\",\"End\"]]",
+      "expected_output": "End",
+      "explanation": "A wide fan-out converging on one sink. Hub has three outgoing edges and End has three incoming ones, so the most-mentioned city is ambiguous between the first and the last.",
+      "category": "branching_convergent"
+    },
+    {
+      "stdin": "[[\"A\",\"B\"],[\"B\",\"C\"],[\"C\",\"D\"],[\"D\",\"E\"],[\"E\",\"F\"]]",
+      "expected_output": "F",
+      "explanation": "A five-edge chain in path order. Longer than any worked example, so an implementation that inspects only the first pair, or only the first two, has somewhere to go wrong.",
+      "category": "long_chain"
+    },
+    {
+      "stdin": "[[\"Yale\",\"Xavier\"],[\"Zeta\",\"Yale\"]]",
+      "expected_output": "Xavier",
+      "explanation": "Both out of order AND alphabetically inverted: the chain is Zeta → Yale → Xavier, so the answer sorts LAST of the three and appears as a destination in the first pair.",
+      "category": "alphabetical_trap"
+    },
+    {
+      "stdin": "[[\"Delhi\",\"Mumbai\"],[\"Mumbai\",\"Delhi Junction\"]]",
+      "expected_output": "Delhi Junction",
+      "explanation": "City names that share a prefix and contain a space. \"Delhi\" is a source and \"Delhi Junction\" is the destination; nothing may match on prefixes or split on whitespace.",
+      "category": "duplicate_values"
+    }
+  ]
+}

@@ -47,3 +47,6 @@ Thumbs.db
 # Runtime artifacts from reseed_questions
 reseed_failures.json
 staticfiles/
+
+# Role DDL carries a generated password
+backend/LearnLM/sql/learnlm_*.sql

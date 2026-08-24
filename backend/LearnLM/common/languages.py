@@ -25,6 +25,8 @@ imported by the serializer, the Judge0 runner and the wrapper resolver, and
 a dependency in the other direction would create an import cycle.
 """
 
+import os
+
 from dataclasses import dataclass
 
 
@@ -56,9 +58,50 @@ class Language:
         return self.ui_key or self.key
 
 
+#: Judge0's language id for Python, overridable by environment (M2 P2.7h-12).
+#:
+#: 71 is Python 3.8.1, which is what this platform ran on until it was found to
+#: reject PEP 585 subscripted generics — `list[list[str]]` raises
+#: `TypeError: 'type' object is not subscriptable` at class-definition time, so
+#: 772 of 2,926 Python starters could not execute AT ALL. The reference
+#: solution of every one of them crashed before its first statement, which also
+#: made a mutation quality gate report a PASS built entirely out of crashes.
+#:
+#: 92 is Python 3.11.2 on the SAME Judge0 deployment and the same API key: this
+#: is a selection, not an upgrade, and nothing about the deployment changes.
+#: 3.11 is chosen over 3.12/3.13/3.14 because it is the oldest option that
+#: supports PEP 585, which minimises semantic drift from 3.8.
+#:
+#: Verified equivalent before switching: q3309 (the only PUBLISHED,
+#: ORACLE_VERIFIED question) reproduces all 12 stored outputs identically under
+#: both 71 and 92, and q1436 reproduces all 13 under 92 while crashing on all
+#: 13 under 71.
+#:
+#: Read from the environment rather than Django settings deliberately — this
+#: module is imported by the serializer, the Judge0 runner and the wrapper
+#: resolver, and the module docstring's "no settings import" rule exists to
+#: keep that from becoming an import cycle. The override also means a rollback
+#: is an environment variable, not a deployment.
+def _python_judge0_id(default=92):
+    raw = os.environ.get("JUDGE0_PYTHON_LANGUAGE_ID")
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        # A typo must not silently fall back to a different interpreter than
+        # the operator asked for; refuse loudly at import.
+        raise ValueError(
+            f"JUDGE0_PYTHON_LANGUAGE_ID must be an integer Judge0 language "
+            f"id, got {raw!r}")
+
+
+PYTHON_JUDGE0_ID = _python_judge0_id()
+
+
 # Order is display order in the language selector.
 REGISTRY = (
-    Language("python", "Python", 71, "py", ()),
+    Language("python", "Python", PYTHON_JUDGE0_ID, "py", ()),
     Language("java", "Java", 62, "java", ()),
     Language("cpp", "C++", 54, "cpp", ("c++",), self_contained=True),
     # self_contained: C and C++ have no generic wrapper, so the student

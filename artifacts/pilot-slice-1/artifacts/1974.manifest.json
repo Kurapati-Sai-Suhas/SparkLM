@@ -1,0 +1,33 @@
+{
+  "applicable": false,
+  "artifact_digest": "d9595db0db29909de7c3d4b004e3a40eef3bdb97f524e7fd70974ef5a43b240e",
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "refusals": []
+    }
+  ],
+  "attempts": 1,
+  "batch_key": null,
+  "difficulty_band": "easy",
+  "frozen_batch": false,
+  "generated_at": "2026-08-23T19:57:48.147249+00:00",
+  "generator_version": "1.0.0",
+  "input_digest": "793d6dbd90cee5db4602d2d362b4ad14b3790de546fa314f9ba17d4649d19384",
+  "manifest_schema_version": 1,
+  "outputs": {
+    "starter": "1974.starter.py",
+    "statement": "1974.statement.html"
+  },
+  "prompt_template_version": "specification-formatter/v2",
+  "provider": "openai/gpt-oss-120b",
+  "provider_version": "1.0.0",
+  "question_id": 1974,
+  "refusals": [],
+  "regeneration_count": 0,
+  "specification_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
+  "specification_provenance": "OPERATOR_SUPPLIED",
+  "status": "READY_FOR_REVIEW",
+  "title": "Find Greatest Common Divisor of Array",
+  "topic": "Array"
+}

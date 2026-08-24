@@ -1,0 +1,212 @@
+{
+  "adaptive_eligibility_counts": {
+    "questions_adaptively_eligible": 0,
+    "submissions_eligible": 0,
+    "submissions_ineligible": 44
+  },
+  "approval_counts": {
+    "note": "no QuestionApproval rows exist; no question has been human-approved",
+    "total": 0
+  },
+  "blockers": [
+    "zero OracleExecution rows: no expected_output anywhere has provenance. Every stored answer key is LEGACY/UNPROVENANCED.",
+    "zero ReferenceSolution rows: nothing can act as an oracle, so no question can be verified.",
+    "zero QuestionApproval rows: no question has been human-approved, which P2.7g-3 makes a precondition of trust."
+  ],
+  "contradiction_counts": {
+    "draft_oracle_verified": 0,
+    "eligible_submissions_on_now_unverified_questions": 0,
+    "oracle_verified_without_active_reference": 0,
+    "oracle_verified_without_approval": 0
+  },
+  "database_identity": {
+    "alias": "default",
+    "database": "neondb",
+    "host_class": "REMOTE_HOSTNAME",
+    "is_production": true,
+    "latest_migration": "0043_glicko_snapshot",
+    "missing_migrations": [],
+    "privileges": {
+      "__database_create__": false,
+      "groups_codesubmission": [
+        "read-only"
+      ],
+      "groups_oracleexecution": [
+        "read-only"
+      ],
+      "groups_question": [
+        "read-only"
+      ],
+      "groups_questionapproval": [
+        "read-only"
+      ],
+      "groups_referencesolution": [
+        "read-only"
+      ]
+    },
+    "read_only": true,
+    "role": "learnlm_census_ro",
+    "server_address_class": "LOOPBACK",
+    "server_version": "PostgreSQL 17.10 (29ad1b7)"
+  },
+  "duplicate_counts": {
+    "definition": "NORMALIZED stdin (the stricter of the two definitions in the repository)",
+    "duplicate_cases_total": 6,
+    "questions_with_normalized_duplicate_inputs": 6
+  },
+  "generated_at": "2026-08-13T10:11:39.795007+00:00",
+  "gradability_counts": {
+    "below_minimum_count": 1785,
+    "gradable": 1778,
+    "malformed_examples": [
+      {
+        "problems": [
+          "case 3: 'stdin' is empty"
+        ],
+        "question_id": 3312
+      },
+      {
+        "problems": [
+          "case 3: 'stdin' is empty"
+        ],
+        "question_id": 206
+      },
+      {
+        "problems": [
+          "case 3: 'expected_output' is list, must be a string",
+          "case 4: 'expected_output' is list, must be a string"
+        ],
+        "question_id": 1469
+      },
+      {
+        "problems": [
+          "case 3: 'expected_output' is list, must be a string"
+        ],
+        "question_id": 652
+      },
+      {
+        "problems": [
+          "case 3: 'expected_output' is int, must be a string",
+          "case 4: 'expected_output' is int, must be a string"
+        ],
+        "question_id": 656
+      },
+      {
+        "problems": [
+          "case 2: 'stdin' is empty"
+        ],
+        "question_id": 687
+      },
+      {
+        "problems": [
+          "case 3: 'expected_output' is int, must be a string",
+          "case 4: 'expected_output' is int, must be a string"
+        ],
+        "question_id": 736
+      },
+      {
+        "problems": [
+          "case 3: 'expected_output' is int, must be a string",
+          "case 4: 'expected_output' is int, must be a string"
+        ],
+        "question_id": 782
+      },
+      {
+        "problems": [
+          "case 4: 'stdin' is empty"
+        ],
+        "question_id": 817
+      },
+      {
+        "problems": [
+          "case 4: 'expected_output' is int, must be a string"
+        ],
+        "question_id": 908
+      }
+    ],
+    "meets_minimum_count": 0,
+    "not_gradable": 7
+  },
+  "grading_data_counts": {
+    "adaptive_eligible_false": 44,
+    "adaptive_eligible_true": 0,
+    "by_status": {
+      "accepted": 13,
+      "compile_error": 2,
+      "runtime_error": 1,
+      "wrong_answer": 28
+    },
+    "code_submissions": 44,
+    "orphaned_no_question": 0,
+    "recommendation_logs": 207
+  },
+  "hidden_test_counts": {
+    "below_minimum_count": 1785,
+    "cases_with_expected_output": 6478,
+    "cases_without_expected_output": 54,
+    "gradable": 1778,
+    "has_hidden_tests": 1785,
+    "malformed_cases": 123,
+    "no_hidden_tests": 1141,
+    "not_gradable": 7,
+    "questions_with_malformed_cases": 78,
+    "questions_with_normalized_duplicates": 6,
+    "total_cases": 6532
+  },
+  "language_counts": {
+    "c": 20,
+    "cpp": 1759,
+    "java": 1779,
+    "javascript": 631,
+    "python": 2926
+  },
+  "provenance_counts": {
+    "authoritative_rows": 0,
+    "executions_by_status": {},
+    "glicko_snapshots": 0,
+    "oracle_execution_rows": 0,
+    "questions_oracle_verified": 0,
+    "questions_with_any_provenance": 0,
+    "questions_with_authoritative_provenance": 0
+  },
+  "question_counts": {
+    "by_status": {
+      "DRAFT": 2926
+    },
+    "by_trust_state": {
+      "UNVERIFIED": 2926
+    },
+    "matrix": {
+      "DRAFT+UNVERIFIED": 2926
+    },
+    "total": 2926
+  },
+  "reference_counts": {
+    "note": "no ReferenceSolution rows exist",
+    "total": 0
+  },
+  "report_hash": "10ed83c14c2783d5a4ab0ddc2c6dd87a6e9e8814804896c340fd5c7306c708ad",
+  "reseed_candidates": {
+    "GENERATE_TESTS": 2926
+  },
+  "safe_to_leave_untouched": 0,
+  "schema_state": {
+    "latest_migration": "0043_glicko_snapshot",
+    "missing_migrations": []
+  },
+  "timings_ms": {
+    "approvals": 245.5,
+    "blast_radius": 9005.31,
+    "contradictions": 994.99,
+    "grading_data": 1480.79,
+    "hidden_tests": 6290.83,
+    "languages": 4667.59,
+    "provenance": 2017.23,
+    "question_counts": 994.78,
+    "references": 244.63
+  },
+  "trust_counts": {},
+  "warnings": [
+    "DUPLICATE DEFINITION DIVERGENCE: hidden_tests.validate_suite compares RAW stdin; reseed_questions and the P2.7h-1 quality gate compare NORMALIZED. This census reports the NORMALIZED count (stricter). Both definitions remain in the repository, unchanged by this phase."
+  ]
+}

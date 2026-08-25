@@ -1,0 +1,38 @@
+{
+  "applicable": false,
+  "artifact_digest": "736b2c2bda5a13382d78de62bc2ecad0a7beb6a7d126c991dc5e671156daedfd",
+  "checked_at": "2026-08-25T05:26:21.920861+00:00",
+  "early_example_check": {
+    "blocked_on": "contract v3 not yet set on the question",
+    "detail": "contract v1 cannot invoke a one-parameter signature whose argument is a container: the generic harness splats it into 5 positional arguments. This question needs contract v3 (or a per-question wrapper) before any example can be executed.",
+    "is_oracle_evidence": false,
+    "supports_trust_transition": false,
+    "verdict": "EXAMPLE_UNRESOLVED"
+  },
+  "frozen_batch": false,
+  "generator_version": "1.0.0",
+  "independent_arithmetic": {
+    "claimed": 6,
+    "gcd_all_elements": 3,
+    "gcd_min_max": 6,
+    "matches_spec_operation": true,
+    "max": 30,
+    "min": 6,
+    "nums": [
+      12,
+      15,
+      6,
+      9,
+      30
+    ],
+    "would_match_gcd_of_all": false
+  },
+  "note": "Generated against a non-frozen spec \u00e2\u20ac\u201d no pilot batch existed when this was produced. NOT applicable to production until rebuilt against the real frozen batch.",
+  "prompt_template_version": "specification-formatter/v4",
+  "question_id": 1974,
+  "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84",
+  "specification_revision": "STYLE_ONLY",
+  "superseded_specification_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
+  "validation": "structural + semantic + conformance + presentation: CLEAN",
+  "validation_refusals": []
+}

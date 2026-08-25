@@ -1,121 +1,146 @@
 {
-  "slice": "pilot-slice-1",
+  "caveat": "Specifications were drafted by the assistant standing in for the operator. Nothing in this pipeline verifies that a specification is correct - only that a generated statement does not drift from it. Each must be read by a human against what the question should ask before any artifact is applied.",
   "frozen_at": "2026-08-23T20:04:06.158265+00:00",
+  "note": "q1940 and q2057 were revised during the pilot after conformance rejected ordinary prose words as requirements; their digests moved and the artifacts were regenerated against the revised text.",
+  "pilot": {
+    "excluded": {
+      "2027": "EXCLUDED from the first production pilot (Phase 14 decision 3). Specification remains operator-approved; the ARTIFACT remains REJECTED. Preserved for a later dedicated example-generation investigation. Not regenerated."
+    },
+    "questions": [
+      1940,
+      1974,
+      2057,
+      2290
+    ]
+  },
   "provenance": "OPERATOR_SUPPLIED",
+  "refrozen_at": "2026-08-24T15:28:46.576369+00:00",
+  "revision_log": [
+    {
+      "at": "2026-08-24T15:28:46.576369+00:00",
+      "by": "Suhas",
+      "from_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
+      "kind": "STYLE_ONLY",
+      "question_id": 1974,
+      "semantic_change": "NONE",
+      "to_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84"
+    }
+  ],
+  "slice": "pilot-slice-1",
   "specification_count": 5,
   "specifications": [
     {
-      "question_id": 1940,
-      "specification_file": "1940.spec.json",
-      "specification_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac",
-      "provenance": "OPERATOR_SUPPLIED",
       "author": "assistant-drafted, pending operator verification",
-      "written_at": "2026-08-23T19:34:10.471158+00:00",
+      "author_confidence": "high",
       "canonical_identity": {
         "problem_number": "1945",
         "slug": "sum-of-digits-of-string-after-convert",
         "source": "leetcode_csv_2024_11_02"
       },
       "prose_characters": 1363,
-      "author_confidence": "high",
-      "verified_by": "Suhas",
-      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "provenance": "OPERATOR_SUPPLIED",
+      "question_id": 1940,
+      "specification_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac",
+      "specification_file": "1940.spec.json",
+      "verification_notes": "Specification describes the intended problem.",
       "verification_source": "operator_manual_review",
+      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "verified_by": "Suhas",
       "verified_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac",
-      "verification_notes": "Specification describes the intended problem."
+      "written_at": "2026-08-23T19:34:10.471158+00:00"
     },
     {
-      "question_id": 1974,
-      "specification_file": "1974.spec.json",
-      "specification_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
-      "provenance": "OPERATOR_SUPPLIED",
-      "author": "assistant-drafted, pending operator verification",
-      "written_at": "2026-08-23T19:34:10.471158+00:00",
+      "author": "operator-approved (style revision applied Phase 14A)",
+      "author_confidence": "high \u2014 this is the defect Phase 5 produced and the correction is the point of including it",
       "canonical_identity": {
         "problem_number": "1979",
         "slug": "find-greatest-common-divisor-of-array",
         "source": "leetcode_csv_2024_11_02"
       },
-      "prose_characters": 1341,
-      "author_confidence": "high \u2014 this is the defect Phase 5 produced and the correction is the point of including it",
-      "verified_by": "Suhas",
-      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "prose_characters": 1103,
+      "provenance": "OPERATOR_SUPPLIED",
+      "question_id": 1974,
+      "revision": "STYLE_ONLY, semantic change NONE (Phase 14A)",
+      "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84",
+      "specification_file": "1974.spec.json",
+      "superseded_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
+      "verification_notes": "Operator explicitly confirms the intended operation is GCD(min(nums), max(nums)) and NOT GCD(all nums). | Operator adopted the proposed style revision in Phase 14 (decision 4). Meta-commentary and negative-only phrasing removed; the operation is unchanged: GCD(min(nums), max(nums)), NOT GCD(all nums).",
       "verification_source": "operator_manual_review",
-      "verified_digest": "ad2a9eb09a60a7a85d2e0daf04bc21a1bb6d661ab5a7acf87c068d6899502a0f",
-      "verification_notes": "Operator explicitly confirms the intended operation is GCD(min(nums), max(nums)) and NOT GCD(all nums)."
+      "verified_at": "2026-08-24T15:28:46.576369+00:00",
+      "verified_by": "Suhas",
+      "verified_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84",
+      "written_at": "2026-08-23T19:34:10.471158+00:00"
     },
     {
-      "question_id": 2027,
-      "specification_file": "2027.spec.json",
-      "specification_digest": "f6937c82a0f38eec99bf5efaeac9f118f6f693dbf6244a494a3914c6e12b4536",
-      "provenance": "OPERATOR_SUPPLIED",
       "author": "assistant-drafted, pending operator verification",
-      "written_at": "2026-08-23T19:34:10.471158+00:00",
+      "author_confidence": "high",
       "canonical_identity": {
         "problem_number": "2038",
         "slug": "remove-colored-pieces-if-both-neighbors-are-the-same-color",
         "source": "leetcode_csv_2024_11_02"
       },
       "prose_characters": 1387,
-      "author_confidence": "high",
-      "verified_by": "Suhas",
-      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "provenance": "OPERATOR_SUPPLIED",
+      "question_id": 2027,
+      "specification_digest": "f6937c82a0f38eec99bf5efaeac9f118f6f693dbf6244a494a3914c6e12b4536",
+      "specification_file": "2027.spec.json",
+      "verification_notes": "Specification approved. The generated artifact is NOT approved: its AABAA example is incorrect and must be regenerated.",
       "verification_source": "operator_manual_review",
+      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "verified_by": "Suhas",
       "verified_digest": "f6937c82a0f38eec99bf5efaeac9f118f6f693dbf6244a494a3914c6e12b4536",
-      "verification_notes": "Specification approved. The generated artifact is NOT approved: its AABAA example is incorrect and must be regenerated."
+      "written_at": "2026-08-23T19:34:10.471158+00:00"
     },
     {
-      "question_id": 2057,
-      "specification_file": "2057.spec.json",
-      "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
-      "provenance": "OPERATOR_SUPPLIED",
       "author": "assistant-drafted, pending operator verification",
-      "written_at": "2026-08-23T19:34:10.471158+00:00",
+      "author_confidence": "high",
       "canonical_identity": {
         "problem_number": "2068",
         "slug": "check-whether-two-strings-are-almost-equivalent",
         "source": "leetcode_csv_2024_11_02"
       },
       "prose_characters": 1313,
-      "author_confidence": "high",
-      "verified_by": "Suhas",
-      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "provenance": "OPERATOR_SUPPLIED",
+      "question_id": 2057,
+      "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
+      "specification_file": "2057.spec.json",
+      "verification_notes": "Specification describes the intended problem.",
       "verification_source": "operator_manual_review",
+      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "verified_by": "Suhas",
       "verified_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
-      "verification_notes": "Specification describes the intended problem."
+      "written_at": "2026-08-23T19:34:10.471158+00:00"
     },
     {
-      "question_id": 2290,
-      "specification_file": "2290.spec.json",
-      "specification_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20",
-      "provenance": "OPERATOR_SUPPLIED",
       "author": "assistant-drafted, pending operator verification",
-      "written_at": "2026-08-23T19:34:10.471158+00:00",
+      "author_confidence": "high",
       "canonical_identity": {
         "problem_number": "2320",
         "slug": "count-number-of-ways-to-place-houses",
         "source": "leetcode_csv_2024_11_02"
       },
       "prose_characters": 1230,
-      "author_confidence": "high",
-      "verified_by": "Suhas",
-      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "provenance": "OPERATOR_SUPPLIED",
+      "question_id": 2290,
+      "specification_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20",
+      "specification_file": "2290.spec.json",
+      "verification_notes": "Specification describes the intended problem.",
       "verification_source": "operator_manual_review",
+      "verified_at": "2026-08-24T07:42:35.593094+00:00",
+      "verified_by": "Suhas",
       "verified_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20",
-      "verification_notes": "Specification describes the intended problem."
+      "written_at": "2026-08-23T19:34:10.471158+00:00"
     }
   ],
-  "caveat": "Specifications were drafted by the assistant standing in for the operator. Nothing in this pipeline verifies that a specification is correct - only that a generated statement does not drift from it. Each must be read by a human against what the question should ask before any artifact is applied.",
-  "note": "q1940 and q2057 were revised during the pilot after conformance rejected ordinary prose words as requirements; their digests moved and the artifacts were regenerated against the revised text.",
   "verification": {
-    "verified_by": "Suhas",
-    "verified_at": "2026-08-24T07:42:35.593094+00:00",
-    "verification_source": "operator_manual_review",
-    "specifications_verified": 5,
-    "scope": "SPECIFICATIONS ONLY. Not an approval of generated artifacts, signatures, hidden tests, expected outputs, oracle results, publication or adaptive eligibility.",
     "artifact_status": {
-      "2027": "REJECTED \u2014 example contradicts the specification; regeneration required",
-      "1974": "STYLE REVIEW PENDING \u2014 specification carries meta-commentary"
-    }
+      "1974": "STYLE REVIEW PENDING \u2014 specification carries meta-commentary",
+      "2027": "REJECTED \u2014 example contradicts the specification; regeneration required"
+    },
+    "scope": "SPECIFICATIONS ONLY. Not an approval of generated artifacts, signatures, hidden tests, expected outputs, oracle results, publication or adaptive eligibility.",
+    "specifications_verified": 5,
+    "verification_source": "operator_manual_review",
+    "verified_at": "2026-08-24T07:42:35.593094+00:00",
+    "verified_by": "Suhas"
   }
 }

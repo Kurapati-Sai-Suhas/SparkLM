@@ -51,8 +51,24 @@ staticfiles/
 # Role DDL carries a generated password
 backend/LearnLM/sql/learnlm_*.sql
 
-# Answer keys. Reference solutions and generated hidden-test plans contain
-# expected outputs, and this repository is public. Phase 19 committed the
-# suite plans before this was noticed (see docs); nothing further should
-# follow them.
+# ── Grading truth must never enter this repository (M2 P2.7h-33) ──────────
+#
+# This repository is PUBLIC. Hidden-test inputs, their expected outputs and
+# reference solutions are the answer key for questions that are served to
+# learners and graded. The database is the source of truth for all of it;
+# nothing here needs a copy.
+#
+# Phase 19 committed the pilot suite plans, and the checkpoint before it
+# carried suite expansions and a reference solution for two questions that
+# are PUBLISHED and adaptive-eligible. Both were untracked in Phase 20.5.
+#
+# Statements, starter boilerplate and quality specs (which hold MUTANTS —
+# wrong solutions — not answers) are deliberately NOT ignored: those are
+# public by design.
 artifacts/**/references-*/
+artifacts/**/suites-*/
+backend/LearnLM/remediation/*_suite_expansion.json
+backend/LearnLM/remediation/*_approved_cases.json
+backend/LearnLM/remediation/*_case*_input.json
+backend/LearnLM/remediation/*_reference_*.py
+pilot_*/reference_*.py

@@ -712,6 +712,45 @@ RESEED_ROLE_GRANTS = (
     "ON groups_reseedledger TO {role}",
 )
 
+#: Tables the reseed authoring PRECONDITIONS must read (M2 P2.7h-30).
+#:
+#: `reseed_authoring.stub_blockers` proves a question carries no grading truth
+#: by querying `QuestionApproval` and `OracleExecution`. Every authoring
+#: command runs it before it writes, so every authoring role needs SELECT on
+#: both — and none of them had it.
+#:
+#: ── Why no test caught this ─────────────────────────────────────────────
+#:
+#: `gate_write_privilege` probes what a command WRITES. Nothing probed what
+#: its preconditions READ. And every command test passes `--local`, where the
+#: throwaway database is owned by a role holding everything, so the narrow
+#: production roles were never the ones executing `stub_blockers`.
+#:
+#: It surfaced in the Phase 16 dry run — the first time an authoring command
+#: was pointed at production under its own role. The dry run is why it cost a
+#: refusal instead of a half-written pilot.
+#:
+#: These are SELECT only. They widen no write authority: these roles already
+#: read `groups_question`, which carries status and trust_state, so knowing
+#: whether an approval row exists is strictly less than they can already see.
+RESEED_AUTHORING_READS = (
+    "groups_questionapproval",
+    "groups_oracleexecution",
+)
+
+#: The roles that run `stub_blockers` and therefore need those reads.
+RESEED_AUTHORING_ROLES = (
+    "learnlm_remediate_rw",      # reseed_statement
+    "learnlm_boilerplate_rw",    # declare_signature
+    "learnlm_contract_rw",       # reseed_contract
+)
+
+RESEED_AUTHORING_READ_GRANTS = tuple(
+    f"GRANT SELECT ON {table} TO {{role}}"
+    for table in RESEED_AUTHORING_READS
+)
+
+
 #: Every captured column, for deriving a rollback's forbidden list.
 CAPTURED_COLUMNS = ("content", "status", "trust_state",
                     "execution_contract_version", "boilerplate_code",

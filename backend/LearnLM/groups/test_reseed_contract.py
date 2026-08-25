@@ -993,6 +993,86 @@ def test_no_further_migration_is_outstanding():
         for op in migration.operations]
 
 
+# ═════════════════════════════════════════════════════════════
+# 16A — the reads the preconditions depend on
+#
+# A command's role must be able to READ what its gate checks, not only WRITE
+# what it changes. Nothing asserted that until a production dry run refused
+# with `permission denied for table groups_questionapproval`, because every
+# command test runs `--local` against a superuser database.
+# ═════════════════════════════════════════════════════════════
+
+def models_queried_by_stub_blockers():
+    """The model names `stub_blockers` runs a query against, by AST."""
+    import inspect
+
+    tree = ast.parse(inspect.getsource(reseed_authoring.stub_blockers).strip())
+    queried = set()
+    for node in ast.walk(tree):
+        # <Model>.objects.using(...) / <Model>.objects.filter(...)
+        if (isinstance(node, ast.Attribute) and node.attr == "objects"
+                and isinstance(node.value, ast.Name)):
+            queried.add(node.value.id)
+    return queried
+
+
+def test_stub_blockers_queries_exactly_the_tables_we_grant_reads_on():
+    """
+    The durable check. If a future edit makes `stub_blockers` consult a third
+    table, this fails until that table is added to `RESEED_AUTHORING_READS` —
+    which is the list the production grants are written from. Without it the
+    next unreadable table is found the same way this one was: by a refusal in
+    production.
+    """
+    queried = models_queried_by_stub_blockers()
+    assert queried == {"QuestionApproval", "OracleExecution"}, queried
+
+    table_of = {
+        "QuestionApproval": QuestionApproval._meta.db_table,
+        "OracleExecution": OracleExecution._meta.db_table,
+    }
+    assert set(ops.RESEED_AUTHORING_READS) == {
+        table_of[name] for name in queried}
+
+
+def test_every_authoring_role_is_listed_for_those_reads():
+    """
+    All three authoring commands call `stub_blockers`, so all three roles need
+    the reads. Missing one means that command alone fails in production.
+    """
+    assert set(ops.RESEED_AUTHORING_ROLES) == {
+        "learnlm_remediate_rw", "learnlm_boilerplate_rw",
+        "learnlm_contract_rw"}
+    assert ops.ALLOWED_CONTRACT_ROLES <= set(ops.RESEED_AUTHORING_ROLES)
+    assert ops.ALLOWED_SIGNATURE_ROLES <= set(ops.RESEED_AUTHORING_ROLES)
+    assert ops.ALLOWED_STATEMENT_GENERATION_ROLES <= set(
+        ops.RESEED_AUTHORING_ROLES)
+
+
+def test_the_precondition_reads_are_select_only():
+    """
+    They must not widen write authority. A grant list that could hand an
+    authoring role INSERT on approvals would let the statement writer
+    manufacture the very evidence its gate looks for.
+    """
+    for grant in ops.RESEED_AUTHORING_READ_GRANTS:
+        assert grant.startswith("GRANT SELECT ON ")
+        for forbidden in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "ALL"):
+            assert forbidden not in grant
+
+
+def test_the_precondition_reads_are_not_in_any_forbidden_list():
+    """
+    Granting them must not put the roles in breach of their own gates, which
+    are checked at runtime on every production write.
+    """
+    tables = set(ops.RESEED_AUTHORING_READS)
+    for forbidden in (ops.STATEMENT_GENERATION_FORBIDDEN,
+                      ops.SIGNATURE_DECLARATION_FORBIDDEN,
+                      ops.CONTRACT_REPAIR_FORBIDDEN):
+        assert not tables & {entry[0] for entry in forbidden}
+
+
 def test_remediate_contract_is_not_weakened():
     """Its refusal must still be there, unchanged."""
     import inspect

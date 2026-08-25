@@ -1,0 +1,90 @@
+{
+  "question": 2290,
+  "labels": {},
+  "additions": [
+    {
+      "stdin": "1",
+      "expected_output": "4",
+      "explanation": "the artifact's example and the stated lower bound: 2 per side, squared = 4",
+      "category": "minimum_boundary"
+    },
+    {
+      "stdin": "2",
+      "expected_output": "9",
+      "explanation": "3 per side, squared = 9",
+      "category": "small"
+    },
+    {
+      "stdin": "3",
+      "expected_output": "25",
+      "explanation": "5 per side, squared = 25",
+      "category": "small_growth"
+    },
+    {
+      "stdin": "4",
+      "expected_output": "64",
+      "explanation": "8 per side, squared = 64",
+      "category": "fourth_term"
+    },
+    {
+      "stdin": "5",
+      "expected_output": "169",
+      "explanation": "13 per side, squared = 169",
+      "category": "fifth_term"
+    },
+    {
+      "stdin": "10",
+      "expected_output": "20736",
+      "explanation": "far enough in to expose an off-by-one",
+      "category": "double_digit"
+    },
+    {
+      "stdin": "20",
+      "expected_output": "313679521",
+      "explanation": "well past hand-checkable values",
+      "category": "beyond_fib_intuition"
+    },
+    {
+      "stdin": "50",
+      "expected_output": "245481867",
+      "explanation": "large enough that squaring matters",
+      "category": "mid_range"
+    },
+    {
+      "stdin": "100",
+      "expected_output": "20522904",
+      "explanation": "three-digit input",
+      "category": "hundred"
+    },
+    {
+      "stdin": "1000",
+      "expected_output": "500478595",
+      "explanation": "exercises the modulus repeatedly",
+      "category": "thousand"
+    },
+    {
+      "stdin": "7",
+      "expected_output": "1156",
+      "explanation": "a further small term to separate seed errors",
+      "category": "seventh_term"
+    },
+    {
+      "stdin": "5000",
+      "expected_output": "851109891",
+      "explanation": "the one-side count here vastly exceeds a 32-bit accumulator; the specification's modulus is the guard and must be applied",
+      "category": "overflow_sensitive"
+    },
+    {
+      "stdin": "9999",
+      "expected_output": "459963766",
+      "explanation": "one below the upper bound",
+      "category": "near_maximum"
+    },
+    {
+      "stdin": "10000",
+      "expected_output": "402613600",
+      "explanation": "the stated upper bound",
+      "category": "maximum_boundary"
+    }
+  ]
+}

@@ -758,3 +758,27 @@ def test_all_tier1_excluded_says_nothing_was_measured():
     report = assess(mutants=skipped + tier2())
 
     assert any("nothing was actually measured" in b for b in report.blockers)
+
+
+# ═════════════════════════════════════════════════════════════
+# M2 P2.7h-31 — the execution plan must stay mandatory
+#
+# `plan` is keyword-only with NO default so the gate cannot be called
+# without one. A default would silently restore the defect the parameter
+# exists to close: mutants executed unwrapped and stdin never prepared, so
+# kill rates measured against semantics no learner experiences. A Phase 19
+# mutation sweep put the default back and nothing failed.
+# ═════════════════════════════════════════════════════════════
+
+def test_evaluate_suite_refuses_to_run_without_an_execution_plan():
+    import inspect
+
+    signature = inspect.signature(evaluate_suite)
+    plan = signature.parameters["plan"]
+    assert plan.kind is inspect.Parameter.KEYWORD_ONLY
+    assert plan.default is inspect.Parameter.empty, (
+        "a default execution plan lets the gate measure the wrong semantics "
+        "silently; it must be supplied at every call site")
+
+    with pytest.raises(TypeError, match="plan"):
+        evaluate_suite([], [], lambda *a: {}, InputContract())

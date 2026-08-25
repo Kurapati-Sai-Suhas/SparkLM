@@ -1,0 +1,27 @@
+<p>You are tasked with counting the arrangements of houses along both sides of a street. The street has <code>n</code> plots on each side, facing each other. Each plot may hold a house or stay empty.</p>
+
+<p>There is a specific restriction: no two houses on the same side may sit on neighbouring plots. This means if a house is placed on a plot, its immediately adjacent plots on that same side must remain empty. A house on one side places no restriction on the plot opposite it.</p>
+
+<p>You need to count every distinct arrangement of houses across both sides of the street. Leaving every plot empty is itself a valid arrangement and is counted. The two sides are independent; therefore, the total count of distinct arrangements across both sides is the count for one side multiplied by itself.</p>
+
+<p>The input will be a single integer, <code>n</code>, representing the count of plots on each side of the street. The plot count <code>n</code> will be between 1 and 10,000, inclusive.</p>
+
+<p>Your output should be a single integer: the total number of arrangements reduced modulo one thousand million and seven (1,000,000,007). You must report this exact modulo result, not the potentially larger exact count.</p>
+
+<p>Implement the following method:</p>
+<p><code>class Solution:<br/>&nbsp;&nbsp;&nbsp;&nbsp;def countNumberOfWaysToPlaceHouses(self, n: int) -> int:</code></p>
+
+<h3>Example</h3>
+<h4>Input:</h4>
+<pre>n = 1</pre>
+<h4>Output:</h4>
+<pre>4</pre>
+<p><strong>Explanation:</strong><br/>For <code>n = 1</code>, there is one plot on each side.
+<br/>Consider one side of the street:
+<ul>
+    <li>Plot 1 is empty (<code>_</code>)</li>
+    <li>Plot 1 has a house (<code>H</code>)</li>
+</ul>
+There are 2 valid arrangements for one side.
+<br/>Since the two sides are independent, the total distinct arrangements for both sides is the number of arrangements for one side multiplied by itself: 2 * 2 = 4.
+<br/>The output is 4 reduced modulo 1,000,000,007, which is exactly 4.</p>

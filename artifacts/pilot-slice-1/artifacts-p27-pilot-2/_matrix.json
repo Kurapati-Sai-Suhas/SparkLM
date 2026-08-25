@@ -1,0 +1,271 @@
+{
+  "1940": {
+    "artifact_digest": "83098d852ea9782077baaa0b4bc768a3ab8d1727b485cce65313bdd500dcdb1b",
+    "attempts": [],
+    "binding": {
+      "DRAFT": true,
+      "UNVERIFIED": true,
+      "batch": "p27-pilot-2",
+      "batch_frozen": true,
+      "no_action": true,
+      "no_approval": true,
+      "no_execution": true,
+      "no_hidden_tests": true,
+      "placeholder": true,
+      "pre_image_digest_matches": true,
+      "pre_image_exists": true,
+      "spec_digest_matches_text": true,
+      "spec_digest_present": true,
+      "spec_verified": true,
+      "statement_blockers_empty": true
+    },
+    "contract_target": "v1",
+    "contract_verdict": "V1_SUFFICIENT",
+    "declared_signature": "sumOfDigitsOfStringAfterConvert(s: str, k: int)",
+    "example": {
+      "actual_output": "9",
+      "arguments": [
+        "az",
+        1
+      ],
+      "artifact_digest": null,
+      "claimed_output": 9,
+      "detail": "the reference produced the claimed output. This is not oracle evidence: one run, one case, an unreviewed reference.",
+      "evidence_class": "EARLY_EXAMPLE_CHECK",
+      "is_oracle_evidence": false,
+      "question_id": 1940,
+      "reference": {
+        "author": null,
+        "language": "python",
+        "notes": "derived from the operator-verified specification for q1940 (digest 3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac); not independently reviewed",
+        "origin": "llm",
+        "prompt_version": "phase15-reference-from-specification/v1",
+        "provider": "claude-opus-5 (assistant)",
+        "reference_digest": "6e6e7573b44e997839c897af170d48f9aea7eda1c3d062bc374344f8a85edb54",
+        "reviewed_by": null,
+        "status": "REFERENCE_CANDIDATE"
+      },
+      "specification_digest": null,
+      "status_id": 3,
+      "stderr": "",
+      "supports_trust_transition": false,
+      "verdict": "EXAMPLE_PASS"
+    },
+    "example_arguments": [
+      "az",
+      1
+    ],
+    "example_claimed": 9,
+    "explanation_status": "EXPLANATION_UNVERIFIED",
+    "independent": {
+      "agrees": true,
+      "claimed": 9,
+      "reference_origin": "llm (assistant), derived from the operator-verified specification's required_operation; UNREVIEWED",
+      "reference_output": 9,
+      "reference_provider": "claude-opus-5 (assistant)",
+      "specification_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac"
+    },
+    "provider": "reused-from-disk",
+    "question_id": 1940,
+    "specification_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac",
+    "status": "READY",
+    "validation_refusals": []
+  },
+  "1974": {
+    "artifact_digest": "736b2c2bda5a13382d78de62bc2ecad0a7beb6a7d126c991dc5e671156daedfd",
+    "attempts": [],
+    "binding": {
+      "DRAFT": true,
+      "UNVERIFIED": true,
+      "batch": "p27-pilot-2",
+      "batch_frozen": true,
+      "no_action": true,
+      "no_approval": true,
+      "no_execution": true,
+      "no_hidden_tests": true,
+      "placeholder": true,
+      "pre_image_digest_matches": true,
+      "pre_image_exists": true,
+      "spec_digest_matches_text": true,
+      "spec_digest_present": true,
+      "spec_verified": true,
+      "statement_blockers_empty": true
+    },
+    "contract_target": "v3",
+    "contract_verdict": "V3_REQUIRED",
+    "declared_signature": "findGreatestCommonDivisorOfArray(nums: list[int])",
+    "example": {
+      "blocked_on": "the question still declares contract v1",
+      "detail": "contract v1 cannot invoke a one-parameter signature whose argument is a container: the generic harness splats it into 5 positional arguments. This question needs contract v3 (or a per-question wrapper) before any example can be executed.",
+      "is_oracle_evidence": false,
+      "supports_trust_transition": false,
+      "verdict": "EXAMPLE_UNRESOLVED"
+    },
+    "example_arguments": [
+      [
+        12,
+        15,
+        6,
+        9,
+        30
+      ]
+    ],
+    "example_claimed": 6,
+    "explanation_status": "EXPLANATION_UNVERIFIED",
+    "independent": {
+      "agrees": true,
+      "claimed": 6,
+      "reference_origin": "llm (assistant), derived from the operator-verified specification's required_operation; UNREVIEWED",
+      "reference_output": 6,
+      "reference_provider": "claude-opus-5 (assistant)",
+      "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84"
+    },
+    "provider": "reused-from-disk",
+    "question_id": 1974,
+    "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84",
+    "status": "READY",
+    "validation_refusals": []
+  },
+  "2057": {
+    "artifact_digest": "8dd380011b0509403db16e15def5bbec05f0b375e4c188166cc28055402ac809",
+    "attempts": [],
+    "binding": {
+      "DRAFT": true,
+      "UNVERIFIED": true,
+      "batch": "p27-pilot-2",
+      "batch_frozen": true,
+      "no_action": true,
+      "no_approval": true,
+      "no_execution": true,
+      "no_hidden_tests": true,
+      "placeholder": true,
+      "pre_image_digest_matches": true,
+      "pre_image_exists": true,
+      "spec_digest_matches_text": true,
+      "spec_digest_present": true,
+      "spec_verified": true,
+      "statement_blockers_empty": true
+    },
+    "contract_target": "v1",
+    "contract_verdict": "V1_SUFFICIENT",
+    "declared_signature": "checkWhetherTwoStringsAreAlmostEquivalent(word1: str, word2: str)",
+    "example": {
+      "actual_output": "false",
+      "arguments": [
+        "aaaaabbbbx",
+        "ccccddddyy"
+      ],
+      "artifact_digest": null,
+      "claimed_output": false,
+      "detail": "the reference produced the claimed output. This is not oracle evidence: one run, one case, an unreviewed reference.",
+      "evidence_class": "EARLY_EXAMPLE_CHECK",
+      "is_oracle_evidence": false,
+      "question_id": 2057,
+      "reference": {
+        "author": null,
+        "language": "python",
+        "notes": "derived from the operator-verified specification for q2057 (digest d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26); not independently reviewed",
+        "origin": "llm",
+        "prompt_version": "phase15-reference-from-specification/v1",
+        "provider": "claude-opus-5 (assistant)",
+        "reference_digest": "ab53947a8ace447facfb01d28585d470f5ac9ea089587d325d89262955a57592",
+        "reviewed_by": null,
+        "status": "REFERENCE_CANDIDATE"
+      },
+      "specification_digest": null,
+      "status_id": 3,
+      "stderr": "",
+      "supports_trust_transition": false,
+      "verdict": "EXAMPLE_PASS"
+    },
+    "example_arguments": [
+      "aaaaabbbbx",
+      "ccccddddyy"
+    ],
+    "example_claimed": false,
+    "explanation_status": "EXPLANATION_UNVERIFIED",
+    "independent": {
+      "agrees": true,
+      "claimed": false,
+      "reference_origin": "llm (assistant), derived from the operator-verified specification's required_operation; UNREVIEWED",
+      "reference_output": false,
+      "reference_provider": "claude-opus-5 (assistant)",
+      "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26"
+    },
+    "provider": "reused-from-disk",
+    "question_id": 2057,
+    "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
+    "status": "READY",
+    "validation_refusals": []
+  },
+  "2290": {
+    "artifact_digest": "e9ad5efd71270709584770df349873e4cb6724022e85f6471301357caa06e61f",
+    "attempts": [],
+    "binding": {
+      "DRAFT": true,
+      "UNVERIFIED": true,
+      "batch": "p27-pilot-2",
+      "batch_frozen": true,
+      "no_action": true,
+      "no_approval": true,
+      "no_execution": true,
+      "no_hidden_tests": true,
+      "placeholder": true,
+      "pre_image_digest_matches": true,
+      "pre_image_exists": true,
+      "spec_digest_matches_text": true,
+      "spec_digest_present": true,
+      "spec_verified": true,
+      "statement_blockers_empty": true
+    },
+    "contract_target": "v1",
+    "contract_verdict": "V1_SUFFICIENT",
+    "declared_signature": "countNumberOfWaysToPlaceHouses(n: int)",
+    "example": {
+      "actual_output": "4",
+      "arguments": [
+        1
+      ],
+      "artifact_digest": null,
+      "claimed_output": 4,
+      "detail": "the reference produced the claimed output. This is not oracle evidence: one run, one case, an unreviewed reference.",
+      "evidence_class": "EARLY_EXAMPLE_CHECK",
+      "is_oracle_evidence": false,
+      "question_id": 2290,
+      "reference": {
+        "author": null,
+        "language": "python",
+        "notes": "derived from the operator-verified specification for q2290 (digest 37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20); not independently reviewed",
+        "origin": "llm",
+        "prompt_version": "phase15-reference-from-specification/v1",
+        "provider": "claude-opus-5 (assistant)",
+        "reference_digest": "85cf0800aa7b2b6c7cd8f516630f7ae1e038de71274f0b869ff80829c7cb664b",
+        "reviewed_by": null,
+        "status": "REFERENCE_CANDIDATE"
+      },
+      "specification_digest": null,
+      "status_id": 3,
+      "stderr": "",
+      "supports_trust_transition": false,
+      "verdict": "EXAMPLE_PASS"
+    },
+    "example_arguments": [
+      1
+    ],
+    "example_claimed": 4,
+    "explanation_status": "EXPLANATION_UNVERIFIED",
+    "independent": {
+      "agrees": true,
+      "claimed": 4,
+      "reference_origin": "llm (assistant), derived from the operator-verified specification's required_operation; UNREVIEWED",
+      "reference_output": 4,
+      "reference_provider": "claude-opus-5 (assistant)",
+      "specification_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20"
+    },
+    "provider": "reused-from-disk",
+    "question_id": 2290,
+    "specification_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20",
+    "status": "READY",
+    "validation_refusals": []
+  }
+}

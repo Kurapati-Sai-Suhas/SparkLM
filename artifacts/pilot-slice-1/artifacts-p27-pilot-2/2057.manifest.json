@@ -1,0 +1,71 @@
+{
+  "applicable": true,
+  "artifact_digest": "8dd380011b0509403db16e15def5bbec05f0b375e4c188166cc28055402ac809",
+  "attempts": [],
+  "batch_key": "p27-pilot-2",
+  "batch_state": "CAPTURED",
+  "contract_target": "v1",
+  "contract_verdict": "V1_SUFFICIENT",
+  "example": {
+    "actual_output": "false",
+    "arguments": [
+      "aaaaabbbbx",
+      "ccccddddyy"
+    ],
+    "artifact_digest": null,
+    "claimed_output": false,
+    "detail": "the reference produced the claimed output. This is not oracle evidence: one run, one case, an unreviewed reference.",
+    "evidence_class": "EARLY_EXAMPLE_CHECK",
+    "is_oracle_evidence": false,
+    "question_id": 2057,
+    "reference": {
+      "author": null,
+      "language": "python",
+      "notes": "derived from the operator-verified specification for q2057 (digest d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26); not independently reviewed",
+      "origin": "llm",
+      "prompt_version": "phase15-reference-from-specification/v1",
+      "provider": "claude-opus-5 (assistant)",
+      "reference_digest": "ab53947a8ace447facfb01d28585d470f5ac9ea089587d325d89262955a57592",
+      "reviewed_by": null,
+      "status": "REFERENCE_CANDIDATE"
+    },
+    "specification_digest": null,
+    "status_id": 3,
+    "stderr": "",
+    "supports_trust_transition": false,
+    "verdict": "EXAMPLE_PASS"
+  },
+  "example_arguments": [
+    "aaaaabbbbx",
+    "ccccddddyy"
+  ],
+  "example_claimed": false,
+  "explanation_status": "EXPLANATION_UNVERIFIED",
+  "generated_at": "2026-08-25T07:04:08.058532+00:00",
+  "generator_version": "1.0.0",
+  "independent": {
+    "agrees": true,
+    "claimed": false,
+    "reference_origin": "llm (assistant), derived from the operator-verified specification's required_operation; UNREVIEWED",
+    "reference_output": false,
+    "reference_provider": "claude-opus-5 (assistant)",
+    "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26"
+  },
+  "model": "reused-from-disk",
+  "prompt_template_version": "specification-formatter/v4",
+  "provider": "reused-from-disk",
+  "question_id": 2057,
+  "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26",
+  "specification_verified_at": "2026-08-24T07:42:35.593094+00:00",
+  "specification_verified_by": "Suhas",
+  "staleness": {
+    "artifact_digest": "8dd380011b0509403db16e15def5bbec05f0b375e4c188166cc28055402ac809",
+    "batch_key": "p27-pilot-2",
+    "how_to_check": "re-read the question, recompute pre_image.live_digest and specification_digest, and recompute artifact_digest from the two files; all four must equal the values above, and the batch must still be frozen",
+    "pre_image_digest": "5b05dfcd47a28113fdd0b3f41ca48882f0a73131f77d90dda87cf0934ab4a692",
+    "question_input_digest": "5b05dfcd47a28113fdd0b3f41ca48882f0a73131f77d90dda87cf0934ab4a692",
+    "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26"
+  },
+  "validation": "CLEAN",
+  "validation_refusals": []
+}

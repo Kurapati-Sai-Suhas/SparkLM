@@ -1,0 +1,54 @@
+{
+  "applicable": true,
+  "artifact_digest": "736b2c2bda5a13382d78de62bc2ecad0a7beb6a7d126c991dc5e671156daedfd",
+  "attempts": [],
+  "batch_key": "p27-pilot-2",
+  "batch_state": "CAPTURED",
+  "contract_target": "v3",
+  "contract_verdict": "V3_REQUIRED",
+  "example": {
+    "blocked_on": "the question still declares contract v1",
+    "detail": "contract v1 cannot invoke a one-parameter signature whose argument is a container: the generic harness splats it into 5 positional arguments. This question needs contract v3 (or a per-question wrapper) before any example can be executed.",
+    "is_oracle_evidence": false,
+    "supports_trust_transition": false,
+    "verdict": "EXAMPLE_UNRESOLVED"
+  },
+  "example_arguments": [
+    [
+      12,
+      15,
+      6,
+      9,
+      30
+    ]
+  ],
+  "example_claimed": 6,
+  "explanation_status": "EXPLANATION_UNVERIFIED",
+  "generated_at": "2026-08-25T07:04:08.058532+00:00",
+  "generator_version": "1.0.0",
+  "independent": {
+    "agrees": true,
+    "claimed": 6,
+    "reference_origin": "llm (assistant), derived from the operator-verified specification's required_operation; UNREVIEWED",
+    "reference_output": 6,
+    "reference_provider": "claude-opus-5 (assistant)",
+    "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84"
+  },
+  "model": "reused-from-disk",
+  "prompt_template_version": "specification-formatter/v4",
+  "provider": "reused-from-disk",
+  "question_id": 1974,
+  "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84",
+  "specification_verified_at": "2026-08-24T15:28:46.576369+00:00",
+  "specification_verified_by": "Suhas",
+  "staleness": {
+    "artifact_digest": "736b2c2bda5a13382d78de62bc2ecad0a7beb6a7d126c991dc5e671156daedfd",
+    "batch_key": "p27-pilot-2",
+    "how_to_check": "re-read the question, recompute pre_image.live_digest and specification_digest, and recompute artifact_digest from the two files; all four must equal the values above, and the batch must still be frozen",
+    "pre_image_digest": "793d6dbd90cee5db4602d2d362b4ad14b3790de546fa314f9ba17d4649d19384",
+    "question_input_digest": "793d6dbd90cee5db4602d2d362b4ad14b3790de546fa314f9ba17d4649d19384",
+    "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84"
+  },
+  "validation": "CLEAN",
+  "validation_refusals": []
+}

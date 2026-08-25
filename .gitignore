@@ -50,3 +50,9 @@ staticfiles/
 
 # Role DDL carries a generated password
 backend/LearnLM/sql/learnlm_*.sql
+
+# Answer keys. Reference solutions and generated hidden-test plans contain
+# expected outputs, and this repository is public. Phase 19 committed the
+# suite plans before this was noticed (see docs); nothing further should
+# follow them.
+artifacts/**/references-*/

@@ -1056,3 +1056,40 @@ def test_the_migration_creates_no_reference_rows(db):
     or activated anything, it would be visible here.
     """
     assert ReferenceSolution.objects.count() == 0
+
+
+# ═════════════════════════════════════════════════════════════
+# M2 P2.7h-32 — why `has_valid_approval_provenance` can look redundant
+#
+# A Phase 20 mutation sweep removed the APPROVED clause from that property
+# and nothing failed. That is not a test gap: the
+# `reference_approval_provenance` CheckConstraint makes APPROVED and
+# source_hash equivalent, so `source_hash is not None` already implies
+# APPROVED and the clause is unreachable by construction.
+#
+# It stays as defence-in-depth, and this test pins the constraint that makes
+# it redundant. If the constraint is ever dropped, the mutation stops being
+# equivalent and this fails first.
+# ═════════════════════════════════════════════════════════════
+
+def test_approval_provenance_constraint_exists():
+    names = {c.name for c in ReferenceSolution._meta.constraints}
+    assert "reference_approval_provenance" in names, names
+
+
+# The "a non-approved reference cannot hold approval metadata" case is NOT
+# repeated here. It already exists above, parametrized across all three
+# provenance fields and all three non-approved states — nine cases. An
+# identically named copy appended here silently shadowed it and cost those
+# nine, which the full-suite count caught. The lesson is the reason this
+# comment exists rather than a second test.
+
+
+def test_source_hash_alone_implies_approved(db, question):
+    """
+    The equivalence the mutation relied on, stated as a property: every row
+    carrying a source_hash is APPROVED, so the two clauses cannot disagree.
+    """
+    for reference in ReferenceSolution.objects.all():
+        if reference.source_hash is not None:
+            assert reference.review_state == ReferenceSolution.REVIEW_APPROVED

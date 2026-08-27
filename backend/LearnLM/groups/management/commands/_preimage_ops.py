@@ -491,6 +491,41 @@ APPROVAL_ROLE_GRANTS = (
 #: table-level UPDATE on groups_questionapproval as excess privilege). That
 #: contract could not be satisfied by any role: grant it and the forbidden
 #: check refuses, withhold it and the write fails mid-transaction.
+#: What a command must be able to READ and APPEND to record an action
+#: (M2 P2.7h-36).
+#:
+#: Every role that files a `RemediationAction` already holds exactly this set:
+#: SELECT on the batch, the pre-image and the action table, plus INSERT on the
+#: action table — and never UPDATE or DELETE on it, so append-only is a
+#: PRIVILEGE, not a convention.
+#:
+#: `learnlm_promote_rw` held none of it, because promotion records itself by
+#: stamping the approval rather than filing an action. Demotion has nothing to
+#: stamp, so it files an action — and the first production dry-run of
+#: `question_demote` failed on `permission denied for table
+#: groups_remediationbatch`. Same shape as the Phase 16 gap: the role could
+#: write its own column and could not reach the trail that makes the write
+#: accountable.
+ACTION_RECORDING_READS = (
+    "groups_remediationbatch",
+    "groups_questionpreimage",
+    "groups_remediationaction",
+)
+
+#: The one table an action-recording role must be able to APPEND to.
+ACTION_RECORDING_APPEND = "groups_remediationaction"
+
+ACTION_RECORDING_GRANTS = tuple(
+    f"GRANT SELECT ON {table} TO {{role}}" for table in ACTION_RECORDING_READS
+) + (f"GRANT INSERT ON {ACTION_RECORDING_APPEND} TO {{role}}",)
+
+#: Privileges an action-recording role must NOT hold: the trail is append-only.
+ACTION_RECORDING_FORBIDDEN = (
+    (ACTION_RECORDING_APPEND, None, "UPDATE"),
+    (ACTION_RECORDING_APPEND, None, "DELETE"),
+    (ACTION_RECORDING_APPEND, None, "TRUNCATE"),
+)
+
 #: Demotion writes ONE column and stamps nothing (M2 P2.7h-35).
 #:
 #: Narrower than PROMOTION_PROBE on purpose: promotion also records

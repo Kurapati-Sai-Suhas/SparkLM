@@ -402,3 +402,49 @@ def test_the_command_actually_passes_its_probe_to_the_gates():
         node = keywords[argument]
         assert isinstance(node, ast.Attribute), argument
         assert node.attr == expected, (argument, node.attr)
+
+
+# ═════════════════════════════════════════════════════════════
+# M2 P2.7h-36 — the privileges recording an action requires
+#
+# The first production dry-run failed with `permission denied for table
+# groups_remediationbatch`. `learnlm_promote_rw` could write trust_state and
+# could not reach the audit trail that makes the write accountable — the
+# same shape as the Phase 16 gap, one layer along.
+# ═════════════════════════════════════════════════════════════
+
+def test_recording_an_action_needs_exactly_three_reads_and_one_append():
+    assert set(ops.ACTION_RECORDING_READS) == {
+        "groups_remediationbatch", "groups_questionpreimage",
+        "groups_remediationaction"}
+    assert ops.ACTION_RECORDING_APPEND == "groups_remediationaction"
+
+
+def test_the_action_trail_stays_append_only():
+    """
+    INSERT and nothing else. A role able to UPDATE or DELETE an action could
+    rewrite the record of what it did, which is the one thing an append-only
+    trail exists to prevent.
+    """
+    for grant in ops.ACTION_RECORDING_GRANTS:
+        assert grant.startswith("GRANT SELECT ON ") or \
+            grant.startswith("GRANT INSERT ON ")
+        for forbidden in ("UPDATE", "DELETE", "TRUNCATE", "ALL"):
+            assert forbidden not in grant
+    for entry in ops.ACTION_RECORDING_FORBIDDEN:
+        assert entry[0] == "groups_remediationaction"
+        assert entry[2] in ("UPDATE", "DELETE", "TRUNCATE")
+
+
+def test_the_tables_demotion_reads_are_the_ones_it_is_granted():
+    """
+    Derived from the command, so a future edit that reaches for a fourth
+    table fails here rather than in a production dry-run.
+    """
+    source = inspect.getsource(question_demote)
+    assert "RemediationBatch.objects" in source
+    assert "require_pre_image" in source
+    assert "record_action" in source
+    # and nothing outside the granted set
+    for model in ("CodeSubmission", "OracleExecution", "ReferenceSolution"):
+        assert f"{model}.objects" not in source, model

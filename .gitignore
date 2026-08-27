@@ -72,3 +72,18 @@ backend/LearnLM/remediation/*_approved_cases.json
 backend/LearnLM/remediation/*_case*_input.json
 backend/LearnLM/remediation/*_reference_*.py
 pilot_*/reference_*.py
+
+# ── KT research corpora and checkpoints (M2 P2.12) ────────────────────────
+#
+# ASSISTments' terms require a written agreement, prohibit redistribution and
+# require publishing your source code. Acquiring the file is an operator
+# decision; REDISTRIBUTING it through this public repository is not ours to
+# make, and a subset is still the dataset. The manifest records the file's
+# sha256, which is how a result stays checkable by someone who obtained their
+# own copy — neither party has to send the data.
+#
+# Checkpoints are binary, regenerable from config + seed, and derived from
+# that same licensed corpus. The metrics they produced ARE committed, under
+# kt_research/results/ — those are the findings.
+backend/LearnLM/kt_research/data/
+backend/LearnLM/kt_research/checkpoints/

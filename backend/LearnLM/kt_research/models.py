@@ -30,6 +30,7 @@ review that has not been done.
 """
 
 import math
+from dataclasses import asdict as dataclasses_asdict
 from dataclasses import dataclass, field
 
 
@@ -49,9 +50,9 @@ class ModelSpec:
 SPECS = {s.name: s for s in (
     ModelSpec("BKT", True, ("concept", "correctness"),
               "Bayesian Knowledge Tracing: four parameters per concept."),
-    ModelSpec("DKT", False, ("concept", "correctness"),
-              "Deep Knowledge Tracing: an RNN over the interaction sequence.",
-              needs="a tensor framework and a public dataset"),
+    ModelSpec("DKT", True, ("concept", "correctness"),
+              "Deep Knowledge Tracing: an LSTM over the interaction "
+              "sequence, one output unit per concept."),
     ModelSpec("SAKT", False, ("concept", "correctness"),
               "Self-Attentive KT: attention from past interactions to the "
               "queried skill.",
@@ -60,10 +61,9 @@ SPECS = {s.name: s for s in (
               "Attentive KT: monotonic attention with Rasch-style "
               "difficulty embeddings.",
               needs="a tensor framework and a public dataset"),
-    ModelSpec("Transformer", False, ("concept", "correctness"),
-              "Plain encoder baseline — the control the additions are "
-              "measured against.",
-              needs="a tensor framework and a public dataset"),
+    ModelSpec("Transformer", True, ("concept", "correctness"),
+              "Plain causal encoder baseline — the control the additions are "
+              "measured against. No temporal gating, no prerequisites."),
     ModelSpec("TA-GTKT", False,
               ("concept", "correctness", "timestamp", "response_time",
                "delta_time", "attempt_count", "difficulty"),
@@ -80,8 +80,44 @@ SPECS = {s.name: s for s in (
               needs="TA-GTKT, plus the research prerequisite representation"),
 )}
 
+#: Name -> constructor, for the implemented rungs only.
+#:
+#: Neural constructors import `kt_research.neural` lazily so that BKT, the
+#: splitter and the leakage guard all keep working with no tensor framework
+#: installed. A leakage check that cannot run without a GPU-era dependency is
+#: a leakage check that stops being run.
+CONSTRUCTORS = {}
+
+
+def concept_of(row):
+    """
+    The concept key, under either of its two names.
+
+    A built corpus carries `concept_id`, the canonical schema's name; the
+    synthetic fixtures carry `concept`. One accessor is cheaper than renaming
+    a key across 300,000 rows on load, and cheaper than two code paths.
+
+    `is None` rather than truthiness: `""` is a real value here — it means the
+    source has no concept mapping for this row, which is different from the
+    key being absent.
+    """
+    value = row.get("concept_id", None)
+    if value is None:
+        value = row.get("concept", None)
+    if value is None:
+        raise KeyError("row has neither 'concept_id' nor 'concept'")
+    return value
+
 
 def build(name, **parameters):
+    """
+    Construct one model by name.
+
+    The constructor is looked up per model rather than defaulted. An earlier
+    version returned `BKT(...)` for anything marked implemented, which would
+    have silently reported BKT's numbers under DKT's name the moment a second
+    model landed — the exact class of error this package's tests exist for.
+    """
     spec = SPECS.get(name)
     if spec is None:
         raise KeyError(f"unknown model {name!r}; known: {sorted(SPECS)}")
@@ -90,7 +126,24 @@ def build(name, **parameters):
             f"{name} is declared but not implemented. It needs: "
             f"{spec.needs}. Returning a placeholder score here would let a "
             f"broken pipeline report a plausible number.")
-    return BKT(**parameters)
+
+    constructor = CONSTRUCTORS.get(name)
+    if constructor is None:
+        raise NotImplementedError(
+            f"{name} is marked implemented but has no constructor registered "
+            f"in CONSTRUCTORS. Refusing rather than substituting another "
+            f"model.")
+    return constructor(**parameters)
+
+
+def _build_dkt(**parameters):
+    from kt_research import neural
+    return neural.DKT(**parameters)
+
+
+def _build_transformer(**parameters):
+    from kt_research import neural
+    return neural.TransformerKT(**parameters)
 
 
 # ═════════════════════════════════════════════════════════════
@@ -136,18 +189,70 @@ class BKT:
     """
 
     name = "BKT"
+    checkpoint_suffix = ".json"
 
-    def __init__(self, parameters=None, iterations=20):
+    def __init__(self, parameters=None, iterations=20, seed=None):
         self.default = (parameters or BKTParameters()).validated()
         self.iterations = iterations
         self.per_concept = {}
+        self.history = []
+        # Accepted so the runner can hand every model the run's seed
+        # uniformly. This fit is deterministic and uses none of it.
+        self.seed = seed
         self._fitted = False
+
+    # ── checkpointing ─────────────────────────────────────────────────
+
+    def save(self, path):
+        """
+        The fitted parameters, as JSON.
+
+        A LIST of {concept, parameters} rather than an object keyed by
+        concept: JSON object keys are always strings, so a dict would turn
+        integer concept ids into strings on the way back and quietly score
+        every interaction against the default prior.
+        """
+        import json
+        import pathlib
+
+        path = pathlib.Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "model": self.name,
+            "default": dataclasses_asdict(self.default),
+            "per_concept": [
+                {"concept": concept,
+                 "parameters": dataclasses_asdict(parameters)}
+                for concept, parameters in sorted(
+                    self.per_concept.items(), key=lambda item: str(item[0]))],
+        }, indent=2) + "\n", encoding="utf-8")
+        return str(path)
+
+    def load(self, path):
+        import json
+        import pathlib
+
+        payload = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        if payload["model"] != self.name:
+            raise ValueError(
+                f"checkpoint holds {payload['model']!r}, not {self.name!r}")
+        self.default = BKTParameters(**payload["default"]).validated()
+        self.per_concept = {
+            entry["concept"]: BKTParameters(**entry["parameters"]).validated()
+            for entry in payload["per_concept"]}
+        self._fitted = True
+        return self
 
     # ── fitting ───────────────────────────────────────────────────────
 
-    def fit(self, sequences):
+    def fit(self, sequences, validation=None):
         """
-        `sequences` maps learner -> [{"concept": c, "correct": bool}, ...].
+        `sequences` maps learner -> [{concept, correct}, ...].
+
+        `validation` is accepted and ignored: BKT has nothing to early-stop
+        on. The runner passes a validation set to every model uniformly, and
+        a model that quietly took a different argument list would be a
+        different experiment.
 
         A simple EM-flavoured fit: the parameters that maximise agreement
         with the observed accuracy per concept, hill-climbed. It is not the
@@ -157,7 +262,7 @@ class BKT:
         by_concept = {}
         for rows in sequences.values():
             for row in rows:
-                by_concept.setdefault(row["concept"], []).append(
+                by_concept.setdefault(concept_of(row), []).append(
                     bool(row["correct"]))
 
         for concept, outcomes in by_concept.items():
@@ -206,7 +311,7 @@ class BKT:
 
         state, predictions = {}, []
         for row in rows:
-            concept = row["concept"]
+            concept = concept_of(row)
             parameters = self.per_concept.get(concept, self.default)
             known = state.get(concept, parameters.prior)
 
@@ -223,6 +328,13 @@ class BKT:
             posterior = numerator / denominator if denominator else known
             state[concept] = posterior + (1 - posterior) * parameters.learn
         return predictions
+
+
+CONSTRUCTORS.update({
+    "BKT": BKT,
+    "DKT": _build_dkt,
+    "Transformer": _build_transformer,
+})
 
 
 # ═════════════════════════════════════════════════════════════
@@ -269,3 +381,33 @@ def rmse(labels, scores):
     total = sum((float(bool(label)) - score) ** 2
                 for label, score in zip(labels, scores))
     return math.sqrt(total / len(labels))
+
+
+#: How far a probability may be clamped from 0 or 1 in `log_loss`.
+#:
+#: Unclamped, a single confident wrong answer scores infinity and one row
+#: decides the metric for the whole corpus. Clamping is standard, but the
+#: bound is a REPORTED CHOICE rather than a hidden constant: it caps the
+#: worst per-row penalty at ~13.8 nats, so two log losses are only comparable
+#: if they used the same epsilon.
+LOG_LOSS_EPSILON = 1e-6
+
+
+def log_loss(labels, scores, epsilon=LOG_LOSS_EPSILON):
+    """
+    Mean binary cross-entropy, in nats.
+
+    The metric that punishes CONFIDENT wrongness, which AUC cannot see at all
+    — AUC is invariant to any monotone rescaling of the scores, so a model
+    that ranks well while being wildly overconfident looks identical to a
+    calibrated one. For deciding what to show a learner, the calibration is
+    the part that matters.
+    """
+    if not labels:
+        return float("nan")
+    total = 0.0
+    for label, score in zip(labels, scores):
+        clamped = min(max(float(score), epsilon), 1.0 - epsilon)
+        total -= (math.log(clamped) if bool(label)
+                  else math.log(1.0 - clamped))
+    return total / len(labels)

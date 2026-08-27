@@ -245,16 +245,27 @@ def audit_split_ordinally(train, validation_rows, test):
             outcome=i.correct, attempt_number=i.attempt_number,
             lag_seconds=None) for i in rows]
 
-    learners = ({i.learner_id for i in train}
-                | {i.learner_id for i in validation_rows}
-                | {i.learner_id for i in test})
+    # Grouped ONCE per bucket. Re-scanning all three lists per learner is
+    # O(learners x interactions), which is 1.7 billion comparisons on the full
+    # ASSISTments 2009 file — the audit, not the model, becomes the reason the
+    # benchmark cannot be run. Same partition, same comparisons, same result.
+    def group(rows):
+        grouped = {}
+        for interaction in rows:
+            grouped.setdefault(interaction.learner_id, []).append(interaction)
+        return grouped
+
+    grouped_train = group(train)
+    grouped_validation = group(validation_rows)
+    grouped_test = group(test)
+    learners = (set(grouped_train) | set(grouped_validation)
+                | set(grouped_test))
 
     problems, checks = [], []
     for learner in sorted(learners):
-        subset_train = [i for i in train if i.learner_id == learner]
-        subset_validation = [i for i in validation_rows
-                             if i.learner_id == learner]
-        subset_test = [i for i in test if i.learner_id == learner]
+        subset_train = grouped_train.get(learner, [])
+        subset_validation = grouped_validation.get(learner, [])
+        subset_test = grouped_test.get(learner, [])
 
         # A learner routed entirely to TRAIN (too short to split) has no
         # held-out rows by design; auditing them would fail on "empty test".
@@ -315,6 +326,36 @@ def split_hash(train, validation_rows, test):
                 f"{interaction.learner_id}|{interaction.question_id}|"
                 f"{interaction.sequence_position}"))
     return digest.hexdigest()
+
+
+#: Column order for the split assignment sidecar.
+SPLIT_COLUMNS = ("source_row_id", "learner_id", "sequence_position", "split")
+
+
+def split_assignment(result):
+    """
+    Which bucket each interaction landed in, keyed by `source_row_id`.
+
+    A SIDECAR, deliberately not a column on `interactions.csv`: the canonical
+    columns and the processed hash are a published contract, and a partition is
+    a property of a build configuration rather than of an interaction. Adding a
+    column would change the processed hash of every dataset ever built from
+    this schema, which would make old and new builds of identical data look
+    like different data.
+
+    It exists so a downstream consumer can USE this split rather than recompute
+    it. A second implementation of the split rule is a second chance to get it
+    wrong, and the whole point of the partition being hashed is that exactly
+    one of them is authoritative.
+    """
+    for name, rows in (("train", result.train),
+                       ("validation", result.validation),
+                       ("test", result.test)):
+        for interaction in rows:
+            yield {"source_row_id": interaction.source_row_id,
+                   "learner_id": interaction.learner_id,
+                   "sequence_position": interaction.sequence_position,
+                   "split": name}
 
 
 # ═════════════════════════════════════════════════════════════

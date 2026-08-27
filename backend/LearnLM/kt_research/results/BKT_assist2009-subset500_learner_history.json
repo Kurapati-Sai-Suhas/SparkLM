@@ -1,0 +1,103 @@
+{
+  "config": {
+    "model": "BKT",
+    "dataset": "assist2009-subset500",
+    "split_by": "learner_history",
+    "fraction": 0.8,
+    "validation_fraction": null,
+    "seed": 20260827,
+    "parameters": {
+      "seed": 20260827
+    },
+    "notes": "P2.12 \u00a722I pipeline proof: 500 learners sampled whole from the ASSISTments 2009-2010 skill builder (corrected). Small enough to run end to end in minutes. NOT the headline result \u2014 see assist2009_baselines.json.",
+    "dataset_directory": "build/kt/assist09_subset500",
+    "preprocessing_version": "p2.12/v1"
+  },
+  "preprocessing_version": "p2.12/v1",
+  "dataset_fingerprint": "80e6271d3565fe01032c6c6c0adfd445f68fba8277b72aea9434ab708b1bb674",
+  "dataset": {
+    "dataset": "assistments-2009-2010-skill-builder",
+    "version": "corrected-one-row-per-student-problem",
+    "interactions": 34234,
+    "learners": 492,
+    "questions": 11759,
+    "concepts": 107,
+    "correct_rate": 0.645937,
+    "raw_dataset_hash": "2e836b60220db20bd831f6a4ef98c11bd1c875bd665bade86b4d02b8eefe0b83",
+    "processed_hash": "afb5e997f206699f5a74f1d7f453c0ebac7326ecb47279022b37ce56d83de074",
+    "split_hash": "93e89a8220088f34f0991680aa3348a6194ab5c2c9d63ea1d3e3c3e50d3c6a51",
+    "split": {
+      "strategy": "learner_history",
+      "boundary": {
+        "source": "kt_dataset build",
+        "split_hash": "93e89a8220088f34f0991680aa3348a6194ab5c2c9d63ea1d3e3c3e50d3c6a51"
+      },
+      "train": 23745,
+      "validation": 5134,
+      "test": 5355
+    },
+    "field_availability": {
+      "learner_id": {
+        "status": "available",
+        "reason": "source column `user_id`."
+      },
+      "question_id": {
+        "status": "available",
+        "reason": "source column `problem_id`."
+      },
+      "concept_id": {
+        "status": "available",
+        "reason": "source column `skill_id`. ~16% of raw rows have none; whether those are kept is the build's `require_concept` setting and is recorded in the manifest either way."
+      },
+      "correctness": {
+        "status": "available",
+        "reason": "source column `correct`, validated as a strict 0/1 label \u2014 a partial score is rejected, never rounded."
+      },
+      "timestamp": {
+        "status": "unavailable",
+        "reason": "ORDINAL ONLY. No absolute time column exists in this corpus; `ms_first_response` and `overlap_time` are durations, not points in time. `sequence_position` (from `order_id`) orders each learner's history and nothing here treats it as a clock."
+      },
+      "response_time": {
+        "status": "unavailable",
+        "reason": "Present in the raw file as `ms_first_response`, absent from canonical schema v1, so it does not reach this pipeline. No baseline in this phase consumes it."
+      },
+      "difficulty": {
+        "status": "unavailable",
+        "reason": "Not a source column. Estimating it from corpus-wide success rate would carry test labels into a training feature."
+      }
+    }
+  },
+  "split": {
+    "strategy": "learner_history",
+    "boundary": {
+      "source": "kt_dataset build",
+      "split_hash": "93e89a8220088f34f0991680aa3348a6194ab5c2c9d63ea1d3e3c3e50d3c6a51"
+    },
+    "train": 23745,
+    "validation": 5134,
+    "test": 5355
+  },
+  "metrics": {
+    "auc": 0.7069739882404651,
+    "accuracy": 0.6451914098972923,
+    "log_loss": 0.6505471468973082,
+    "rmse": 0.474556066592465,
+    "test_interactions": 5355,
+    "positive_rate": 0.633613
+  },
+  "validation_metrics": {
+    "auc": 0.6945527426602948,
+    "accuracy": 0.6493961823139852,
+    "log_loss": 0.6499147860026322,
+    "rmse": 0.4735979504778943,
+    "test_interactions": 5134,
+    "positive_rate": 0.648812
+  },
+  "training_history": [],
+  "checkpoint": "kt_research/checkpoints/BKT_assist2009-subset500.json",
+  "environment": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "run_at": "2026-08-27T09:42:40.519079+00:00"
+}

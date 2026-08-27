@@ -13,6 +13,7 @@ import inspect
 import json
 import pathlib
 import tempfile
+from collections import Counter
 
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
@@ -742,6 +743,116 @@ class CommandTests(TestCase):
         payload = json.loads(
             (pathlib.Path(out) / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(payload["counts"]["interactions"], 0)
+
+
+# ═════════════════════════════════════════════════════════════
+# Split assignment sidecar (M2 P2.12)
+# ═════════════════════════════════════════════════════════════
+
+class SplitAssignmentTests(TestCase):
+    """
+    The partition is written out so a consumer can USE it rather than
+    recompute it. A second implementation of the split rule agrees with
+    itself, which is not the same as being right.
+    """
+
+    def build(self, **overrides):
+        rows = sources.synthetic_rows(learners=12, seed=11)
+        return pipeline.build(rows, config(**overrides), sources.SYNTHETIC,
+                              "h")
+
+    def test_every_interaction_is_assigned_exactly_once(self):
+        result = self.build()
+        assignment = list(pipeline.split_assignment(result))
+
+        self.assertEqual(len(assignment), len(result.interactions))
+        row_ids = [row["source_row_id"] for row in assignment]
+        self.assertEqual(len(set(row_ids)), len(row_ids))
+
+    def test_the_assignment_agrees_with_the_buckets_it_came_from(self):
+        result = self.build()
+        counts = Counter(row["split"]
+                         for row in pipeline.split_assignment(result))
+
+        self.assertEqual(counts["train"], len(result.train))
+        self.assertEqual(counts["validation"], len(result.validation))
+        self.assertEqual(counts["test"], len(result.test))
+
+    def test_no_interaction_is_assigned_to_two_buckets(self):
+        result = self.build()
+        seen = {}
+        for row in pipeline.split_assignment(result):
+            self.assertNotIn(row["source_row_id"], seen)
+            seen[row["source_row_id"]] = row["split"]
+
+    def test_the_command_writes_the_sidecar_with_its_declared_columns(self):
+        out = self.outdir()
+        call_command("kt_dataset_build", "--source", "synthetic", "--out", out)
+
+        path = pathlib.Path(out) / "split_assignment.csv"
+        self.assertTrue(path.is_file())
+        with path.open(encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            self.assertEqual(next(reader), list(pipeline.SPLIT_COLUMNS))
+            self.assertTrue(sum(1 for _ in reader) > 0)
+
+    def test_the_sidecar_does_not_change_the_processed_hash(self):
+        """
+        The canonical columns and the processed hash are a published
+        contract. A partition is a property of a build configuration, not of
+        an interaction — putting it on the row would make every corpus ever
+        built from schema v1 hash differently, so identical data would look
+        like different data.
+        """
+        result = self.build()
+        self.assertNotIn("split", CANONICAL_COLUMNS)
+        self.assertEqual(
+            result.processed_hash,
+            pipeline.processed_hash(result.interactions, config()))
+
+    def outdir(self):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(
+            lambda: __import__("shutil").rmtree(directory, ignore_errors=True))
+        return directory
+
+
+class SplitAuditScaleTests(TestCase):
+    """
+    The audit used to rescan all three buckets once per learner, which is
+    1.7 billion comparisons on the full ASSISTments file — the audit, not
+    the model, becomes the reason a benchmark cannot be run.
+    """
+
+    def test_the_audit_agrees_with_a_deliberately_naive_implementation(self):
+        rows = sources.synthetic_rows(learners=25, seed=3)
+        result = pipeline.build(rows, config(), sources.SYNTHETIC, "h")
+
+        fast = pipeline.audit_split_ordinally(
+            result.train, result.validation, result.test)
+
+        learners = sorted({i.learner_id for i in result.interactions})
+        naive = []
+        for learner in learners:
+            picked = [[i for i in bucket if i.learner_id == learner]
+                      for bucket in (result.train, result.validation,
+                                     result.test)]
+            if not picked[1] and not picked[2]:
+                continue
+            naive.append(learner)
+
+        self.assertTrue(fast.is_safe)
+        self.assertEqual(fast.problems, [])
+        self.assertTrue(naive, "the fixture produced nothing to audit")
+
+    def test_the_audit_still_catches_a_learner_whose_split_is_reversed(self):
+        rows = sources.synthetic_rows(learners=6, seed=4)
+        result = pipeline.build(rows, config(), sources.SYNTHETIC, "h")
+
+        reversed_audit = pipeline.audit_split_ordinally(
+            result.test, result.validation, result.train)
+
+        self.assertFalse(reversed_audit.is_safe)
 
 
 # ═════════════════════════════════════════════════════════════

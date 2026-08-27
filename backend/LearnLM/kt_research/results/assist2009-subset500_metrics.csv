@@ -1,0 +1,4 @@
+model,dataset,split_by,seed,preprocessing_version,dataset_fingerprint,auc,accuracy,log_loss,rmse,test_interactions,positive_rate,checkpoint
+BKT,assist2009-subset500,learner_history,20260827,p2.12/v1,80e6271d3565fe01032c6c6c0adfd445f68fba8277b72aea9434ab708b1bb674,0.7069739882404651,0.6451914098972923,0.6505471468973082,0.474556066592465,5355,0.633613,kt_research/checkpoints/BKT_assist2009-subset500.json
+DKT,assist2009-subset500,learner_history,20260827,p2.12/v1,80e6271d3565fe01032c6c6c0adfd445f68fba8277b72aea9434ab708b1bb674,0.7374959929794898,0.7064425770308124,0.5723091820874285,0.4402995121736448,5355,0.633613,kt_research/checkpoints/DKT_assist2009-subset500.pt
+Transformer,assist2009-subset500,learner_history,20260827,p2.12/v1,80e6271d3565fe01032c6c6c0adfd445f68fba8277b72aea9434ab708b1bb674,0.7234204978589667,0.6980392156862745,0.5794086156404582,0.444205086447647,5355,0.633613,kt_research/checkpoints/Transformer_assist2009-subset500.pt

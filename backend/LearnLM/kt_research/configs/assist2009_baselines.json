@@ -1,0 +1,32 @@
+{
+  "dataset": "assist2009",
+  "dataset_directory": "build/kt/assist09",
+  "split_by": "learner_history",
+  "seed": 20260827,
+  "notes": "P2.12 §22D/§22E baselines on the full ASSISTments 2009-2010 skill builder (corrected), concept-required. Per-learner temporal split owned by the corpus build. Hyperparameters are deliberately modest and identical across the two neural models where the architectures allow, so the comparison is between architectures rather than between search budgets — neither has been tuned.",
+  "models": {
+    "BKT": {},
+    "DKT": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 15,
+      "batch_size": 64,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3
+    },
+    "Transformer": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 15,
+      "batch_size": 64,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3,
+      "heads": 4,
+      "layers": 2
+    }
+  }
+}

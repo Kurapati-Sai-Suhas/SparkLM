@@ -76,6 +76,7 @@ class Command(BaseCommand):
         out.mkdir(parents=True, exist_ok=True)
         self._write_csv(out / "interactions.csv", result.interactions)
         self._write_rejections(out / "rejections.csv", result.rejected)
+        self._write_split_assignment(out / "split_assignment.csv", result)
         pipeline.write_manifest(out / "manifest.json", payload)
 
         if options["json"]:
@@ -133,6 +134,21 @@ class Command(BaseCommand):
             writer.writeheader()
             for interaction in interactions:
                 writer.writerow(interaction.as_row())
+
+    def _write_split_assignment(self, path, result):
+        """
+        The partition, so a consumer can use it instead of recomputing it.
+
+        `split_hash` in the manifest covers the same partition, so a consumer
+        that reads this file can confirm it got the build's own split rather
+        than one that merely resembles it.
+        """
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(
+                handle, fieldnames=list(pipeline.SPLIT_COLUMNS))
+            writer.writeheader()
+            for row in pipeline.split_assignment(result):
+                writer.writerow(row)
 
     def _write_rejections(self, path, rejections):
         with path.open("w", encoding="utf-8", newline="") as handle:
@@ -204,7 +220,7 @@ class Command(BaseCommand):
             write("")
 
         write(f"Written to {out}/ (interactions.csv, rejections.csv, "
-              f"manifest.json)")
+              f"split_assignment.csv, manifest.json)")
 
 
 def _wrap(text, width):

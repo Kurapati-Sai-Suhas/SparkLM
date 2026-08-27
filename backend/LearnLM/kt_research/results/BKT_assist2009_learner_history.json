@@ -1,0 +1,103 @@
+{
+  "config": {
+    "model": "BKT",
+    "dataset": "assist2009",
+    "split_by": "learner_history",
+    "fraction": 0.8,
+    "validation_fraction": null,
+    "seed": 20260827,
+    "parameters": {
+      "seed": 20260827
+    },
+    "notes": "P2.12 \u00a722D/\u00a722E baselines on the full ASSISTments 2009-2010 skill builder (corrected), concept-required. Per-learner temporal split owned by the corpus build. Hyperparameters are deliberately modest and identical across the two neural models where the architectures allow, so the comparison is between architectures rather than between search budgets \u2014 neither has been tuned.",
+    "dataset_directory": "build/kt/assist09",
+    "preprocessing_version": "p2.12/v1"
+  },
+  "preprocessing_version": "p2.12/v1",
+  "dataset_fingerprint": "39cfb98e85152887b2b17a85005d5c265eda0d2516734f6b85654e30bdc8f005",
+  "dataset": {
+    "dataset": "assistments-2009-2010-skill-builder",
+    "version": "corrected-one-row-per-student-problem",
+    "interactions": 283105,
+    "learners": 4163,
+    "questions": 17751,
+    "concepts": 112,
+    "correct_rate": 0.658137,
+    "raw_dataset_hash": "1aa296e00b6c88c4d6fad4ca2ae4866484d9fe5484f38f5c8c94dfc49f045e08",
+    "processed_hash": "d0cbd2bf2500f75841361ed4d4c6a734785a75ad69d90d3050691defda31bc9a",
+    "split_hash": "f894bcc691d010d5ac684cfcd41c8e99d2de49b878fa935503086c86d932b055",
+    "split": {
+      "strategy": "learner_history",
+      "boundary": {
+        "source": "kt_dataset build",
+        "split_hash": "f894bcc691d010d5ac684cfcd41c8e99d2de49b878fa935503086c86d932b055"
+      },
+      "train": 196465,
+      "validation": 42386,
+      "test": 44254
+    },
+    "field_availability": {
+      "learner_id": {
+        "status": "available",
+        "reason": "source column `user_id`."
+      },
+      "question_id": {
+        "status": "available",
+        "reason": "source column `problem_id`."
+      },
+      "concept_id": {
+        "status": "available",
+        "reason": "source column `skill_id`. ~16% of raw rows have none; whether those are kept is the build's `require_concept` setting and is recorded in the manifest either way."
+      },
+      "correctness": {
+        "status": "available",
+        "reason": "source column `correct`, validated as a strict 0/1 label \u2014 a partial score is rejected, never rounded."
+      },
+      "timestamp": {
+        "status": "ordinal-only",
+        "reason": "No absolute time column exists in this corpus; `ms_first_response` and `overlap_time` are durations, not points in time. `sequence_position` (from `order_id`) orders each learner's history and nothing here treats it as a clock."
+      },
+      "response_time": {
+        "status": "unavailable",
+        "reason": "Present in the raw file as `ms_first_response`, absent from canonical schema v1, so it does not reach this pipeline. No baseline in this phase consumes it."
+      },
+      "difficulty": {
+        "status": "unavailable",
+        "reason": "Not a source column. Estimating it from corpus-wide success rate would carry test labels into a training feature."
+      }
+    }
+  },
+  "split": {
+    "strategy": "learner_history",
+    "boundary": {
+      "source": "kt_dataset build",
+      "split_hash": "f894bcc691d010d5ac684cfcd41c8e99d2de49b878fa935503086c86d932b055"
+    },
+    "train": 196465,
+    "validation": 42386,
+    "test": 44254
+  },
+  "metrics": {
+    "auc": 0.7085912721493446,
+    "accuracy": 0.6506304514846115,
+    "log_loss": 0.6442076563589797,
+    "rmse": 0.4719097343565403,
+    "test_interactions": 44254,
+    "positive_rate": 0.644823
+  },
+  "validation_metrics": {
+    "auc": 0.6881170484027631,
+    "accuracy": 0.6429245505591469,
+    "log_loss": 0.651114979283946,
+    "rmse": 0.47483352870164003,
+    "test_interactions": 42386,
+    "positive_rate": 0.664205
+  },
+  "training_history": [],
+  "checkpoint": "kt_research/checkpoints/BKT_assist2009.json",
+  "environment": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "run_at": "2026-08-27T09:44:21.914611+00:00"
+}

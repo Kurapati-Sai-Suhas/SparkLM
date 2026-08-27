@@ -1,0 +1,32 @@
+{
+  "dataset": "assist2009-subset500",
+  "dataset_directory": "build/kt/assist09_subset500",
+  "split_by": "learner_history",
+  "seed": 20260827,
+  "notes": "P2.12 §22I pipeline proof: 500 learners sampled whole from the ASSISTments 2009-2010 skill builder (corrected). Small enough to run end to end in minutes. NOT the headline result — see assist2009_baselines.json.",
+  "models": {
+    "BKT": {},
+    "DKT": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 12,
+      "batch_size": 32,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3
+    },
+    "Transformer": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 12,
+      "batch_size": 32,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3,
+      "heads": 4,
+      "layers": 2
+    }
+  }
+}

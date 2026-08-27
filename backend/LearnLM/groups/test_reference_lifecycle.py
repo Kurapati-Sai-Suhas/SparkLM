@@ -1093,3 +1093,82 @@ def test_source_hash_alone_implies_approved(db, question):
     for reference in ReferenceSolution.objects.all():
         if reference.source_hash is not None:
             assert reference.review_state == ReferenceSolution.REVIEW_APPROVED
+
+
+# ═════════════════════════════════════════════════════════════
+# M2 P2.7h-34 — reference provenance
+#
+# Phase 20.5 could not persist four LLM-written reference candidates
+# honestly: the model had no origin, provider, model or prompt_version, so a
+# stored reference written by a language model was indistinguishable from
+# one written by a person. `ReferenceCandidate` refuses an unattributed LLM
+# reference in memory; these fields carry that refusal across persistence.
+# ═════════════════════════════════════════════════════════════
+
+def test_the_three_origins_the_system_must_distinguish_exist():
+    values = dict(ReferenceSolution.ORIGIN_CHOICES)
+    for required in ("human", "llm", "trusted_source"):
+        assert required in values, required
+
+
+def test_origin_defaults_to_unrecorded_not_human(db, question):
+    """
+    A row created without provenance must NOT claim a person wrote it.
+    Defaulting to `human` would manufacture provenance for every legacy row
+    and every future caller that forgot to set it.
+    """
+    reference = ReferenceSolution.objects.create(
+        question=question, language="python", source_code=SOURCE)
+    assert reference.origin == ReferenceSolution.ORIGIN_UNRECORDED
+    assert reference.origin != ReferenceSolution.ORIGIN_HUMAN
+
+
+def test_an_llm_reference_must_name_its_provider_and_prompt(db, question):
+    """The constraint that makes attribution enforceable rather than optional."""
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ReferenceSolution.objects.create(
+            question=question, language="python", source_code=SOURCE,
+            origin=ReferenceSolution.ORIGIN_LLM)
+
+
+@pytest.mark.parametrize("provider,prompt", [
+    ("gemini-2.5-flash", ""),
+    ("", "specification-formatter/v4"),
+])
+def test_partial_llm_attribution_is_refused(db, question, provider, prompt):
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ReferenceSolution.objects.create(
+            question=question, language="python", source_code=SOURCE,
+            origin=ReferenceSolution.ORIGIN_LLM,
+            provider=provider, prompt_version=prompt)
+
+
+def test_a_fully_attributed_llm_reference_is_accepted(db, question):
+    reference = ReferenceSolution.objects.create(
+        question=question, language="python", source_code=SOURCE,
+        origin=ReferenceSolution.ORIGIN_LLM,
+        provider="gemini-2.5-flash",
+        model_name="gemini-2.5-flash",
+        prompt_version="specification-formatter/v4",
+        specification_digest="e" * 64)
+    assert reference.origin == ReferenceSolution.ORIGIN_LLM
+    assert reference.specification_digest == "e" * 64
+
+
+def test_a_human_reference_needs_no_provider(db, question):
+    """The constraint must not make human-authored references harder to file."""
+    reference = ReferenceSolution.objects.create(
+        question=question, language="python", source_code=SOURCE,
+        origin=ReferenceSolution.ORIGIN_HUMAN)
+    assert reference.provider == ""
+
+
+def test_provenance_does_not_disturb_the_approval_lifecycle(db, question):
+    """Adding provenance must not change what approval means."""
+    reference = ReferenceSolution.objects.create(
+        question=question, language="python", source_code=SOURCE,
+        origin=ReferenceSolution.ORIGIN_LLM, provider="gemini-2.5-flash",
+        prompt_version="v4")
+    assert reference.review_state == ReferenceSolution.REVIEW_DRAFT
+    assert reference.is_active is False
+    assert reference.is_canonical is False

@@ -1,5 +1,11 @@
 # P2.7 — Approved remediation plan: q1436 and q3309
 
+> **Hidden-test values withheld (M2 P2.7h-34).** This repository is public and
+> the cases quoted below are the answer key for questions this system grades —
+> q1436 and q3309 are PUBLISHED and adaptive-eligible. The inputs and expected
+> outputs are redacted here; the database holds them. The reasoning is what
+> this record exists for, and it is unchanged.
+
 All three outstanding decisions are signed off. This supersedes the projections
 in [P2_7_CONTRACT_REPAIR_PLANS.md](LearnLM/docs/P2_7_CONTRACT_REPAIR_PLANS.md) —
 q1436 now has **four** steps rather than three, and every digest after its first
@@ -45,16 +51,16 @@ not Example 1 or 3, not the constraints, not the input/output format lines.
 
 ```json
 [
-  {"stdin": "[[\"London\",\"New York\"],[\"New York\",\"Paris\"],[\"Paris\",\"Rome\"]]", "expected_output": "Rome"},
-  {"stdin": "[[\"B\",\"D\"],[\"A\",\"B\"],[\"C\",\"D\"]]",                               "expected_output": "D"},
-  {"stdin": "[[\"A\",\"Z\"]]",                                                           "expected_output": "Z"},
-  {"stdin": "[[\"A\",\"B\"],[\"A\",\"C\"],[\"B\",\"D\"],[\"C\",\"D\"]]",                 "expected_output": "D"}
+  {"stdin": "<WITHHELD>", "expected_output": "<WITHHELD>"},
+  {"stdin": "<WITHHELD>",                               "expected_output": "<WITHHELD>"},
+  {"stdin": "<WITHHELD>",                                                           "expected_output": "<WITHHELD>"},
+  {"stdin": "<WITHHELD>",                 "expected_output": "<WITHHELD>"}
 ]
 ```
 
 ```
 case 2 stdin   [["B","C"],["D","B"],["C","D"]]  ->  [["B","D"],["A","B"],["C","D"]]
-expected_output  "D"  — unchanged, as approved
+expected_output  "<WITHHELD>"  — unchanged, as approved
 case_identity  ca98a35032745542…  ->  991a0528a61ec16f…
 cases 1, 3, 4  byte-identical (derived from the pre-image, not retyped)
 ```
@@ -112,17 +118,17 @@ are untouched.
 
 ```json
 [
-  {"stdin": "hello\nll\n",           "expected_output": "2"},
-  {"stdin": "aaaaa\nbba\n",          "expected_output": "-1"},
-  {"stdin": "abc\na\n",              "expected_output": "0"},
-  {"stdin": "[\"\",\"\"]",           "expected_output": "0"},
-  {"stdin": "mississippi\nissip\n",  "expected_output": "4"}
+  {"stdin": "<WITHHELD>",           "expected_output": "<WITHHELD>"},
+  {"stdin": "<WITHHELD>",          "expected_output": "<WITHHELD>"},
+  {"stdin": "<WITHHELD>",              "expected_output": "<WITHHELD>"},
+  {"stdin": "<WITHHELD>",           "expected_output": "<WITHHELD>"},
+  {"stdin": "<WITHHELD>",  "expected_output": "<WITHHELD>"}
 ]
 ```
 
 ```
-case 4 stdin   "\n\n"  ->  "[\"\",\"\"]"
-expected_output  "0"  — unchanged, as approved
+case 4 stdin   "<WITHHELD>"  ->  "[\"\",\"\"]"
+expected_output  "<WITHHELD>"  — unchanged, as approved
 case_identity  e3b0c44298fc1c14…  ->  439083f38956ba51…
 cases 1, 2, 3, 5  byte-identical
 ```

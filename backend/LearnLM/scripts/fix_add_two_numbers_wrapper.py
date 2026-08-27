@@ -106,12 +106,15 @@ if __name__ == '__main__':
         "python": python_wrapper
     }
     
-    # Also fix test cases to match the wrapper expectations
+    # Also fix test cases to match the wrapper expectations.
+    # VALUES WITHHELD (M2 P2.7h-34): this repository is public and these
+    # are hidden-test cases. The script is kept as a record of the repair;
+    # the real values live only in the database.
     # 342 (2 4 3) + 465 (5 6 4) = 807 (7 0 8)
     q.hidden_test_cases = [
-        {"stdin": "2 4 3\\n5 6 4", "expected_output": "7 0 8"},
-        {"stdin": "0\\n0", "expected_output": "0"},
-        {"stdin": "9 9 9 9 9 9 9\\n9 9 9 9", "expected_output": "8 9 9 9 0 0 0 1"}
+        {"stdin": "<WITHHELD>", "expected_output": "<WITHHELD>"},
+        {"stdin": "<WITHHELD>", "expected_output": "<WITHHELD>"},
+        {"stdin": "<WITHHELD>", "expected_output": "<WITHHELD>"}
     ]
     
     q.save()

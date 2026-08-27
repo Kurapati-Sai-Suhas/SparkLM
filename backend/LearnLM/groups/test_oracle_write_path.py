@@ -143,7 +143,8 @@ def test_b_reference_create_writes_through_the_named_alias(question, operator,
 
     monkeypatch.setattr(ReferenceSolution.objects, "using", recording)
 
-    call_command("reference_create", "--question", str(question.pk),
+    call_command("reference_create",
+                     "--origin", "human", "--question", str(question.pk),
                  "--language", "python", "--source-file", source_file(tmp_path),
                  "--operator", operator.username, "--confirm",
                  "--alias", "default")
@@ -332,7 +333,8 @@ def test_a_production_target_triggers_the_role_gate(question, operator,
                        "server_version": "17.10", "is_production": True})
 
     with pytest.raises(CommandError, match="not an authorized role"):
-        call_command("reference_create", "--question", str(question.pk),
+        call_command("reference_create",
+                     "--origin", "human", "--question", str(question.pk),
                      "--language", "python",
                      "--source-file", source_file(tmp_path),
                      "--operator", operator.username, "--confirm")
@@ -367,7 +369,8 @@ def test_the_pipeline_threads_the_alias_to_the_writer():
 @pytest.mark.django_db
 def test_g_an_unconfigured_alias_fails_loudly(question, operator, tmp_path):
     with pytest.raises(Exception) as raised:
-        call_command("reference_create", "--question", str(question.pk),
+        call_command("reference_create",
+                     "--origin", "human", "--question", str(question.pk),
                      "--language", "python",
                      "--source-file", source_file(tmp_path),
                      "--operator", operator.username, "--confirm",

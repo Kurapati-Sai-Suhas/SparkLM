@@ -1918,6 +1918,20 @@ class RemediationAction(models.Model):
     #: Distinct from every repair class because it changes no grading truth at
     #: all. A reader of the audit trail needs "this question became publishable"
     #: to look nothing like "this question's answers changed".
+    #: Trust was WITHDRAWN from a question (M2 P2.7h-35).
+    #:
+    #: Promotion records itself by stamping the approval it rests on, so it
+    #: needs no action row. Demotion has nothing to stamp — it invalidates a
+    #: claim rather than completing one — and without a row the trail would
+    #: show a question that was ORACLE_VERIFIED and then simply was not, with
+    #: no record of who withdrew it or why.
+    #:
+    #: NOT `STATUS_TRANSITION`, which is about servability. A question can be
+    #: withdrawn from publication and keep its verified answers, or lose its
+    #: verified answers while still published; conflating them would make
+    #: "this question stopped being trusted" unfindable.
+    CLASS_TRUST_DEMOTION = "TRUST_DEMOTION"
+
     CLASS_STATUS_TRANSITION = "STATUS_TRANSITION"
 
     CLASS_MANUAL_REVIEW = "MANUAL_REVIEW"
@@ -1929,7 +1943,7 @@ class RemediationAction(models.Model):
         CLASS_EXPECTED_OUTPUT_REPAIR, CLASS_INPUT_REPAIR,
         CLASS_SUITE_EXPANSION, CLASS_STATEMENT_GENERATION,
         CLASS_SIGNATURE_DECLARATION, CLASS_CONTRACT_DECLARATION,
-        CLASS_STATUS_TRANSITION,
+        CLASS_TRUST_DEMOTION, CLASS_STATUS_TRANSITION,
         CLASS_MANUAL_REVIEW, CLASS_COMPLETE_REBUILD, CLASS_ROLLBACK)]
 
     batch = models.ForeignKey(RemediationBatch, on_delete=models.PROTECT,

@@ -491,6 +491,21 @@ APPROVAL_ROLE_GRANTS = (
 #: table-level UPDATE on groups_questionapproval as excess privilege). That
 #: contract could not be satisfied by any role: grant it and the forbidden
 #: check refuses, withhold it and the write fails mid-transaction.
+#: Demotion writes ONE column and stamps nothing (M2 P2.7h-35).
+#:
+#: Narrower than PROMOTION_PROBE on purpose: promotion also records
+#: `promoted_at`/`promoted_by` on the approval, because a promotion is
+#: something that HAPPENED to that approval. A demotion is not an event on the
+#: approval — the approval remains exactly what it was, a record that a person
+#: once approved a specific artifact. Withdrawing trust must not rewrite it.
+DEMOTION_PROBE = (("groups_question", "trust_state", "UPDATE"),)
+
+#: The same role, and therefore the same must-not-touch set as promotion.
+#: Reused rather than restated: two lists that agree today are two lists that
+#: disagree after the next edit, and the one that drifts is the one guarding
+#: a live question.
+ALLOWED_DEMOTION_ROLES = ALLOWED_PROMOTION_ROLES
+
 PROMOTION_PROBE = (
     ("groups_question", "trust_state", "UPDATE"),
     ("groups_questionapproval", "promoted_at", "UPDATE"),

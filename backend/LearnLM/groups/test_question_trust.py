@@ -1140,10 +1140,16 @@ class WriteBoundaryTests(TestCase):
         self.assertNotIn("trust_state", assigned)
         self.assertEqual(called, set())
 
-    def test_promote_is_the_only_trust_state_writer_in_the_codebase(self):
+    def test_only_the_two_sanctioned_commands_write_trust_state(self):
         """
-        The invariant the whole milestone rests on. If a second writer ever
+        The invariant the whole milestone rests on. If a THIRD writer ever
         appears, this fails and names it.
+
+        `question_demote` joined `question_promote` in M2 P2.7h-35: trust had
+        to become revocable, because a question whose evidence stopped
+        covering its suite otherwise kept claiming it for ever. Demotion is
+        safe as a second writer only because it can never assign the verified
+        value — pinned in test_promotion_write_path.py.
         """
         root = pathlib.Path(inspect.getfile(question_artifact)).parent
         writers = []
@@ -1158,4 +1164,6 @@ class WriteBoundaryTests(TestCase):
                 continue
             if "trust_state" in assigned:
                 writers.append(path.name)
-        self.assertEqual(sorted(writers), ["question_promote.py"], writers)
+        self.assertEqual(sorted(writers),
+                         ["question_demote.py", "question_promote.py"],
+                         writers)

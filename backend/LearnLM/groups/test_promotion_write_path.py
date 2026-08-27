@@ -736,16 +736,23 @@ def test_the_preflight_reports_a_refused_role_instead_of_hiding_the_plan(
     assert "learnlm_census_ro" in out
 
 
-def test_promotion_is_the_only_writer_of_trust_state():
-    """
-    The property the whole milestone rests on. Any other module assigning
-    `trust_state` would be a second, unreviewed promotion path.
-    """
+#: The ONLY two modules permitted to assign `trust_state`.
+#:
+#: `question_demote` joined `question_promote` in M2 P2.7h-35. Until then
+#: ORACLE_VERIFIED was a one-way door, which meant a question whose evidence
+#: stopped covering its suite kept claiming trust and could never re-earn it.
+#: Adding a second writer weakens nothing PROVIDED it can only ever remove the
+#: claim — which the companion test below pins.
+TRUST_WRITERS = {"question_promote.py", "question_demote.py"}
+
+
+def trust_state_writers():
+    """(filename, line) for every non-test assignment to `trust_state`."""
     import pathlib
     root = pathlib.Path(promote_cmd.__file__).resolve().parents[1]
     writers = []
     for path in root.rglob("*.py"):
-        if "test" in path.name or path.name == "question_promote.py":
+        if "test" in path.name:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -753,8 +760,45 @@ def test_promotion_is_the_only_writer_of_trust_state():
                 for target in node.targets:
                     if (isinstance(target, ast.Attribute)
                             and target.attr == "trust_state"):
-                        writers.append(f"{path.name}:{node.lineno}")
-    assert not writers, writers
+                        writers.append((path.name, node.lineno))
+    return writers
+
+
+def test_only_the_two_sanctioned_commands_write_trust_state():
+    """
+    The property the whole milestone rests on. Any OTHER module assigning
+    `trust_state` would be an unreviewed path into or out of trust.
+    """
+    unexpected = [f"{name}:{line}" for name, line in trust_state_writers()
+                  if name not in TRUST_WRITERS]
+    assert not unexpected, unexpected
+
+
+def test_demotion_can_only_ever_remove_the_claim():
+    """
+    Why a second writer is safe. `question_demote` must never assign the
+    verified value — if it could, it would be a promotion path that skips
+    the oracle, the approval and the artifact digest.
+    """
+    import pathlib
+    from groups.models import Question
+
+    source = (pathlib.Path(promote_cmd.__file__).resolve().parent
+              / "question_demote.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    assigned = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (isinstance(target, ast.Attribute)
+                        and target.attr == "trust_state"):
+                    assigned.append(ast.unparse(node.value))
+    assert assigned == ["TO_STATE"], assigned
+
+    from groups.management.commands import question_demote
+    assert question_demote.TO_STATE == Question.TRUST_UNVERIFIED
+    assert question_demote.TO_STATE != Question.TRUST_ORACLE_VERIFIED
 
 
 def test_current_for_is_read_on_the_promoting_connection():

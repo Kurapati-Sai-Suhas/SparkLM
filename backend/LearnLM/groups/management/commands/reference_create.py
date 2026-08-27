@@ -69,6 +69,24 @@ class Command(BaseCommand):
             "--source-file", required=True, metavar="PATH",
             help="File containing the reference solution. There is no inline "
                  "--source: the answer key must not enter shell history.")
+        parser.add_argument(
+            "--origin", required=True,
+            choices=[ReferenceSolution.ORIGIN_HUMAN,
+                     ReferenceSolution.ORIGIN_LLM,
+                     ReferenceSolution.ORIGIN_TRUSTED_SOURCE],
+            help="Who wrote this. REQUIRED and not defaulted: an unattributed "
+                 "reference is one nobody can assess later, and `unrecorded` "
+                 "exists only for rows that predate provenance -- it is not "
+                 "an option here.")
+        parser.add_argument("--provider", default="",
+                            help="Required for --origin llm.")
+        parser.add_argument("--model-name", default="",
+                            help="The exact model identifier.")
+        parser.add_argument("--prompt-version", default="",
+                            help="Required for --origin llm.")
+        parser.add_argument(
+            "--specification-digest", default="",
+            help="The operator-verified specification this was written from.")
         parser.add_argument("--operator", required=True, metavar="USERNAME")
         parser.add_argument(
             "--confirm", action="store_true",
@@ -107,13 +125,33 @@ class Command(BaseCommand):
         self._refuse_duplicate(question, language, alias)
         self._warn_other_active(question, language, alias)
 
-        # Lifecycle columns are omitted, not set: the model defaults give
-        # review_state=DRAFT, is_active=False, and NULL provenance. Passing
-        # them explicitly would be this command asserting a lifecycle state it
-        # has no standing to assert.
+        # LIFECYCLE columns are omitted, not set: the model defaults give
+        # review_state=DRAFT and is_active=False. Passing them explicitly
+        # would be this command asserting a lifecycle state it has no
+        # standing to assert.
+        #
+        # PROVENANCE columns are the opposite — they must be set here or
+        # never. Nothing downstream can work out who wrote a reference after
+        # the fact, and a row that reaches the database unattributed stays
+        # unattributed (M2 P2.7h-35).
+        origin = options["origin"]
+        provider = (options.get("provider") or "").strip()
+        prompt_version = (options.get("prompt_version") or "").strip()
+        if origin == ReferenceSolution.ORIGIN_LLM and not (
+                provider and prompt_version):
+            raise ops.GateFailure(
+                "--origin llm requires --provider and --prompt-version; an "
+                "LLM reference that does not name the model that wrote it is "
+                "indistinguishable from a human's once stored")
+
         with transaction.atomic(using=alias):
             reference = ReferenceSolution.objects.using(alias).create(
-                question_id=question.pk, language=language, source_code=source)
+                question_id=question.pk, language=language, source_code=source,
+                origin=origin, provider=provider,
+                model_name=(options.get("model_name") or "").strip(),
+                prompt_version=prompt_version,
+                specification_digest=(
+                    options.get("specification_digest") or "").strip())
 
         ops.render_identity(self, identity, operator)
         self.stdout.write("")
@@ -253,6 +291,13 @@ class Command(BaseCommand):
         write(f"  source bytes    {len(encoded)}")
         write(f"  source sha256   {digest[:16]}…  (content digest, NOT "
               f"approval provenance)")
+        write(f"  origin          {reference.origin}"
+              + (f"  provider={reference.provider}"
+                 f"  model={reference.model_name}"
+                 f"  prompt={reference.prompt_version}"
+                 if reference.origin == ReferenceSolution.ORIGIN_LLM
+                 else ""))
+        write(f"  spec digest     {reference.specification_digest or '(none)'}")
         write(f"  review_state    {reference.review_state}")
         write(f"  is_active       {reference.is_active}")
         write(f"  authored by     {operator.username}")

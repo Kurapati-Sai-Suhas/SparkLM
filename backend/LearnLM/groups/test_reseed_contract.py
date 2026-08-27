@@ -958,16 +958,34 @@ def test_0049_is_required_by_the_deployed_choices():
     assert "CONTRACT_SET" not in predecessor
 
 
-def test_0049_choices_match_the_models_exactly():
+def test_0049_introduced_exactly_its_own_two_values():
     """
-    Generated migrations drift when a model is edited and no migration is
-    made. If these disagree, `makemigrations --check` would want another one.
+    0049's contribution, pinned to 0049.
+
+    This used to assert that EVERY current model choice appears in 0049,
+    which held only while 0049 was the latest migration. 0051 later added
+    TRUST_DEMOTION, and the assertion then failed for a correct reason —
+    a later migration doing its job. Drift between models and the migration
+    graph is what `test_no_further_migration_is_outstanding` checks, and it
+    checks it properly, via the autodetector.
     """
     source = MIGRATION_0049.read_text(encoding="utf-8")
-    for value, _label in RemediationAction.CLASS_CHOICES:
-        assert f"'{value}'" in source, value
-    for value, _label in ReseedLedger.STAGE_CHOICES:
-        assert f"'{value}'" in source, value
+    assert "'CONTRACT_DECLARATION'" in source
+    assert "'CONTRACT_SET'" in source
+
+    predecessor = (MIGRATION_0049.parent
+                   / "0048_reseed_action_classes_and_ledger.py"
+                   ).read_text(encoding="utf-8")
+    for value in ("CONTRACT_DECLARATION", "CONTRACT_SET"):
+        assert value not in predecessor, value
+
+    # every value 0049 lists must still be a real model choice — the
+    # direction that stays true no matter how many migrations follow
+    known = {v for v, _ in RemediationAction.CLASS_CHOICES}
+    known |= {v for v, _ in ReseedLedger.STAGE_CHOICES}
+    import re
+    for quoted in set(re.findall(r"'([A-Z_]{4,})'", source)):
+        assert quoted in known, quoted
 
 
 def test_no_further_migration_is_outstanding():

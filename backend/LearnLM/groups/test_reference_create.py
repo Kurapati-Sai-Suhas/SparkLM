@@ -55,6 +55,11 @@ class ReferenceCreateTestCase(TestCase):
             "language": "python",
             "source_file": self.source_file(),
             "operator": self.operator.username,
+            # Attribution is REQUIRED by the command (M2 P2.7h-35). These
+            # fixtures are hand-written test sources, so `human` is the
+            # honest value; provenance itself is covered in
+            # test_reference_lifecycle.py.
+            "origin": "human",
         }
         options.update(overrides)
         buffer = StringIO()
@@ -62,7 +67,8 @@ class ReferenceCreateTestCase(TestCase):
                 "--question", options["question"],
                 "--language", options["language"],
                 "--source-file", options["source_file"],
-                "--operator", options["operator"]]
+                "--operator", options["operator"],
+                "--origin", options["origin"]]
         if overrides.get("confirm", True):
             args.append("--confirm")
         call_command(*args, stdout=buffer)

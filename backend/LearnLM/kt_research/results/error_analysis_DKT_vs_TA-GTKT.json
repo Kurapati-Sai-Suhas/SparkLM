@@ -1,0 +1,221 @@
+{
+  "reference": "DKT",
+  "candidate": "TA-GTKT",
+  "scored_interactions": 44254,
+  "agreement": {
+    "both_right": 27447,
+    "both_wrong": 7609,
+    "reference_only": 4632,
+    "candidate_only": 4566,
+    "agree_share": 0.79215,
+    "net_candidate": -66
+  },
+  "strata": {
+    "history_length": [
+      {
+        "stratum": "2-5",
+        "interactions": 374,
+        "both_right": 226,
+        "both_wrong": 71,
+        "reference_only": 24,
+        "candidate_only": 53,
+        "net_candidate": 29,
+        "net_share": 0.07754,
+        "disagreement_share": 0.20588
+      },
+      {
+        "stratum": "6-20",
+        "interactions": 3555,
+        "both_right": 2420,
+        "both_wrong": 497,
+        "reference_only": 356,
+        "candidate_only": 282,
+        "net_candidate": -74,
+        "net_share": -0.02082,
+        "disagreement_share": 0.17947
+      },
+      {
+        "stratum": "21-50",
+        "interactions": 4937,
+        "both_right": 2983,
+        "both_wrong": 911,
+        "reference_only": 537,
+        "candidate_only": 506,
+        "net_candidate": -31,
+        "net_share": -0.00628,
+        "disagreement_share": 0.21126
+      },
+      {
+        "stratum": "50+",
+        "interactions": 35388,
+        "both_right": 21818,
+        "both_wrong": 6130,
+        "reference_only": 3715,
+        "candidate_only": 3725,
+        "net_candidate": 10,
+        "net_share": 0.00028,
+        "disagreement_share": 0.21024
+      }
+    ],
+    "concept_repetitions": [
+      {
+        "stratum": "concept unseen",
+        "interactions": 3786,
+        "both_right": 2082,
+        "both_wrong": 743,
+        "reference_only": 445,
+        "candidate_only": 516,
+        "net_candidate": 71,
+        "net_share": 0.01875,
+        "disagreement_share": 0.25383
+      },
+      {
+        "stratum": "seen 1-2",
+        "interactions": 5711,
+        "both_right": 3541,
+        "both_wrong": 1041,
+        "reference_only": 558,
+        "candidate_only": 571,
+        "net_candidate": 13,
+        "net_share": 0.00228,
+        "disagreement_share": 0.19769
+      },
+      {
+        "stratum": "seen 3-9",
+        "interactions": 15466,
+        "both_right": 10003,
+        "both_wrong": 2586,
+        "reference_only": 1497,
+        "candidate_only": 1380,
+        "net_candidate": -117,
+        "net_share": -0.00756,
+        "disagreement_share": 0.18602
+      },
+      {
+        "stratum": "seen 10+",
+        "interactions": 19291,
+        "both_right": 11821,
+        "both_wrong": 3239,
+        "reference_only": 2132,
+        "candidate_only": 2099,
+        "net_candidate": -33,
+        "net_share": -0.00171,
+        "disagreement_share": 0.21933
+      }
+    ],
+    "previous_duration": [
+      {
+        "stratum": "under 5s",
+        "interactions": 5092,
+        "both_right": 3314,
+        "both_wrong": 674,
+        "reference_only": 543,
+        "candidate_only": 561,
+        "net_candidate": 18,
+        "net_share": 0.00353,
+        "disagreement_share": 0.21681
+      },
+      {
+        "stratum": "5-20s",
+        "interactions": 16526,
+        "both_right": 10428,
+        "both_wrong": 2830,
+        "reference_only": 1620,
+        "candidate_only": 1648,
+        "net_candidate": 28,
+        "net_share": 0.00169,
+        "disagreement_share": 0.19775
+      },
+      {
+        "stratum": "20-60s",
+        "interactions": 13968,
+        "both_right": 8642,
+        "both_wrong": 2488,
+        "reference_only": 1433,
+        "candidate_only": 1405,
+        "net_candidate": -28,
+        "net_share": -0.002,
+        "disagreement_share": 0.20318
+      },
+      {
+        "stratum": "1-10min",
+        "interactions": 8481,
+        "both_right": 4951,
+        "both_wrong": 1591,
+        "reference_only": 1012,
+        "candidate_only": 927,
+        "net_candidate": -85,
+        "net_share": -0.01002,
+        "disagreement_share": 0.22863
+      },
+      {
+        "stratum": "over 10min",
+        "interactions": 186,
+        "both_right": 112,
+        "both_wrong": 25,
+        "reference_only": 24,
+        "candidate_only": 25,
+        "net_candidate": 1,
+        "net_share": 0.00538,
+        "disagreement_share": 0.26344
+      },
+      {
+        "stratum": "unknown",
+        "interactions": 1,
+        "both_right": 0,
+        "both_wrong": 1,
+        "reference_only": 0,
+        "candidate_only": 0,
+        "net_candidate": 0,
+        "net_share": 0.0,
+        "disagreement_share": 0.0
+      }
+    ],
+    "question_difficulty": [
+      {
+        "stratum": "hard (<40% in train)",
+        "interactions": 6865,
+        "both_right": 2888,
+        "both_wrong": 1185,
+        "reference_only": 1316,
+        "candidate_only": 1476,
+        "net_candidate": 160,
+        "net_share": 0.02331,
+        "disagreement_share": 0.4067
+      },
+      {
+        "stratum": "medium (40-70%)",
+        "interactions": 17910,
+        "both_right": 10441,
+        "both_wrong": 3510,
+        "reference_only": 2130,
+        "candidate_only": 1829,
+        "net_candidate": -301,
+        "net_share": -0.01681,
+        "disagreement_share": 0.22105
+      },
+      {
+        "stratum": "easy (>70%)",
+        "interactions": 18382,
+        "both_right": 13510,
+        "both_wrong": 2730,
+        "reference_only": 1015,
+        "candidate_only": 1127,
+        "net_candidate": 112,
+        "net_share": 0.00609,
+        "disagreement_share": 0.11653
+      },
+      {
+        "stratum": "unknown",
+        "interactions": 1097,
+        "both_right": 608,
+        "both_wrong": 184,
+        "reference_only": 171,
+        "candidate_only": 134,
+        "net_candidate": -37,
+        "net_share": -0.03373,
+        "disagreement_share": 0.27803
+      }
+    ]
+  }
+}

@@ -74,6 +74,14 @@ class ExperimentConfig:
     notes: str = ""
     dataset_directory: str = ""
     preprocessing_version: str = PREPROCESSING_VERSION
+    #: Distinguishes artifacts from runs that differ only by seed. Empty by
+    #: default so P2.12's checkpoint and result filenames are unchanged.
+    tag: str = ""
+
+    @property
+    def slug(self):
+        return (f"{self.model}_{self.dataset}"
+                + (f"_{self.tag}" if self.tag else ""))
 
 
 def dataset_fingerprint(interactions):
@@ -126,7 +134,13 @@ def build_tasks(context_rows, scored_rows, learner_key="learner_id",
 
 
 def score(model, tasks):
-    """(labels, scores) — one path, for every model and every bucket."""
+    """
+    (labels, scores) — one path, for every model and every bucket.
+
+    One sequence at a time, deliberately: see the note in `neural` on why
+    batching this was measured, found to be worth 1.2x, and rejected for
+    moving the numbers in the seventh decimal.
+    """
     labels, scores = [], []
     for sequence, indices in tasks:
         predictions = model.predict_sequence(sequence)
@@ -203,7 +217,7 @@ def run(config, interactions, *, save=True, partition=None,
         CHECKPOINTS.mkdir(parents=True, exist_ok=True)
         suffix = getattr(model, "checkpoint_suffix", ".pt")
         checkpoint_path = portable(model.save(
-            CHECKPOINTS / f"{config.model}_{config.dataset}{suffix}"))
+            CHECKPOINTS / f"{config.slug}{suffix}"))
 
     record = {
         "config": asdict(config),
@@ -214,6 +228,14 @@ def run(config, interactions, *, save=True, partition=None,
         "metrics": test_metrics,
         "validation_metrics": validation_metrics,
         "training_history": getattr(model, "history", []),
+        # What this rung switched on, what it cost, and how long it took —
+        # §23E asks for the last two, and the first is what makes a row in
+        # the ablation table mean anything.
+        "components": getattr(model, "components", {}),
+        "parameters": getattr(model, "parameter_count", 0),
+        "training_seconds": getattr(model, "training_seconds", None),
+        "mean_gate": (model.mean_gate(list(train_sequences.values()))
+                      if hasattr(model, "mean_gate") else None),
         "checkpoint": checkpoint_path,
         "environment": {"python": sys.version.split()[0],
                         "platform": platform.platform()},
@@ -221,10 +243,74 @@ def run(config, interactions, *, save=True, partition=None,
     }
     if save:
         RESULTS.mkdir(exist_ok=True)
-        name = f"{config.model}_{config.dataset}_{config.split_by}.json"
-        (RESULTS / name).write_text(
+        (RESULTS / f"{config.slug}_{config.split_by}.json").write_text(
             json.dumps(record, indent=2, default=str) + "\n", encoding="utf-8")
     return record
+
+
+def aggregate(records):
+    """
+    Mean and sample standard deviation per model across seeds (§23F).
+
+    SAMPLE standard deviation (n-1). With three seeds the population form
+    understates the spread by about 18%, and understating the spread is
+    exactly how a difference smaller than the noise gets reported as a
+    result.
+    """
+    import statistics
+    from collections import defaultdict
+
+    grouped = defaultdict(list)
+    for record in records:
+        grouped[record["config"]["model"]].append(record)
+
+    summary = {}
+    for model, runs in grouped.items():
+        entry = {"seeds": sorted(r["config"]["seed"] for r in runs),
+                 "runs": len(runs),
+                 "parameters": runs[0]["parameters"],
+                 "components": runs[0]["components"]}
+        for metric in ("auc", "accuracy", "log_loss", "rmse"):
+            values = [r["metrics"][metric] for r in runs]
+            entry[metric] = {
+                "mean": statistics.fmean(values),
+                "std": (statistics.stdev(values) if len(values) > 1 else 0.0),
+                "values": values,
+            }
+        times = [r["training_seconds"] for r in runs
+                 if r.get("training_seconds")]
+        entry["training_seconds_mean"] = (statistics.fmean(times)
+                                          if times else None)
+        # The MINIMUM is the honest estimate of what this rung costs. Wall
+        # clock on a shared machine measures whatever else was running, and
+        # a run that happened to overlap something else can triple. The
+        # fastest run is the one least contaminated by contention; the mean
+        # is kept beside it so a large gap is visible rather than smoothed.
+        entry["training_seconds_min"] = min(times) if times else None
+        entry["training_seconds_all"] = times
+        gates = [r["mean_gate"] for r in runs if r.get("mean_gate") is not None]
+        entry["mean_gate"] = statistics.fmean(gates) if gates else None
+        summary[model] = entry
+    return summary
+
+
+def ablation_table(summary, order=None):
+    """The §23E/§23F table. Only models that actually ran appear."""
+    names = [n for n in (order or sorted(summary)) if n in summary]
+    lines = ["| Model | AUC | Accuracy | Log Loss | Params | Train (s) |",
+             "| --- | --- | --- | --- | --- | --- |"]
+    for name in names:
+        entry = summary[name]
+        fastest = entry.get("training_seconds_min")
+        time_text = "n/a" if fastest is None else f"{fastest:,.0f}"
+        lines.append(
+            f"| {name} "
+            f"| {entry['auc']['mean']:.4f} ± {entry['auc']['std']:.4f} "
+            f"| {entry['accuracy']['mean']:.4f} ± {entry['accuracy']['std']:.4f} "
+            f"| {entry['log_loss']['mean']:.4f} ± {entry['log_loss']['std']:.4f} "
+            f"| {entry['parameters']:,} "
+            f"| {time_text} |")
+    return "\n".join(lines)
 
 
 def comparison_table(records):

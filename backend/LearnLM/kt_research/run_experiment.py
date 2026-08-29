@@ -37,7 +37,8 @@ import json
 import pathlib
 import sys
 
-from kt_research import datasets, experiment, models, splits, subsample
+from kt_research import (datasets, error_analysis, experiment, models, splits,
+                         subsample)
 
 
 def load_config(path):
@@ -167,6 +168,241 @@ def command_evaluate(arguments):
     return _report(records, payload, prefix="evaluate_")
 
 
+def command_ablate(arguments):
+    """
+    Every rung, every seed (§23E, §23F).
+
+    Runs are independent and each is recorded on its own, so a crashed or
+    interrupted sweep leaves behind every run that did finish rather than
+    nothing.
+    """
+    payload = load_config(arguments.config)
+    loaded = load_corpus(payload)
+    description = loaded.describe()
+    splits.assert_no_leakage(loaded.partition)
+
+    seeds = payload.get("seeds") or [payload["seed"]]
+    order = list(payload["models"])
+
+    print(f"corpus   {description['dataset']}  {description['interactions']:,} "
+          f"interactions, {description['learners']:,} learners")
+    print(f"hashes   processed={description['processed_hash'][:16]} "
+          f"split={description['split_hash'][:16]}")
+    print(f"leakage  PASS")
+    print(f"rungs    {order}")
+    print(f"seeds    {seeds}\n", flush=True)
+
+    records = []
+    for name in order:
+        if arguments.model and name != arguments.model:
+            continue
+        for seed in seeds:
+            parameters = dict(payload["models"][name])
+            parameters["seed"] = seed
+            config = experiment.ExperimentConfig(
+                model=name, dataset=payload["dataset"],
+                split_by=payload["split_by"], seed=seed,
+                parameters=parameters,
+                dataset_directory=payload["dataset_directory"],
+                notes=payload.get("notes", ""), tag=f"seed{seed}")
+
+            existing = (experiment.RESULTS
+                        / f"{config.slug}_{config.split_by}.json")
+            if existing.is_file() and not arguments.force:
+                print(f"{name} seed {seed}: already recorded — reused")
+                records.append(json.loads(
+                    existing.read_text(encoding="utf-8")))
+                continue
+
+            print(f"{name} seed {seed} ...", flush=True)
+            record = experiment.run(config, loaded.rows,
+                                    partition=loaded.partition,
+                                    dataset_description=description)
+            metrics = record["metrics"]
+            print(f"  auc {metrics['auc']:.4f}  acc {metrics['accuracy']:.4f}  "
+                  f"log loss {metrics['log_loss']:.4f}  "
+                  f"params {record['parameters']:,}  "
+                  f"{record['training_seconds']:,.0f}s"
+                  + (f"  gate {record['mean_gate']:.3f}"
+                     if record.get("mean_gate") is not None else ""),
+                  flush=True)
+            records.append(record)
+
+    if not records:
+        raise SystemExit("nothing ran")
+
+    summary = experiment.aggregate(records)
+    print("\n" + experiment.ablation_table(summary, order=order))
+
+    path = experiment.RESULTS / f"ablation_{payload['dataset']}.json"
+    path.write_text(json.dumps(summary, indent=2, default=str) + "\n",
+                    encoding="utf-8")
+    csv_path = experiment.write_metrics_csv(
+        experiment.RESULTS / f"ablation_{payload['dataset']}_runs.csv", records)
+    print(f"\nsummary written to {experiment.portable(path)}")
+    print(f"per-run metrics written to {experiment.portable(csv_path)}")
+    return 0
+
+
+def command_analyse(arguments):
+    """
+    Where two finished checkpoints disagree (§23G).
+
+    Trains nothing and tunes nothing. Both models are loaded from disk and
+    scored on the same held-out rows.
+    """
+    payload = load_config(arguments.config)
+    loaded = load_corpus(payload)
+    splits.assert_no_leakage(loaded.partition)
+
+    validation_rows = list(loaded.partition.validation)
+    tasks = experiment.build_tasks(
+        list(loaded.partition.train) + validation_rows
+        + list(loaded.partition.test), loaded.partition.test)
+
+    def load(name):
+        parameters = dict(payload["models"].get(name, {}))
+        parameters["seed"] = arguments.seed or payload["seed"]
+        model = models.build(name, **parameters)
+        suffix = getattr(model, "checkpoint_suffix", ".pt")
+
+        # Ablation rungs are tagged by seed; models carried over from an
+        # earlier phase are not. Try the tagged name, then the plain one,
+        # rather than requiring the caller to know which is which.
+        candidates = []
+        if arguments.seed:
+            candidates.append(
+                f"{name}_{payload['dataset']}_seed{arguments.seed}{suffix}")
+        candidates.append(f"{name}_{payload['dataset']}{suffix}")
+
+        for candidate in candidates:
+            path = experiment.CHECKPOINTS / candidate
+            if path.is_file():
+                model.load(path)
+                print(f"loaded {name:16} {experiment.portable(path)}")
+                return model
+
+        raise SystemExit(
+            f"no checkpoint for {name}. Looked for: "
+            + ", ".join(candidates) + ". Train it first.")
+
+    reference = load(arguments.reference)
+    candidate = load(arguments.candidate)
+
+    print("scoring ...", flush=True)
+    reference_scores = [reference.predict_sequence(s) for s, _i in tasks]
+    candidate_scores = [candidate.predict_sequence(s) for s, _i in tasks]
+
+    records = error_analysis.describe_rows(
+        tasks, reference_scores, candidate_scores, loaded.partition.train)
+    summary = error_analysis.summarise(records, arguments.reference,
+                                       arguments.candidate)
+    print()
+    print(error_analysis.render(summary))
+
+    path = (experiment.RESULTS
+            / f"error_analysis_{arguments.reference}_vs_"
+              f"{arguments.candidate}.json".replace("+", ""))
+    path.write_text(json.dumps(summary, indent=2, default=str) + "\n",
+                    encoding="utf-8")
+    print(f"written to {experiment.portable(path)}")
+    return 0
+
+
+def command_export(arguments):
+    """
+    Write the offline prediction export the application reads (M2 P2.14 §24E).
+
+    This is the whole of the research/production boundary. The application
+    never imports this package and never loads a checkpoint — the web tier
+    has no tensor framework by design — so a finished model reaches it as a
+    file, or not at all.
+
+    The export is keyed by the LEARNER IDS OF THE TRAINING CORPUS, which are
+    ASSISTments learners. That is not a limitation to work around: this model
+    has never seen a SparkLM learner, so it has nothing to say about one, and
+    an export that pretended otherwise would be inventing the number the
+    interface exists to report honestly.
+    """
+    payload = load_config(arguments.config)
+    loaded = load_corpus(payload)
+    splits.assert_no_leakage(loaded.partition)
+
+    parameters = dict(payload["models"].get(arguments.model, {}))
+    parameters["seed"] = arguments.seed or payload["seed"]
+    model = models.build(arguments.model, **parameters)
+    suffix = getattr(model, "checkpoint_suffix", ".pt")
+
+    for candidate in (f"{arguments.model}_{payload['dataset']}"
+                      f"_seed{parameters['seed']}{suffix}",
+                      f"{arguments.model}_{payload['dataset']}{suffix}"):
+        path = experiment.CHECKPOINTS / candidate
+        if path.is_file():
+            model.load(path)
+            break
+    else:
+        raise SystemExit(f"no checkpoint for {arguments.model}. Train it first.")
+
+    validation_rows = list(loaded.partition.validation)
+    tasks = experiment.build_tasks(
+        list(loaded.partition.train) + validation_rows
+        + list(loaded.partition.test), loaded.partition.test)
+
+    print(f"scoring {len(tasks)} learners with {arguments.model} ...",
+          flush=True)
+
+    learners = {}
+    for sequence, indices in tasks[:arguments.limit]:
+        predictions = model.predict_sequence(sequence)
+        scored = [predictions[position] for position in indices]
+        if not scored:
+            continue
+        learner = sequence[0]["learner_id"]
+        learners[str(learner)] = {
+            # Mean predicted P(correct) over the held-out tail: the model's
+            # standing view of this learner, not a per-item score.
+            "predicted_mastery": round(sum(scored) / len(scored), 6),
+            # The next single interaction it was asked about.
+            "predicted_next_correct": round(scored[0], 6),
+            "interactions_scored": len(scored),
+        }
+
+    # Two DIFFERENT versions, named separately. `model_version` identifies the
+    # architecture — which components are switched on — and the preprocessing
+    # version identifies the scoring protocol. Reporting the second under the
+    # first would label a P2.13 architecture as a P2.12 model.
+    components = getattr(model, "components", {})
+    switched_on = "+".join(sorted(k for k, v in components.items() if v))
+    export = {
+        "model": arguments.model,
+        "model_version": f"p2.13/{switched_on or 'baseline'}",
+        "components": components,
+        "preprocessing_version": experiment.PREPROCESSING_VERSION,
+        "trained_on": f"{loaded.name} {loaded.version}",
+        "dataset_fingerprint": loaded.manifest.get("processed_hash", ""),
+        "split_hash": loaded.manifest.get("split_hash", ""),
+        "seed": parameters["seed"],
+        "checkpoint": experiment.portable(path),
+        "exported_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(),
+        "applicability": (
+            "Learner ids in this file are ASSISTments learners. This model "
+            "has never seen a SparkLM learner or question."),
+        "learners": learners,
+    }
+
+    destination = pathlib.Path(arguments.out)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(export, indent=2) + "\n",
+                           encoding="utf-8")
+
+    print(f"  model            {export['model']} {export['model_version']}")
+    print(f"  trained on       {export['trained_on']}")
+    print(f"  learners exported {len(learners):,}")
+    print(f"  written to       {destination}")
+    return 0
+
+
 def command_compare(arguments):
     """Render the comparison table from records already on disk."""
     payload = load_config(arguments.config)
@@ -216,12 +452,36 @@ def main(argv=None):
     for name, handler, help_text in (
             ("train", command_train, "Fit every model in the config."),
             ("evaluate", command_evaluate, "Re-score from checkpoints."),
+            ("ablate", command_ablate, "Every rung, every seed."),
             ("compare", command_compare, "Render the comparison table.")):
         sub = subparsers.add_parser(name, help=help_text)
         sub.add_argument("--config", required=True)
         sub.add_argument("--model", default=None,
                          help="Restrict to one model by name.")
+        sub.add_argument("--force", action="store_true",
+                         help="Re-run rather than reusing recorded results.")
         sub.set_defaults(handler=handler)
+
+    sub = subparsers.add_parser(
+        "export", help="Write the offline prediction export production reads.")
+    sub.add_argument("--config", required=True)
+    sub.add_argument("--model", default="TA-GTKT")
+    sub.add_argument("--out", required=True)
+    sub.add_argument("--seed", type=int, default=None)
+    sub.add_argument("--limit", type=int, default=500,
+                     help="Learners to score. The export is advisory; a few "
+                          "hundred proves the seam without a long run.")
+    sub.set_defaults(handler=command_export)
+
+    sub = subparsers.add_parser(
+        "analyse", help="Where two finished checkpoints disagree.")
+    sub.add_argument("--config", required=True)
+    sub.add_argument("--reference", required=True,
+                     help="The model the candidate is measured against.")
+    sub.add_argument("--candidate", required=True)
+    sub.add_argument("--seed", type=int, default=None,
+                     help="Use the checkpoints tagged with this seed.")
+    sub.set_defaults(handler=command_analyse)
 
     arguments = parser.parse_args(argv)
     return arguments.handler(arguments)

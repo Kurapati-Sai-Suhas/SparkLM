@@ -1,0 +1,186 @@
+{
+  "Transformer": {
+    "seeds": [
+      20260827
+    ],
+    "runs": 1,
+    "parameters": 93441,
+    "components": {
+      "question_embedding": false,
+      "temporal_features": false,
+      "gated_fusion": false
+    },
+    "auc": {
+      "mean": 0.7454252596925494,
+      "std": 0.0,
+      "values": [
+        0.7454252596925494
+      ]
+    },
+    "accuracy": {
+      "mean": 0.71955077507118,
+      "std": 0.0,
+      "values": [
+        0.71955077507118
+      ]
+    },
+    "log_loss": {
+      "mean": 0.5598623055673081,
+      "std": 0.0,
+      "values": [
+        0.5598623055673081
+      ]
+    },
+    "rmse": {
+      "mean": 0.43379181386426613,
+      "std": 0.0,
+      "values": [
+        0.43379181386426613
+      ]
+    },
+    "training_seconds_mean": 1037.66,
+    "training_seconds_min": 1037.66,
+    "training_seconds_all": [
+      1037.66
+    ],
+    "mean_gate": null
+  },
+  "Transformer+T": {
+    "seeds": [
+      20260827
+    ],
+    "runs": 1,
+    "parameters": 93825,
+    "components": {
+      "question_embedding": false,
+      "temporal_features": true,
+      "gated_fusion": false
+    },
+    "auc": {
+      "mean": 0.746485343123348,
+      "std": 0.0,
+      "values": [
+        0.746485343123348
+      ]
+    },
+    "accuracy": {
+      "mean": 0.7236859944863742,
+      "std": 0.0,
+      "values": [
+        0.7236859944863742
+      ]
+    },
+    "log_loss": {
+      "mean": 0.5552464693191481,
+      "std": 0.0,
+      "values": [
+        0.5552464693191481
+      ]
+    },
+    "rmse": {
+      "mean": 0.4319669446122825,
+      "std": 0.0,
+      "values": [
+        0.4319669446122825
+      ]
+    },
+    "training_seconds_mean": 1048.06,
+    "training_seconds_min": 1048.06,
+    "training_seconds_all": [
+      1048.06
+    ],
+    "mean_gate": null
+  },
+  "Transformer+TG": {
+    "seeds": [
+      20260827
+    ],
+    "runs": 1,
+    "parameters": 102081,
+    "components": {
+      "question_embedding": false,
+      "temporal_features": true,
+      "gated_fusion": true
+    },
+    "auc": {
+      "mean": 0.7484876680663358,
+      "std": 0.0,
+      "values": [
+        0.7484876680663358
+      ]
+    },
+    "accuracy": {
+      "mean": 0.7223527816694536,
+      "std": 0.0,
+      "values": [
+        0.7223527816694536
+      ]
+    },
+    "log_loss": {
+      "mean": 0.5554248907532426,
+      "std": 0.0,
+      "values": [
+        0.5554248907532426
+      ]
+    },
+    "rmse": {
+      "mean": 0.4322319757836773,
+      "std": 0.0,
+      "values": [
+        0.4322319757836773
+      ]
+    },
+    "training_seconds_mean": 1082.83,
+    "training_seconds_min": 1082.83,
+    "training_seconds_all": [
+      1082.83
+    ],
+    "mean_gate": 0.633073
+  },
+  "TA-GTKT": {
+    "seeds": [
+      20260827
+    ],
+    "runs": 1,
+    "parameters": 1174721,
+    "components": {
+      "question_embedding": true,
+      "temporal_features": true,
+      "gated_fusion": true
+    },
+    "auc": {
+      "mean": 0.7624490744015645,
+      "std": 0.0,
+      "values": [
+        0.7624490744015645
+      ]
+    },
+    "accuracy": {
+      "mean": 0.7233922357301035,
+      "std": 0.0,
+      "values": [
+        0.7233922357301035
+      ]
+    },
+    "log_loss": {
+      "mean": 0.5558349595102198,
+      "std": 0.0,
+      "values": [
+        0.5558349595102198
+      ]
+    },
+    "rmse": {
+      "mean": 0.43112284890970437,
+      "std": 0.0,
+      "values": [
+        0.43112284890970437
+      ]
+    },
+    "training_seconds_mean": 7885.45,
+    "training_seconds_min": 7885.45,
+    "training_seconds_all": [
+      7885.45
+    ],
+    "mean_gate": 0.581855
+  }
+}

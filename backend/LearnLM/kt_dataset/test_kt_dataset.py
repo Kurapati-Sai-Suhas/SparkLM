@@ -146,21 +146,21 @@ class AssemblyTests(TestCase):
     def test_attempt_number_counts_only_prior_attempts(self):
         rows = [raw("L1", "Q1", 1, 0), raw("L1", "Q1", 2, 0),
                 raw("L1", "Q1", 3, 1)]
-        interactions, _ = pipeline.assemble(
+        interactions, _r, _i = pipeline.assemble(
             rows, config(), sources.SYNTHETIC, "h")
         self.assertEqual([i.attempt_number for i in interactions], [0, 1, 2])
 
     def test_attempt_number_is_per_question_not_global(self):
         rows = [raw("L1", "Q1", 1, 1), raw("L1", "Q2", 2, 1),
                 raw("L1", "Q1", 3, 1)]
-        interactions, _ = pipeline.assemble(
+        interactions, _r, _i = pipeline.assemble(
             rows, config(), sources.SYNTHETIC, "h")
         self.assertEqual([i.attempt_number for i in interactions], [0, 0, 1])
 
     def test_rows_are_ordered_by_learner_then_position(self):
         rows = [raw("L2", "Q1", 5, 1), raw("L1", "Q1", 9, 1),
                 raw("L1", "Q1", 2, 0)]
-        interactions, _ = pipeline.assemble(
+        interactions, _r, _i = pipeline.assemble(
             rows, config(), sources.SYNTHETIC, "h")
         self.assertEqual([(i.learner_id, i.sequence_position)
                           for i in interactions],
@@ -180,7 +180,7 @@ class AssemblyTests(TestCase):
         column, so `occurred_at` stays None rather than being invented.
         """
         rows = [raw("L1", "Q1", 1, 1)]
-        interactions, _ = pipeline.assemble(
+        interactions, _r, _i = pipeline.assemble(
             rows, config(), sources.ASSISTMENTS_2009, "h")
         self.assertIsNone(interactions[0].occurred_at)
         self.assertIsNone(interactions[0].lag_seconds)
@@ -201,18 +201,18 @@ class AssemblyTests(TestCase):
         row = raw("L1", "Q1", 1, 1)
         row["occurred_at"] = datetime(2020, 5, 5, tzinfo=timezone.utc)
 
-        interactions, _ = pipeline.assemble(
+        interactions, _r, _i = pipeline.assemble(
             [row], config(), sources.ASSISTMENTS_2009, "h")
         self.assertIsNone(interactions[0].occurred_at)
 
         # A source that DOES declare wall-clock time keeps it.
-        kept, _ = pipeline.assemble(
+        kept, _r, _i = pipeline.assemble(
             [row], config(), adapters.learnlm_capabilities(), "h")
         self.assertIsNotNone(kept[0].occurred_at)
 
     def test_provenance_travels_with_every_row(self):
         rows = [raw("L1", "Q1", 1, 1)]
-        interactions, _ = pipeline.assemble(
+        interactions, _r, _i = pipeline.assemble(
             rows, config(source_file="skill_builder.csv"),
             sources.SYNTHETIC, "abc123")
         record = interactions[0]
@@ -226,7 +226,7 @@ class AssemblyTests(TestCase):
         back-filled, because no source can currently supply it honestly.
         """
         rows = [raw("L1", "Q1", 1, 1)]
-        interactions, _ = pipeline.assemble(
+        interactions, _r, _i = pipeline.assemble(
             rows, config(), sources.SYNTHETIC, "h")
         self.assertIn("glicko_rating_at_time", CANONICAL_COLUMNS)
         self.assertIsNone(interactions[0].glicko_rating_at_time)
@@ -417,12 +417,39 @@ class DeterminismTests(TestCase):
                                 "fixed-raw-hash")
 
         self.assertEqual(len(result.interactions), 35)
+        self.assertEqual(SCHEMA_VERSION, 2)
+        # v2 (M2 P2.13) added `response_time_ms`. Deliberate, and paid for
+        # with the bump this docstring requires.
+        #   v1 was 15d0a581ad60277f38d138d6c607ddcf72d84c031cbacfeffae3dc87d27f96c0
         self.assertEqual(
             result.processed_hash,
-            "15d0a581ad60277f38d138d6c607ddcf72d84c031cbacfeffae3dc87d27f96c0")
+            "adc66bd5457345eb3e442b89ee5c4f7b9a4449838bac50d7d6cb32efa79cd803")
         self.assertEqual(
             result.split_hash,
             "ca13aa60f3b888aa8c0c2ee9b90b1f369f314aa7baa73b3ff27a9f481be81c20")
+
+    def test_adding_a_column_moved_the_corpus_hash_and_not_the_partition(self):
+        """
+        The load-bearing claim behind the v1 -> v2 bump.
+
+        A schema change that also moved the SPLIT would have invalidated
+        every Phase 22 baseline: those numbers are only comparable to the new
+        models if all of them are scored on the same held-out rows. The
+        partition is a function of learner and sequence position, and adding
+        a column touches neither — so `split_hash` must be byte-for-byte the
+        value it had under v1, pinned here independently of the golden test
+        above.
+        """
+        rows = sources.synthetic_rows(learners=8, questions=10,
+                                      max_length=12, seed=99)
+        result = pipeline.build(rows, config(), sources.SYNTHETIC,
+                                "fixed-raw-hash")
+
+        self.assertEqual(
+            result.split_hash,
+            "ca13aa60f3b888aa8c0c2ee9b90b1f369f314aa7baa73b3ff27a9f481be81c20",
+            "adding a column moved the partition; the baselines are no longer "
+            "comparable")
 
     def test_synthetic_source_is_seeded_and_reproducible(self):
         self.assertEqual(sources.synthetic_rows(learners=5, seed=7),
@@ -743,6 +770,130 @@ class CommandTests(TestCase):
         payload = json.loads(
             (pathlib.Path(out) / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(payload["counts"]["interactions"], 0)
+
+
+# ═════════════════════════════════════════════════════════════
+# Response duration (M2 P2.13)
+# ═════════════════════════════════════════════════════════════
+
+def timed(learner, question, order, correct, duration, **extra):
+    row = raw(learner, question, order, correct, **extra)
+    row["response_time_raw"] = duration
+    return row
+
+
+class ResponseTimeTests(TestCase):
+    """
+    ASSISTments 2009 carries a genuine response duration that schema v1 did
+    not transport. These tests hold what it is and, more importantly, what
+    it is not.
+    """
+
+    def assemble(self, rows, capabilities=None):
+        return pipeline.assemble(rows, config(),
+                                 capabilities or sources.ASSISTMENTS_2009, "h")
+
+    def test_a_duration_survives_the_build(self):
+        interactions, _r, _i = self.assemble(
+            [timed("L1", "Q1", 1, 1, "19453")])
+        self.assertEqual(interactions[0].response_time_ms, 19453.0)
+
+    def test_a_source_without_response_time_gets_none_not_a_guess(self):
+        """
+        UNAVAILABLE is a property of the SOURCE. A source that cannot supply
+        a duration must not be handed one derived from something else.
+        """
+        interactions, _r, _i = self.assemble(
+            [timed("L1", "Q1", 1, 1, "19453")], sources.SYNTHETIC)
+        self.assertIsNone(interactions[0].response_time_ms)
+
+    def test_a_negative_duration_is_dropped_and_counted(self):
+        """
+        Eight rows of the published file have a negative `ms_first_response`.
+        A duration cannot be negative; that is a defect, not a fast answer.
+        """
+        interactions, _r, issues = self.assemble(
+            [timed("L1", "Q1", 1, 1, "-6576")])
+
+        self.assertIsNone(interactions[0].response_time_ms)
+        self.assertEqual(issues["response_time_negative"], 1)
+
+    def test_a_bad_duration_costs_the_field_and_not_the_row(self):
+        """
+        An interaction with a broken clock still has a known outcome.
+        Rejecting it would delete a real answer over an unusable field.
+        """
+        interactions, rejections, _i = self.assemble(
+            [timed("L1", "Q1", 1, 1, "not-a-number")])
+
+        self.assertEqual(len(interactions), 1)
+        self.assertEqual(interactions[0].correct, 1)
+        self.assertEqual(rejections, [])
+
+    def test_every_unusable_duration_is_counted_by_reason(self):
+        interactions, _r, issues = self.assemble([
+            timed("L1", "Q1", 1, 1, "1200"),
+            timed("L1", "Q1", 2, 1, ""),
+            timed("L1", "Q1", 3, 1, "-5"),
+            timed("L1", "Q1", 4, 1, "oops"),
+        ])
+
+        self.assertEqual(len(interactions), 4)
+        self.assertEqual(issues["response_time_missing"], 1)
+        self.assertEqual(issues["response_time_negative"], 1)
+        self.assertEqual(issues["response_time_malformed"], 1)
+
+    def test_an_implausibly_long_duration_is_carried_not_capped(self):
+        """
+        The longest value in ASSISTments 2009 is 23 hours — a session left
+        open rather than a response. Squashing it here would assert a number
+        nobody measured; what to do about it is a MODELLING decision.
+        """
+        interactions, _r, _i = self.assemble(
+            [timed("L1", "Q1", 1, 1, "84076920")])
+        self.assertEqual(interactions[0].response_time_ms, 84076920.0)
+
+    def test_a_duration_is_not_a_timestamp(self):
+        """
+        The distinction the whole schema is built on. Having a duration does
+        not give this corpus a clock.
+        """
+        interactions, _r, _i = self.assemble(
+            [timed("L1", "Q1", 1, 1, "19453")])
+
+        self.assertIsNone(interactions[0].occurred_at)
+        self.assertIsNone(interactions[0].lag_seconds)
+        self.assertFalse(sources.ASSISTMENTS_2009.has_wall_clock_time)
+
+    def test_the_outcome_side_columns_are_recorded_as_leaky(self):
+        """
+        `attempt_count` and `hint_count` describe how the learner's
+        engagement ENDED. They look like spacing features and are not.
+        """
+        reasons = sources.ASSISTMENTS_2009.unavailable_reasons
+        self.assertIn("attempt_count_column", reasons)
+        self.assertIn("leaks", reasons["attempt_count_column"])
+        self.assertIn("inter_event_interval", reasons)
+
+    def test_statistics_report_coverage_rather_than_a_mean(self):
+        rows = [timed("L1", "Q1", n, 1, str(1000 * n)) for n in range(1, 21)]
+        result = pipeline.build(rows, config(), sources.ASSISTMENTS_2009, "h")
+
+        durations = stats.describe(result)["response_time_ms"]
+        self.assertEqual(durations["available"], 20)
+        self.assertEqual(durations["coverage"], 1.0)
+        self.assertIn("median", durations)
+        self.assertNotIn("mean", durations)
+
+    def test_the_manifest_reports_field_issues(self):
+        rows = [timed("L1", "Q1", 1, 1, "-1"), timed("L1", "Q1", 2, 1, "5")]
+        result = pipeline.build(rows, config(), sources.ASSISTMENTS_2009, "h")
+        payload = pipeline.manifest(
+            result, stats.describe(result),
+            pipeline.audit_split_ordinally(result.train, result.validation,
+                                           result.test))
+
+        self.assertEqual(payload["field_issues"]["response_time_negative"], 1)
 
 
 # ═════════════════════════════════════════════════════════════

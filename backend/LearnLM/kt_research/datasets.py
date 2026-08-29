@@ -64,7 +64,25 @@ from kt_research import splits
 
 #: The keys every row in this package carries. See the module docstring.
 ROW_FIELDS = ("learner_id", "question_id", "concept_id", "correct",
-              "timestamp")
+              "timestamp", "response_time_ms", "attempt_number")
+
+#: Which side of the prediction each field may be used on (M2 P2.13).
+#:
+#: THE RULE: a feature may inform the prediction at position t if and only if
+#: it is knowable BEFORE the learner answers item t.
+#:
+#:   QUERY   known when the question is put — the item, its concept, how many
+#:           times this learner has attempted it before, where it sits in
+#:           their history.
+#:   PAST    known only after an answer exists — the outcome, and how long
+#:           they took. These may enter only as evidence about EARLIER
+#:           interactions, never at the position they describe.
+#:
+#: `response_time_ms` is the one that looks harmless and is not: a learner
+#: who took ninety seconds probably struggled, so reading it at its own
+#: position is reading most of the answer.
+QUERY_SIDE = ("question_id", "concept_id", "attempt_number", "timestamp")
+PAST_SIDE = ("correct", "response_time_ms")
 
 #: `interactions.csv` column that becomes `timestamp`.
 ORDERING_COLUMN = "sequence_position"
@@ -101,14 +119,29 @@ FIELD_AVAILABILITY = {
         "time. `sequence_position` (from `order_id`) orders each learner's "
         "history and nothing here treats it as a clock."),
     "response_time": (
-        UNAVAILABLE,
-        "Present in the raw file as `ms_first_response`, absent from "
-        "canonical schema v1, so it does not reach this pipeline. No baseline "
-        "in this phase consumes it."),
+        AVAILABLE,
+        "Source column `ms_first_response`, carried since canonical schema "
+        "v2 (M2 P2.13). 99.998% coverage; negative durations are a source "
+        "defect and are dropped to None rather than kept. PAST-SIDE ONLY — "
+        "it is not knowable until the learner has answered."),
     "difficulty": (
         UNAVAILABLE,
         "Not a source column. Estimating it from corpus-wide success rate "
         "would carry test labels into a training feature."),
+    "inter_event_interval": (
+        UNAVAILABLE,
+        "Requires wall-clock time, which this corpus does not have. The gap "
+        "between two of a learner's `sequence_position`s counts OTHER logged "
+        "interactions in between; it correlates with elapsed time but also "
+        "moves with how busy the platform was, so it is used as an ORDINAL "
+        "GAP and never called elapsed time."),
+    "attempt_spacing": (
+        AVAILABLE,
+        "`attempt_number` — PRIOR attempts by this learner on this question, "
+        "computed by the corpus build. Knowable before the learner answers, "
+        "so it is a query-side feature. The source's own `attempt_count` and "
+        "`hint_count` columns are NOT used: they record how the engagement "
+        "ended, so reading either at its own position leaks the outcome."),
 }
 
 
@@ -160,6 +193,16 @@ class BuildNotUsable(Exception):
     """The directory is not a complete corpus build. Never worked around."""
 
 
+def _optional_float(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def load_build(directory):
     """
     Read a `kt_dataset_build` output directory.
@@ -193,6 +236,13 @@ def load_build(directory):
                 "concept_id": record.get("concept_id", "") or "",
                 "correct": int(float(record["correct"])),
                 "timestamp": int(float(record[ORDERING_COLUMN])),
+                # None, not 0. A missing duration is not a zero-second
+                # answer, and a model that cannot tell them apart will learn
+                # that instant answers are wrong.
+                "response_time_ms": _optional_float(
+                    record.get("response_time_ms")),
+                "attempt_number": int(float(
+                    record.get("attempt_number") or 0)),
             }
             rows.append(row)
             by_row_id[record["source_row_id"]] = row

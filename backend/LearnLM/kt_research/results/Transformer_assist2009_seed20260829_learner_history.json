@@ -1,0 +1,221 @@
+{
+  "config": {
+    "model": "Transformer",
+    "dataset": "assist2009",
+    "split_by": "learner_history",
+    "fraction": 0.8,
+    "validation_fraction": null,
+    "seed": 20260829,
+    "parameters": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 15,
+      "batch_size": 64,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3,
+      "heads": 4,
+      "layers": 2,
+      "seed": 20260829
+    },
+    "notes": "P2.13 \u00a723E ablation. Every rung shares the corpus, the partition, the sequence construction, the scoring protocol and the training budget with the frozen P2.12 Transformer baseline; the ONLY difference between adjacent rungs is the component named in its key. Transformer+Q is a control \u00a723E did not ask for: \u00a723D introduces a question embedding and temporal features together, and a step that changes two things attributes nothing.",
+    "dataset_directory": "build/kt/assist09",
+    "preprocessing_version": "p2.12/v1",
+    "tag": "seed20260829"
+  },
+  "preprocessing_version": "p2.12/v1",
+  "dataset_fingerprint": "f9c8f462b2b8003ff0ba356781bd0e934fced26d98d5b36df5a55963f2a7c016",
+  "dataset": {
+    "dataset": "assistments-2009-2010-skill-builder",
+    "version": "corrected-one-row-per-student-problem",
+    "interactions": 283105,
+    "learners": 4163,
+    "questions": 17751,
+    "concepts": 112,
+    "correct_rate": 0.658137,
+    "raw_dataset_hash": "1aa296e00b6c88c4d6fad4ca2ae4866484d9fe5484f38f5c8c94dfc49f045e08",
+    "processed_hash": "423bcaa2cfe60600ff0c2faf221fce29b2a8dbc5b7b49f7bd98d58a6aa7b37d8",
+    "split_hash": "f894bcc691d010d5ac684cfcd41c8e99d2de49b878fa935503086c86d932b055",
+    "split": {
+      "strategy": "learner_history",
+      "boundary": {
+        "source": "kt_dataset build",
+        "split_hash": "f894bcc691d010d5ac684cfcd41c8e99d2de49b878fa935503086c86d932b055"
+      },
+      "train": 196465,
+      "validation": 42386,
+      "test": 44254
+    },
+    "field_availability": {
+      "learner_id": {
+        "status": "available",
+        "reason": "source column `user_id`."
+      },
+      "question_id": {
+        "status": "available",
+        "reason": "source column `problem_id`."
+      },
+      "concept_id": {
+        "status": "available",
+        "reason": "source column `skill_id`. ~16% of raw rows have none; whether those are kept is the build's `require_concept` setting and is recorded in the manifest either way."
+      },
+      "correctness": {
+        "status": "available",
+        "reason": "source column `correct`, validated as a strict 0/1 label \u2014 a partial score is rejected, never rounded."
+      },
+      "timestamp": {
+        "status": "ordinal-only",
+        "reason": "No absolute time column exists in this corpus; `ms_first_response` and `overlap_time` are durations, not points in time. `sequence_position` (from `order_id`) orders each learner's history and nothing here treats it as a clock."
+      },
+      "response_time": {
+        "status": "available",
+        "reason": "Source column `ms_first_response`, carried since canonical schema v2 (M2 P2.13). 99.998% coverage; negative durations are a source defect and are dropped to None rather than kept. PAST-SIDE ONLY \u2014 it is not knowable until the learner has answered."
+      },
+      "difficulty": {
+        "status": "unavailable",
+        "reason": "Not a source column. Estimating it from corpus-wide success rate would carry test labels into a training feature."
+      },
+      "inter_event_interval": {
+        "status": "unavailable",
+        "reason": "Requires wall-clock time, which this corpus does not have. The gap between two of a learner's `sequence_position`s counts OTHER logged interactions in between; it correlates with elapsed time but also moves with how busy the platform was, so it is used as an ORDINAL GAP and never called elapsed time."
+      },
+      "attempt_spacing": {
+        "status": "available",
+        "reason": "`attempt_number` \u2014 PRIOR attempts by this learner on this question, computed by the corpus build. Knowable before the learner answers, so it is a query-side feature. The source's own `attempt_count` and `hint_count` columns are NOT used: they record how the engagement ended, so reading either at its own position leaks the outcome."
+      }
+    }
+  },
+  "split": {
+    "strategy": "learner_history",
+    "boundary": {
+      "source": "kt_dataset build",
+      "split_hash": "f894bcc691d010d5ac684cfcd41c8e99d2de49b878fa935503086c86d932b055"
+    },
+    "train": 196465,
+    "validation": 42386,
+    "test": 44254
+  },
+  "metrics": {
+    "auc": 0.744211024527011,
+    "accuracy": 0.7199575179644778,
+    "log_loss": 0.5582036551905639,
+    "rmse": 0.4335878500348697,
+    "test_interactions": 44254,
+    "positive_rate": 0.644823
+  },
+  "validation_metrics": {
+    "auc": 0.7376503297095242,
+    "accuracy": 0.7252394658613693,
+    "log_loss": 0.551051675024455,
+    "rmse": 0.43028811798743494,
+    "test_interactions": 42386,
+    "positive_rate": 0.664205
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.621042,
+      "validation_auc": 0.687996,
+      "validation_log_loss": 0.586753
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.58743,
+      "validation_auc": 0.707827,
+      "validation_log_loss": 0.572405
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.57773,
+      "validation_auc": 0.71881,
+      "validation_log_loss": 0.565651
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.571475,
+      "validation_auc": 0.722885,
+      "validation_log_loss": 0.562605
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.56782,
+      "validation_auc": 0.727523,
+      "validation_log_loss": 0.559933
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.564327,
+      "validation_auc": 0.729628,
+      "validation_log_loss": 0.557275
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.562265,
+      "validation_auc": 0.729617,
+      "validation_log_loss": 0.557353
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.560357,
+      "validation_auc": 0.731881,
+      "validation_log_loss": 0.558177
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.558641,
+      "validation_auc": 0.734162,
+      "validation_log_loss": 0.554132
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.556577,
+      "validation_auc": 0.733637,
+      "validation_log_loss": 0.554152
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.555322,
+      "validation_auc": 0.734751,
+      "validation_log_loss": 0.553572
+    },
+    {
+      "epoch": 12,
+      "train_loss": 0.553656,
+      "validation_auc": 0.736148,
+      "validation_log_loss": 0.553324
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.552214,
+      "validation_auc": 0.736722,
+      "validation_log_loss": 0.553995
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.551247,
+      "validation_auc": 0.73765,
+      "validation_log_loss": 0.551052
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.550233,
+      "validation_auc": 0.735718,
+      "validation_log_loss": 0.55335
+    }
+  ],
+  "components": {
+    "question_embedding": false,
+    "temporal_features": false,
+    "gated_fusion": false
+  },
+  "parameters": 93441,
+  "training_seconds": 1593.36,
+  "mean_gate": null,
+  "checkpoint": "kt_research/checkpoints/Transformer_assist2009_seed20260829.pt",
+  "environment": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "run_at": "2026-08-27T14:23:24.331489+00:00"
+}

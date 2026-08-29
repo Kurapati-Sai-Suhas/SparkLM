@@ -189,6 +189,23 @@ seed 20260827.
 **The Transformer did not beat DKT.** It is behind on every one of the four
 metrics — AUC by 0.0022, log loss by 0.0040. Reported as measured.
 
+> **CORRECTION (M2 P2.13).** This section overstated the finding. P2.13 ran
+> the Transformer at three seeds on the identical corpus and split and
+> measured the seed-to-seed spread directly: **±0.0017 AUC** (1σ; range
+> 0.7420–0.7454 across seeds).
+>
+> The DKT–Transformer gap of 0.0022 is therefore **1.3σ of the seed noise**,
+> measured from one seed each. The correct statement is that the two are
+> **indistinguishable at this budget**, not that DKT is ahead. The
+> directional wording below should be read with that in mind.
+>
+> The claim that survives unchanged is the one with a real margin: both
+> sequence models beat BKT by ~0.039 AUC, which is more than twenty times
+> the seed noise.
+>
+> This is why P2.13 required a multi-seed check before accepting any
+> difference — a single-seed comparison could not have told these apart.
+
 Two things make that result weaker than it looks, and both cut against the
 Transformer rather than for it:
 

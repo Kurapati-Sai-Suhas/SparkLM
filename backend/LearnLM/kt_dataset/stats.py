@@ -75,6 +75,37 @@ def describe(result):
             "min": min(i.sequence_position for i in interactions),
             "max": max(i.sequence_position for i in interactions),
         },
+
+        "response_time_ms": _durations(interactions),
+    }
+
+
+def _durations(interactions):
+    """
+    Coverage and shape of `response_time_ms` (M2 P2.13).
+
+    Quantiles rather than a mean: the distribution has a tail measured in
+    hours — a session left open, not a response — and a mean over that says
+    nothing about a typical answer.
+    """
+    values = sorted(i.response_time_ms for i in interactions
+                    if i.response_time_ms is not None)
+    missing = len(interactions) - len(values)
+    if not values:
+        return {"available": 0, "missing": missing,
+                "note": "this source supplies no response duration"}
+
+    def at(fraction):
+        return values[min(len(values) - 1, int(len(values) * fraction))]
+
+    return {
+        "available": len(values),
+        "missing": missing,
+        "coverage": round(len(values) / len(interactions), 6),
+        "p05": at(0.05), "p25": at(0.25), "median": at(0.5),
+        "p75": at(0.75), "p95": at(0.95), "p99": at(0.99),
+        "max": values[-1],
+        "over_10_minutes": sum(1 for v in values if v > 600_000),
     }
 
 

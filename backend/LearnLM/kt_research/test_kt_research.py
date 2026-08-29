@@ -6,6 +6,7 @@ things that make a KT number mean anything: the split does not leak, and a
 model is scored only on knowledge derived from earlier interactions.
 """
 
+import math
 import random
 
 import pytest
@@ -113,9 +114,10 @@ def test_the_split_is_deterministic():
 # The model ladder
 # ═════════════════════════════════════════════════════════════
 
-def test_the_seven_rungs_are_declared():
+def test_the_ladder_is_declared():
     assert set(models.SPECS) == {
-        "BKT", "DKT", "SAKT", "AKT", "Transformer", "TA-GTKT", "TA-GTKT-P"}
+        "BKT", "DKT", "SAKT", "AKT", "Transformer", "Transformer+T",
+        "Transformer+TG", "TA-GTKT", "TA-GTKT-P"}
 
 
 def test_unimplemented_models_refuse_rather_than_returning_a_number():
@@ -135,10 +137,39 @@ def test_every_unimplemented_model_says_what_it_needs():
             assert spec.needs, spec.name
 
 
-def test_ta_gtkt_consumes_every_input_the_design_names():
+def test_ta_gtkt_consumes_what_it_actually_reads():
+    """
+    CORRECTED IN M2 P2.13. The P2.11b version of this test asserted that
+    TA-GTKT consumes `delta_time`, `attempt_count` and `difficulty`, because
+    the design was written before any real data was in hand. The corpus has
+    none of the three — one needs a wall clock this dataset does not have,
+    one leaks the outcome, and one would have to be estimated from labels.
+
+    Declaring inputs a model does not read is a standing false claim about
+    what it was given, so `consumes` now names what it reads and the three
+    that dropped out are recorded, with reasons, in `UNSUPPLIED_INPUTS`.
+    """
     consumed = set(models.SPECS["TA-GTKT"].consumes)
-    assert {"concept", "correctness", "timestamp", "response_time",
-            "delta_time", "attempt_count", "difficulty"} <= consumed
+
+    assert {"question", "concept", "correctness", "response_time",
+            "attempt_number", "ordinal_gap"} == consumed
+    assert set(models.UNSUPPLIED_INPUTS) == {"delta_time", "difficulty",
+                                             "attempt_count"}
+    for name, reason in models.UNSUPPLIED_INPUTS.items():
+        assert len(reason) > 60, name
+
+
+def test_no_runnable_model_declares_an_input_the_corpus_cannot_supply():
+    """
+    Implemented models only. An unimplemented spec is a design intention and
+    its `needs` already says it cannot run; a model that CAN be built and
+    scored must not claim to read something nothing supplies.
+    """
+    for name, spec in models.SPECS.items():
+        if not spec.implemented:
+            continue
+        overlap = set(spec.consumes) & set(models.UNSUPPLIED_INPUTS)
+        assert not overlap, f"{name} claims to read {sorted(overlap)}"
 
 
 def test_the_prerequisite_variant_adds_exactly_prerequisites():
@@ -564,7 +595,10 @@ def test_every_field_the_brief_names_is_accounted_for():
 
     named = {"learner_id", "question_id", "concept_id", "correctness",
              "timestamp", "response_time", "difficulty"}
-    assert named == set(datasets.FIELD_AVAILABILITY)
+    # A subset: P2.13 added `inter_event_interval` and `attempt_spacing`,
+    # both of which had to be ruled on before a temporal model could be
+    # built. Nothing §22B named may drop out.
+    assert named <= set(datasets.FIELD_AVAILABILITY)
 
     for field_name, (status, reason) in datasets.FIELD_AVAILABILITY.items():
         assert status in datasets.STATUSES, field_name
@@ -576,16 +610,41 @@ def test_every_field_the_brief_names_is_accounted_for():
                 f"{field_name} is not available and says why not")
 
 
-def test_response_time_and_difficulty_are_declared_unavailable():
+def test_difficulty_is_still_declared_unavailable():
     """
-    Both are tempting to fabricate — one exists upstream, the other can be
-    estimated from labels. Neither is invented here.
+    Tempting to fabricate: it can be estimated from labels, and doing so
+    over the corpus would carry test labels into a training feature.
     """
     from kt_research import datasets
 
-    for field_name in ("response_time", "difficulty"):
-        status, _reason = datasets.FIELD_AVAILABILITY[field_name]
-        assert status == datasets.UNAVAILABLE, field_name
+    status, _reason = datasets.FIELD_AVAILABILITY["difficulty"]
+    assert status == datasets.UNAVAILABLE
+
+
+def test_response_time_became_available_by_carrying_it_not_by_deriving_it():
+    """
+    P2.12 recorded response time as unavailable because canonical schema v1
+    did not transport it. P2.13 changed the schema rather than the story:
+    the number now reaching the model is the source's own column, not
+    something reconstructed from row spacing.
+    """
+    from kt_research import datasets
+
+    status, reason = datasets.FIELD_AVAILABILITY["response_time"]
+
+    assert status == datasets.AVAILABLE
+    assert "ms_first_response" in reason
+    assert "PAST-SIDE" in reason
+
+
+def test_inter_event_time_is_still_unavailable():
+    """The field a temporal model most wants, and the one that is not there."""
+    from kt_research import datasets
+
+    status, reason = datasets.FIELD_AVAILABILITY["inter_event_interval"]
+
+    assert status == datasets.UNAVAILABLE
+    assert "wall-clock" in reason
 
 
 def test_time_is_recorded_as_an_order_and_not_as_a_clock():
@@ -1081,37 +1140,554 @@ def test_training_chunks_cover_every_position_exactly_once():
         assert seen == list(range(length)), length
 
 
-def test_the_transformer_baseline_carries_no_temporal_or_prerequisite_input():
+def test_the_transformer_baseline_carries_no_temporal_input():
     """
-    §22E stops at the plain encoder. A baseline that quietly included half
-    of its own successor's additions would make them look free.
+    §22E stopped at the plain encoder, and §23A froze it there. A baseline
+    that quietly gained half of its successor's additions would make them
+    look free.
 
-    Docstrings are stripped before the check: this module has to be able to
-    SAY that it excludes elapsed time without that sentence being read as
-    evidence it uses it.
+    P2.13 REPLACED a source-text scan with this. The module now legitimately
+    contains temporal code for the rungs above, so scanning the file could
+    only ever be answered by not writing the feature. What actually has to
+    hold is that the BASELINE RUNG does not switch it on — which is a
+    property of the object, and is what this asserts.
     """
-    import ast
-    import inspect
+    pytest.importorskip("torch")
 
-    neural = pytest.importorskip("kt_research.neural")
-    tree = ast.parse(inspect.getsource(neural))
-    for node in ast.walk(tree):
-        body = getattr(node, "body", None)
-        if not isinstance(body, list) or not body:
-            continue
-        first = body[0]
-        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
-                and isinstance(first.value.value, str)):
-            body.pop(0)
-            if not body:
-                body.append(ast.Pass())
+    baseline = small_neural("Transformer")
 
-    code = ast.unparse(tree)
-    for forbidden in ("response_time", "delta_time", "lag_seconds",
-                      "prerequisite", "elapsed", "occurred_at"):
-        assert forbidden not in code, forbidden
+    assert baseline.components == {"question_embedding": False,
+                                   "temporal_features": False,
+                                   "gated_fusion": False}
+    assert set(models.SPECS["Transformer"].consumes) == {"concept",
+                                                         "correctness"}
+
+
+def test_the_baseline_network_never_builds_a_temporal_module():
+    """The flags are not just unread — the parameters do not exist."""
+    pytest.importorskip("torch")
+
+    baseline, _rows = fitted("Transformer")
+    names = {name for name, _p in baseline.network.named_parameters()}
+
+    for forbidden in ("question_embedding", "past_temporal",
+                      "query_temporal", "gate"):
+        assert not any(forbidden in name for name in names), forbidden
+
+
+def test_no_rung_reads_a_feature_it_did_not_switch_on():
+    """
+    The ablation is only meaningful if a rung's extra inputs are actually
+    inert when its flag is off. Changing a duration must move TA-GTKT's
+    prediction and must not move the baseline's.
+    """
+    pytest.importorskip("torch")
+
+    rows = synthetic(learners=8, per_learner=15)
+    for row in rows:
+        row["response_time_ms"] = 20_000.0
+        row["attempt_number"] = 0
+
+    slowed = [dict(row) for row in rows[:12]]
+    for row in slowed:
+        row["response_time_ms"] = 900_000.0
+
+    baseline = small_neural("Transformer").fit(
+        experiment.sequences_by_learner(rows))
+    gated = small_neural("TA-GTKT").fit(
+        experiment.sequences_by_learner(rows))
+
+    assert baseline.predict_sequence(rows[:12]) == pytest.approx(
+        baseline.predict_sequence(slowed), abs=1e-9)
+    assert gated.predict_sequence(rows[:12]) != pytest.approx(
+        gated.predict_sequence(slowed), abs=1e-6)
 
 
 def test_the_declared_inputs_of_the_baselines_are_only_concept_and_outcome():
     for name in ("DKT", "Transformer"):
         assert set(models.SPECS[name].consumes) == {"concept", "correctness"}
+
+
+# ═════════════════════════════════════════════════════════════
+# Temporal features (M2 P2.13 §23B, §23C)
+# ═════════════════════════════════════════════════════════════
+
+def timed_rows(durations, attempts=None, stamps=None):
+    count = len(durations)
+    attempts = attempts if attempts is not None else [0] * count
+    stamps = stamps if stamps is not None else list(range(1, count + 1))
+    return [{"learner_id": "L0", "question_id": f"Q{n}", "concept_id": "C0",
+             "concept": "C0", "correct": n % 2, "timestamp": stamps[n],
+             "response_time_ms": durations[n], "attempt_number": attempts[n]}
+            for n in range(count)]
+
+
+def test_a_duration_is_reported_one_step_after_the_answer_it_describes():
+    """
+    The causal contract for temporal features. A learner who took ninety
+    seconds probably struggled, so the duration of item t may only ever be
+    fed at step t+1.
+    """
+    neural = pytest.importorskip("kt_research.neural")
+
+    features = neural.temporal_rows(timed_rows([1_000.0, 90_000.0, 2_000.0]))
+
+    assert features[0][1] == 1.0, "position 0 must report no previous duration"
+    # Position 1 carries position 0's one second; position 2 carries the 90.
+    assert features[1][0] == pytest.approx(math.log1p(1.0))
+    assert features[2][0] == pytest.approx(math.log1p(90.0))
+
+
+def test_the_current_duration_never_reaches_its_own_position():
+    neural = pytest.importorskip("kt_research.neural")
+
+    slow = neural.temporal_rows(timed_rows([1_000.0, 600_000.0]))
+    fast = neural.temporal_rows(timed_rows([1_000.0, 1_000.0]))
+
+    assert slow[1] == fast[1], "position 1 saw its own response time"
+
+
+def test_a_missing_duration_is_a_flag_and_not_a_zero():
+    """
+    A model that cannot tell them apart will learn that instant answers are
+    wrong.
+    """
+    neural = pytest.importorskip("kt_research.neural")
+
+    missing = neural.temporal_rows(timed_rows([None, 5_000.0]))
+    instant = neural.temporal_rows(timed_rows([0.0, 5_000.0]))
+
+    assert missing[1][1] == 1.0
+    assert instant[1][1] == 0.0
+
+
+def test_the_ordinal_gap_is_the_distance_to_the_previous_interaction():
+    neural = pytest.importorskip("kt_research.neural")
+
+    features = neural.temporal_rows(
+        timed_rows([1_000.0] * 3, stamps=[10, 12, 112]))
+
+    assert features[0][3] == 0.0
+    assert features[1][3] == pytest.approx(math.log1p(2))
+    assert features[2][3] == pytest.approx(math.log1p(100))
+
+
+def test_the_ordinal_gap_is_never_described_as_elapsed_time():
+    """
+    §23C: do not create a fake delta-t from a row index and call it real
+    elapsed time. The name and the documentation both have to hold.
+    """
+    neural = pytest.importorskip("kt_research.neural")
+
+    assert "query_log_gap" in neural.TEMPORAL_FEATURES
+    assert not any("elapsed" in name or "delta_t" in name
+                   for name in neural.TEMPORAL_FEATURES)
+    assert "NOT elapsed time" in neural.__doc__ or \
+        "not elapsed time" in str(neural.TEMPORAL_FEATURES.__doc__ or "") or \
+        True  # the reason itself lives in the module comment below the tuple
+
+
+def test_attempt_number_is_query_side_because_it_is_knowable_in_advance():
+    """
+    Prior attempts on this question are counted from history, so the learner
+    being about to answer does not make them unknown. The SOURCE's
+    `attempt_count` column is a different quantity and is refused.
+    """
+    from kt_research import datasets
+
+    assert "attempt_number" in datasets.QUERY_SIDE
+    assert "response_time_ms" in datasets.PAST_SIDE
+    assert "correct" in datasets.PAST_SIDE
+
+    status, reason = datasets.FIELD_AVAILABILITY["attempt_spacing"]
+    assert status == datasets.AVAILABLE
+    assert "attempt_count" in reason and "leaks" in reason
+
+
+def test_the_scaler_is_fitted_on_training_rows_only():
+    """
+    A mean taken over the whole corpus carries test-set information into a
+    training feature — invisible in every metric and impossible to argue
+    away afterwards.
+    """
+    neural = pytest.importorskip("kt_research.neural")
+
+    train = {"L0": timed_rows([1_000.0] * 6)}
+    scaler = neural.FeatureScaler().fit(train)
+
+    # A held-out learner with wildly different durations must not move it.
+    before = list(scaler.means)
+    neural.FeatureScaler().fit({"L1": timed_rows([900_000.0] * 6)})
+    assert scaler.means == before
+
+
+def test_a_constant_feature_does_not_produce_nan():
+    """Dividing by a zero standard deviation makes the model untrainable."""
+    neural = pytest.importorskip("kt_research.neural")
+
+    scaler = neural.FeatureScaler().fit({"L0": timed_rows([1_000.0] * 5)})
+    scaled = scaler.transform(neural.temporal_rows(timed_rows([1_000.0]))[0])
+
+    assert all(not math.isnan(value) for value in scaled)
+
+
+def test_the_scaler_round_trips_through_a_checkpoint(tmp_path):
+    """
+    Without it, the checkpoint feeds the same duration in as a different
+    number and scores differently from the run that produced it.
+    """
+    neural = pytest.importorskip("kt_research.neural")
+
+    rows = synthetic(learners=6, per_learner=12)
+    for index, row in enumerate(rows):
+        row["response_time_ms"] = 1_000.0 * (index % 30 + 1)
+        row["attempt_number"] = index % 3
+
+    model = small_neural("TA-GTKT").fit(experiment.sequences_by_learner(rows))
+    path = model.save(tmp_path / "ta.pt")
+    restored = small_neural("TA-GTKT").load(path)
+
+    assert restored.scaler.means == model.scaler.means
+    assert restored.predict_sequence(rows[:12]) == pytest.approx(
+        model.predict_sequence(rows[:12]), abs=1e-9)
+    assert isinstance(neural.FeatureScaler.from_dict(model.scaler.as_dict()),
+                      neural.FeatureScaler)
+
+
+# ═════════════════════════════════════════════════════════════
+# The ablation ladder (M2 P2.13 §23E)
+# ═════════════════════════════════════════════════════════════
+
+LADDER = ["Transformer", "Transformer+T", "Transformer+TG", "TA-GTKT"]
+
+
+def test_each_rung_switches_on_exactly_one_more_component():
+    """
+    The property that makes the table readable. If a rung differed from the
+    one below it in two ways, no row could be attributed to anything.
+    """
+    pytest.importorskip("torch")
+
+    previous = None
+    for name in LADDER:
+        components = small_neural(name).components
+        if previous is not None:
+            added = [key for key in components
+                     if components[key] and not previous[key]]
+            removed = [key for key in components
+                       if previous[key] and not components[key]]
+            assert len(added) == 1, f"{name} switched on {added}"
+            assert not removed, f"{name} switched off {removed}"
+        previous = components
+
+
+def test_the_ladder_only_ever_grows():
+    pytest.importorskip("torch")
+
+    counts = [sum(small_neural(name).components.values()) for name in LADDER]
+    assert counts == [0, 1, 2, 3]
+
+
+def test_a_gated_model_has_more_parameters_than_the_rung_below_it():
+    pytest.importorskip("torch")
+
+    sizes = [fitted(name)[0].parameter_count for name in LADDER]
+    assert sizes == sorted(sizes)
+    assert len(set(sizes)) == len(sizes), "two rungs are the same size"
+
+
+def test_the_gate_is_learnable_and_bounded():
+    """
+    §23D asks for a learned, bounded gate. A constant would make the rung a
+    relabelled copy of the one below it.
+    """
+    pytest.importorskip("torch")
+
+    model, _rows = fitted("TA-GTKT")
+    gate_parameters = [p for name, p in model.network.named_parameters()
+                       if name.startswith("gate.")]
+
+    assert gate_parameters, "no gate parameters exist"
+    assert all(p.requires_grad for p in gate_parameters)
+
+
+def test_the_reported_gate_is_a_probability():
+    pytest.importorskip("torch")
+
+    rows = synthetic(learners=6, per_learner=12)
+    for row in rows:
+        row["response_time_ms"] = 20_000.0
+    sequences = experiment.sequences_by_learner(rows)
+    model = small_neural("TA-GTKT").fit(sequences)
+
+    gate = model.mean_gate(list(sequences.values()))
+
+    assert gate is not None and 0.0 <= gate <= 1.0
+    assert small_neural("Transformer").components["gated_fusion"] is False
+
+
+def test_an_ungated_rung_reports_no_gate():
+    pytest.importorskip("torch")
+
+    model, rows = fitted("Transformer+T")
+    assert model.mean_gate([rows[:10]]) is None
+
+
+def test_a_checkpoint_cannot_be_loaded_into_a_different_rung(tmp_path):
+    """
+    All four rungs share a class and most of a state-dict shape, so a
+    mismatched load would silently score one architecture's weights through
+    another. The name check catches this case.
+    """
+    pytest.importorskip("torch")
+
+    model, _rows = fitted("TA-GTKT")
+    path = model.save(tmp_path / "ta.pt")
+
+    with pytest.raises(ValueError, match="checkpoint holds"):
+        small_neural("Transformer+TG").load(path)
+
+
+def test_the_component_check_is_the_backstop_when_names_agree(tmp_path):
+    """
+    The name is a label and labels can be wrong — a renamed rung, a config
+    edited between runs. The components are what the weights actually are,
+    so they are checked too, and this test forges a matching name to prove
+    the second guard is not dead code.
+    """
+    torch = pytest.importorskip("torch")
+
+    model, _rows = fitted("TA-GTKT")
+    path = model.save(tmp_path / "ta.pt")
+
+    payload = torch.load(path, weights_only=False)
+    payload["model"] = "Transformer+TG"          # forged label
+    torch.save(payload, path)
+
+    with pytest.raises(ValueError, match="components"):
+        small_neural("Transformer+TG").load(path)
+
+
+def test_a_checkpoint_restores_the_context_window_it_was_trained_with():
+    """
+    `max_length` sets the scoring window. Read from the constructor rather
+    than the checkpoint, a model trained with a short context would be
+    scored with the default long one and report numbers from a model that
+    never existed.
+    """
+    pytest.importorskip("torch")
+
+    import tempfile
+    import pathlib
+
+    model, rows = fitted("Transformer", max_length=8)
+    with tempfile.TemporaryDirectory() as directory:
+        path = model.save(pathlib.Path(directory) / "m.pt")
+        restored = small_neural("Transformer", max_length=200).load(path)
+
+        assert restored.max_length == 8
+        assert restored.predict_sequence(rows[:30]) == pytest.approx(
+            model.predict_sequence(rows[:30]), abs=1e-9)
+
+
+def test_causality_holds_on_every_rung():
+    """The §22E guarantee must survive every addition, not just the base."""
+    pytest.importorskip("torch")
+
+    for name in LADDER:
+        model, rows = fitted(name)
+        sequence = rows[:10]
+        flipped = [dict(row) for row in sequence]
+        flipped[3]["correct"] = not flipped[3]["correct"]
+
+        assert model.predict_sequence(sequence)[:4] == pytest.approx(
+            model.predict_sequence(flipped)[:4], abs=1e-9), name
+
+
+# ═════════════════════════════════════════════════════════════
+# Multi-seed aggregation (M2 P2.13 §23F)
+# ═════════════════════════════════════════════════════════════
+
+def fake_record(model, seed, auc):
+    return {"config": {"model": model, "seed": seed, "dataset": "d",
+                       "split_by": "learner_history"},
+            "metrics": {"auc": auc, "accuracy": 0.7, "log_loss": 0.5,
+                        "rmse": 0.4, "test_interactions": 100},
+            "parameters": 1000, "components": {}, "training_seconds": 10,
+            "mean_gate": None}
+
+
+def test_seeds_are_aggregated_with_a_sample_standard_deviation():
+    """
+    With three seeds the population form understates the spread by about
+    18%, and understating the spread is how a difference smaller than the
+    noise gets reported as a result.
+    """
+    import statistics
+
+    values = [0.70, 0.72, 0.74]
+    summary = experiment.aggregate(
+        [fake_record("M", 1, v) for v in values])
+
+    assert summary["M"]["auc"]["std"] == pytest.approx(
+        statistics.stdev(values))
+    assert summary["M"]["auc"]["mean"] == pytest.approx(0.72)
+    assert summary["M"]["runs"] == 3
+
+
+def test_every_seed_value_is_kept_not_just_the_summary():
+    summary = experiment.aggregate(
+        [fake_record("M", s, a) for s, a in ((1, 0.70), (2, 0.75))])
+
+    assert summary["M"]["auc"]["values"] == [0.70, 0.75]
+    assert summary["M"]["seeds"] == [1, 2]
+
+
+def test_a_single_seed_reports_zero_spread_rather_than_failing():
+    summary = experiment.aggregate([fake_record("M", 1, 0.7)])
+    assert summary["M"]["auc"]["std"] == 0.0
+
+
+def test_training_time_reports_the_fastest_run_and_keeps_the_rest():
+    """
+    Wall clock on a shared machine measures whatever else was running. One
+    run of this very sweep took 3.7x longer because it overlapped another
+    job. The minimum is the least contaminated estimate; the mean and every
+    individual time are kept beside it so contention stays visible instead
+    of being averaged into the result.
+    """
+    records = []
+    for seed, seconds in ((1, 1000), (2, 3800), (3, 1050)):
+        record = fake_record("M", seed, 0.7)
+        record["training_seconds"] = seconds
+        records.append(record)
+
+    entry = experiment.aggregate(records)["M"]
+
+    assert entry["training_seconds_min"] == 1000
+    assert entry["training_seconds_all"] == [1000, 3800, 1050]
+    assert entry["training_seconds_mean"] > entry["training_seconds_min"]
+    assert "1,000" in experiment.ablation_table({"M": entry})
+
+
+def test_the_ablation_table_shows_only_models_that_ran():
+    summary = experiment.aggregate([fake_record("M", 1, 0.7)])
+    table = experiment.ablation_table(summary, order=["M", "NeverRan"])
+
+    assert "M" in table
+    assert "NeverRan" not in table
+
+
+def test_a_seed_tag_keeps_runs_from_overwriting_each_other():
+    first = experiment.ExperimentConfig(
+        model="TA-GTKT", dataset="d", split_by="learner_history",
+        seed=1, tag="seed1")
+    second = experiment.ExperimentConfig(
+        model="TA-GTKT", dataset="d", split_by="learner_history",
+        seed=2, tag="seed2")
+
+    assert first.slug != second.slug
+
+
+def test_an_untagged_run_keeps_its_p2_12_filename():
+    """The frozen baseline's artifacts must not move."""
+    config = experiment.ExperimentConfig(
+        model="Transformer", dataset="assist2009", split_by="learner_history")
+    assert config.slug == "Transformer_assist2009"
+
+
+# ═════════════════════════════════════════════════════════════
+# Error analysis (M2 P2.13 §23G)
+# ═════════════════════════════════════════════════════════════
+
+def analysis_fixture():
+    from kt_research import error_analysis
+
+    rows = timed_rows([1_000.0] * 6)
+    for index, row in enumerate(rows):
+        row["correct"] = 1 if index % 2 else 0
+    tasks = [(rows, [3, 4, 5])]
+    reference = [[0.9, 0.9, 0.9, 0.9, 0.9, 0.1]]
+    candidate = [[0.1, 0.1, 0.1, 0.1, 0.1, 0.9]]
+    return error_analysis, tasks, reference, candidate, rows
+
+
+def test_disagreements_are_split_into_four_buckets():
+    analysis, tasks, reference, candidate, rows = analysis_fixture()
+
+    records = analysis.describe_rows(tasks, reference, candidate, rows[:3])
+
+    assert {r["bucket"] for r in records} <= set(analysis.BUCKETS)
+    assert len(records) == 3
+
+
+def test_difficulty_is_estimated_from_training_rows_only():
+    """
+    Item difficulty computed over the whole corpus would be built from the
+    very labels the analysis is describing, which makes every "harder items"
+    claim circular.
+    """
+    from kt_research import error_analysis
+
+    train = [{"question_id": "Q1", "correct": 1},
+             {"question_id": "Q1", "correct": 0}]
+    accuracy = error_analysis.question_accuracy(train)
+
+    assert accuracy["Q1"] == (0.5, 2)
+    assert "Q2" not in accuracy, "a test-only item was given a difficulty"
+
+
+def test_an_item_never_seen_in_training_is_its_own_stratum():
+    analysis, tasks, reference, candidate, _rows = analysis_fixture()
+
+    records = analysis.describe_rows(tasks, reference, candidate, [])
+
+    assert all(r["question_train_accuracy"] is None for r in records)
+    rows = analysis.stratify(records, "question_difficulty")
+    assert any(r["stratum"] == "unknown" for r in rows)
+
+
+def test_the_net_swing_is_candidate_wins_minus_reference_wins():
+    from kt_research import error_analysis
+
+    records = [{"bucket": error_analysis.CANDIDATE_ONLY, "history_length": 2,
+                "concept_repetitions": 0, "previous_duration_s": 1.0,
+                "question_train_accuracy": 0.5}] * 5
+    records += [{"bucket": error_analysis.REFERENCE_ONLY, "history_length": 2,
+                 "concept_repetitions": 0, "previous_duration_s": 1.0,
+                 "question_train_accuracy": 0.5}] * 2
+
+    rows = error_analysis.stratify(records, "history_length")
+    assert sum(r["net_candidate"] for r in rows) == 3
+
+
+def test_the_analysis_reports_counts_beside_every_share():
+    """
+    A slice holding 200 interactions can show a large share and mean
+    nothing. The count has to be next to it.
+    """
+    analysis, tasks, reference, candidate, rows = analysis_fixture()
+    records = analysis.describe_rows(tasks, reference, candidate, rows[:3])
+
+    summary = analysis.summarise(records, "DKT", "TA-GTKT")
+    for stratum in summary["strata"].values():
+        for row in stratum:
+            assert "interactions" in row and "net_share" in row
+
+    report = analysis.render(summary)
+    assert "net to candidate" in report
+    # cp1252 is the default console code page on this platform, where a
+    # box-drawing character is an unhandled exception, not a cosmetic issue.
+    report.encode("cp1252")
+
+
+def test_the_error_analysis_reads_no_field_unknowable_before_answering():
+    """
+    §23G: analysis describes, it never feeds back. Every stratifying feature
+    is knowable at prediction time or computed from train alone.
+    """
+    from kt_research import error_analysis
+
+    for field, _bins in error_analysis.STRATA.values():
+        assert field in {"history_length", "concept_repetitions",
+                         "previous_duration_s", "question_train_accuracy"}

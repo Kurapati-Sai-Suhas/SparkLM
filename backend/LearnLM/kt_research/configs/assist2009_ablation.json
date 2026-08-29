@@ -1,0 +1,60 @@
+{
+  "dataset": "assist2009",
+  "dataset_directory": "build/kt/assist09",
+  "split_by": "learner_history",
+  "seed": 20260827,
+  "seeds": [
+    20260827
+  ],
+  "notes": "P2.13 FAST MATRIX. One seed, four rungs, each switching on exactly one component. Every rung shares the corpus, the partition, the sequence construction, the scoring protocol and the training budget with the frozen P2.12 Transformer baseline; nothing is tuned per variant. The baseline's three seeds were completed before the sweep was stopped and are reused, so the seed noise floor is known: 0.0017 AUC.",
+  "models": {
+    "Transformer": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 15,
+      "batch_size": 64,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3,
+      "heads": 4,
+      "layers": 2
+    },
+    "Transformer+T": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 15,
+      "batch_size": 64,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3,
+      "heads": 4,
+      "layers": 2
+    },
+    "Transformer+TG": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 15,
+      "batch_size": 64,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3,
+      "heads": 4,
+      "layers": 2
+    },
+    "TA-GTKT": {
+      "hidden": 64,
+      "embedding": 64,
+      "max_length": 200,
+      "epochs": 15,
+      "batch_size": 64,
+      "learning_rate": 0.001,
+      "dropout": 0.2,
+      "patience": 3,
+      "heads": 4,
+      "layers": 2
+    }
+  }
+}

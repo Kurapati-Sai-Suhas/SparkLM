@@ -40,7 +40,14 @@ from dataclasses import asdict, dataclass, field
 
 #: Bumped when the canonical field set or its semantics change. Participates in
 #: the processed hash, so a schema change cannot silently reuse a cached build.
-SCHEMA_VERSION = 1
+#:
+#: v2 (M2 P2.13) adds `response_time_ms`. ASSISTments 2009 carries a genuine
+#: response duration in `ms_first_response` that v1 simply did not transport,
+#: so a temporal model built on v1 would have had to invent one. Adding a
+#: column changes the PROCESSED hash of every corpus and changes the SPLIT
+#: hash of none: the partition is a function of learner and position, and
+#: neither moved. A test asserts exactly that.
+SCHEMA_VERSION = 2
 
 #: Sentinel for "this source cannot supply this field".
 #:
@@ -85,6 +92,26 @@ class Interaction:
     source_row_id: str = ""
     occurred_at: object = UNAVAILABLE      # real timestamp, or None
     lag_seconds: float = UNAVAILABLE       # requires occurred_at
+
+    #: How long the learner took to give their first response, in
+    #: milliseconds, or None when the source has none (M2 P2.13).
+    #:
+    #: A DURATION, like `lag_seconds`, and not a point in time — it does not
+    #: give this corpus a clock. Carried verbatim from the source apart from
+    #: impossible values: a negative duration is dropped to None, because 8
+    #: rows of the published ASSISTments file are negative and that is a
+    #: source defect, not a fast answer.
+    #:
+    #: NOT capped here, deliberately. The longest value in ASSISTments 2009
+    #: is 23 hours, which is a session left open rather than a response, but
+    #: deciding what to do about that is a MODELLING choice. A corpus that
+    #: silently squashed it would be asserting a value nobody measured.
+    #:
+    #: Knowable only AFTER the learner answers. Any model using it must feed
+    #: it as evidence about a PAST interaction; using it at the position it
+    #: describes would be reading the answer sheet.
+    response_time_ms: float = UNAVAILABLE
+
     outcome_label: str = ""                # source's own verdict vocabulary
     provenance: Provenance = None
 
@@ -113,6 +140,8 @@ class Interaction:
                             else self.occurred_at.isoformat()),
             "lag_seconds": ("" if self.lag_seconds is None
                             else f"{self.lag_seconds:.3f}"),
+            "response_time_ms": ("" if self.response_time_ms is None
+                                 else f"{self.response_time_ms:.0f}"),
             "outcome_label": self.outcome_label,
             "dataset_name": self.provenance.dataset_name if self.provenance else "",
             "dataset_version": (self.provenance.dataset_version
@@ -137,8 +166,8 @@ class Interaction:
 CANONICAL_COLUMNS = (
     "learner_id", "question_id", "concept_id", "sequence_position",
     "correct", "attempt_number", "source_row_id", "occurred_at",
-    "lag_seconds", "outcome_label", "dataset_name", "dataset_version",
-    "source_file", "raw_dataset_hash", "schema_version",
+    "lag_seconds", "response_time_ms", "outcome_label", "dataset_name",
+    "dataset_version", "source_file", "raw_dataset_hash", "schema_version",
     "glicko_rating_at_time", "glicko_rd_at_time",
 )
 

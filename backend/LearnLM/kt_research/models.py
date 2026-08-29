@@ -6,18 +6,24 @@ what it consumes, so the comparison is between models that genuinely differ
 rather than between names.
 
     BKT              per-concept, no sequence model      IMPLEMENTED
-    DKT              RNN over interactions               NOT IMPLEMENTED
+    DKT              LSTM over interactions              IMPLEMENTED
     SAKT             self-attention, key/query on skill  NOT IMPLEMENTED
     AKT              monotonic attention + Rasch         NOT IMPLEMENTED
-    Transformer      plain encoder baseline              NOT IMPLEMENTED
-    TA-GTKT          + temporal + gating                 NOT IMPLEMENTED
+    Transformer      plain encoder baseline              IMPLEMENTED
+    Transformer+T    + response time, additive fusion    IMPLEMENTED
+    Transformer+TG   + learned gated fusion              IMPLEMENTED
+    TA-GTKT          + question embedding                IMPLEMENTED
     TA-GTKT-P        + prerequisite signal               NOT IMPLEMENTED
 
-Only BKT is implemented, and that is deliberate rather than a shortfall:
-it needs no framework, no GPU and no downloaded corpus, so the pipeline can
-be proven end-to-end — split, train, score, record — before any neural work
-begins. The rest raise `NotImplementedError` with what they still need. A
-stub that silently returned 0.5 would let a broken pipeline report a
+The last four form the P2.13 ablation ladder, and each rung switches on
+exactly ONE thing, so a difference in the table has exactly one candidate
+cause. The order is deliberate: response time first, then the gate that
+mixes it, then the question embedding — which is the largest block of
+parameters in the model and the one most likely to overfit, so it is added
+last where its effect can still be seen on its own.
+
+Anything unimplemented raises `NotImplementedError` with what it still
+needs. A stub that silently returned 0.5 would let a broken pipeline report a
 plausible AUC, which is the failure this file exists to avoid.
 
 ── On the name ─────────────────────────────────────────────────────────────
@@ -57,28 +63,60 @@ SPECS = {s.name: s for s in (
               "Self-Attentive KT: attention from past interactions to the "
               "queried skill.",
               needs="a tensor framework and a public dataset"),
-    ModelSpec("AKT", False, ("concept", "correctness", "difficulty"),
-              "Attentive KT: monotonic attention with Rasch-style "
-              "difficulty embeddings.",
+    ModelSpec("AKT", False, ("question", "concept", "correctness"),
+              "Attentive KT: monotonic attention with Rasch-style difficulty "
+              "embeddings. Difficulty is LEARNED as a scalar per question, "
+              "not read from a column — which is why AKT can use it on a "
+              "corpus that has no difficulty field.",
               needs="a tensor framework and a public dataset"),
     ModelSpec("Transformer", True, ("concept", "correctness"),
               "Plain causal encoder baseline — the control the additions are "
               "measured against. No temporal gating, no prerequisites."),
-    ModelSpec("TA-GTKT", False,
-              ("concept", "correctness", "timestamp", "response_time",
-               "delta_time", "attempt_count", "difficulty"),
-              "Temporal-Aware Gated Transformer KT: embeddings -> temporal "
-              "encoding -> gated fusion -> encoder -> next-response "
-              "probability.",
-              needs="a tensor framework, a public dataset, and the "
-                    "Transformer baseline to compare against"),
+    ModelSpec("Transformer+T", True,
+              ("concept", "correctness", "response_time", "attempt_number",
+               "ordinal_gap"),
+              "Baseline + response time, fused by plain addition. The "
+              "no-gate control."),
+    ModelSpec("Transformer+TG", True,
+              ("concept", "correctness", "response_time", "attempt_number",
+               "ordinal_gap"),
+              "The same temporal features mixed by a LEARNED gate. Differs "
+              "from the rung below by the gating mechanism and nothing "
+              "else."),
+    ModelSpec("TA-GTKT", True,
+              ("question", "concept", "correctness", "response_time",
+               "attempt_number", "ordinal_gap"),
+              "Temporal-Aware Gated Transformer KT: question, concept, "
+              "interaction and response-time representations -> learned "
+              "gated fusion -> causal encoder -> next-response probability."),
     ModelSpec("TA-GTKT-P", False,
-              ("concept", "correctness", "timestamp", "response_time",
-               "delta_time", "attempt_count", "difficulty", "prerequisites"),
+              ("question", "concept", "correctness", "response_time",
+               "attempt_number", "ordinal_gap", "prerequisites"),
               "TA-GTKT plus a prerequisite signal derived from the "
               "curriculum DAG.",
               needs="TA-GTKT, plus the research prerequisite representation"),
 )}
+
+#: Inputs the M2 P2.11b design named for TA-GTKT that the corpus cannot
+#: supply, and why (M2 P2.13 §23B).
+#:
+#: The original spec was written before any real data was in hand, and it
+#: named three inputs ASSISTments 2009 does not have. Leaving them in
+#: `consumes` would have been a standing claim that the model reads them.
+UNSUPPLIED_INPUTS = {
+    "delta_time":
+        "Real inter-event time requires a wall clock, and this corpus has "
+        "none. `ordinal_gap` counts other logged interactions in between; it "
+        "is used instead and is never called elapsed time.",
+    "difficulty":
+        "Not a source column. Estimating it from corpus-wide success rate "
+        "would carry test labels into a training feature.",
+    "attempt_count":
+        "The source column records how many tries the learner ULTIMATELY "
+        "needed, so reading it at its own position leaks the outcome. "
+        "`attempt_number` — prior attempts, computed from history — is used "
+        "instead.",
+}
 
 #: Name -> constructor, for the implemented rungs only.
 #:
@@ -144,6 +182,21 @@ def _build_dkt(**parameters):
 def _build_transformer(**parameters):
     from kt_research import neural
     return neural.TransformerKT(**parameters)
+
+
+def _build_transformer_temporal(**parameters):
+    from kt_research import neural
+    return neural.TransformerTemporal(**parameters)
+
+
+def _build_transformer_gated(**parameters):
+    from kt_research import neural
+    return neural.TransformerGated(**parameters)
+
+
+def _build_ta_gtkt(**parameters):
+    from kt_research import neural
+    return neural.TAGTKT(**parameters)
 
 
 # ═════════════════════════════════════════════════════════════
@@ -334,6 +387,9 @@ CONSTRUCTORS.update({
     "BKT": BKT,
     "DKT": _build_dkt,
     "Transformer": _build_transformer,
+    "Transformer+T": _build_transformer_temporal,
+    "Transformer+TG": _build_transformer_gated,
+    "TA-GTKT": _build_ta_gtkt,
 })
 
 

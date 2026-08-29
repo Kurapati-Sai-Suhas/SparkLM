@@ -84,6 +84,8 @@ class BuildResult:
     validation: list = field(default_factory=list)
     test: list = field(default_factory=list)
     rejected: list = field(default_factory=list)
+    #: Per-FIELD problems that did not cost the row. Counted, never silent.
+    field_issues: dict = field(default_factory=dict)
     config: dict = field(default_factory=dict)
     capabilities: dict = field(default_factory=dict)
     raw_dataset_hash: str = ""
@@ -139,12 +141,13 @@ def assemble(rows, config, capabilities, raw_hash):
                               int(float(r["order_key"])),
                               str(r.get("source_row_id", ""))))
 
-    interactions, prior = [], {}
+    interactions, prior, issues = [], {}, {}
     for row in valid:
         learner = str(row["learner_id"])
         question = str(row["question_id"])
         key = (learner, question)
         interactions.append(Interaction(
+            response_time_ms=_response_time(row, capabilities, issues),
             learner_id=learner,
             question_id=question,
             concept_id=str(row.get("concept_id", "") or ""),
@@ -171,7 +174,40 @@ def assemble(rows, config, capabilities, raw_hash):
         interactions = [i for i in interactions
                         if counts[i.learner_id] >= config.min_learner_length]
 
-    return interactions, rejections
+    return interactions, rejections, issues
+
+
+def _response_time(row, capabilities, issues):
+    """
+    `response_time_ms` for one row, or None with the reason counted.
+
+    A FIELD problem, not a ROW problem: an interaction whose duration is
+    unusable is still a perfectly good interaction with a known outcome, and
+    rejecting it would delete a real answer over a broken clock. So the field
+    goes to None and the count reaches the manifest — which is the same
+    "nothing silently discarded" rule applied one level down.
+    """
+    if not capabilities.has_response_time:
+        return None
+
+    raw = str(row.get("response_time_raw", "") or "").strip()
+    if not raw:
+        issues["response_time_missing"] = issues.get(
+            "response_time_missing", 0) + 1
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        issues["response_time_malformed"] = issues.get(
+            "response_time_malformed", 0) + 1
+        return None
+    if value < 0:
+        # A duration cannot be negative. Eight rows of the published
+        # ASSISTments file are; that is a defect, not a fast answer.
+        issues["response_time_negative"] = issues.get(
+            "response_time_negative", 0) + 1
+        return None
+    return value
 
 
 # ═════════════════════════════════════════════════════════════
@@ -364,13 +400,14 @@ def split_assignment(result):
 
 def build(rows, config, capabilities, raw_hash=""):
     """The whole pipeline. Pure: reads nothing, writes nothing."""
-    interactions, rejected = assemble(rows, config, capabilities, raw_hash)
+    interactions, rejected, issues = assemble(rows, config, capabilities,
+                                              raw_hash)
     train, validation_rows, test = split_by_learner(interactions, config)
 
     return BuildResult(
         interactions=interactions,
         train=train, validation=validation_rows, test=test,
-        rejected=rejected,
+        rejected=rejected, field_issues=issues,
         config=config.as_dict(),
         capabilities=capabilities.as_dict(),
         raw_dataset_hash=raw_hash,
@@ -399,6 +436,7 @@ def manifest(result, statistics, leakage):
             "rejected": len(result.rejected),
         },
         "rejection_counts": result.rejection_counts,
+        "field_issues": result.field_issues,
         "statistics": statistics,
         "leakage": leakage.as_dict(),
         "canonical_columns": list(CANONICAL_COLUMNS),

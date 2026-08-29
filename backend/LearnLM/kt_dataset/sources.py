@@ -43,6 +43,18 @@ ASSISTMENTS_2009 = SourceCapabilities(
             "No timestamp column exists. `ms_first_response` and "
             "`overlap_time` are DURATIONS in milliseconds, not points in "
             "time. Ordering is by `order_id` only.",
+        "inter_event_interval":
+            "Requires wall-clock time. The gap between two of a learner's "
+            "`order_id`s counts OTHER logged interactions in between, which "
+            "correlates with elapsed time but is not a measure of it — it "
+            "also moves with how busy the platform was.",
+        "attempt_count_column":
+            "`attempt_count` and `hint_count` describe how the learner's "
+            "engagement with this problem ENDED — how many tries and hints "
+            "they ultimately needed. Reading either at the position it "
+            "describes leaks the outcome. `attempt_number` (PRIOR attempts "
+            "on this learner+question) is computed instead and is knowable "
+            "before the learner answers.",
         "lag_seconds":
             "Requires wall-clock time, which this source does not have. "
             "SAINT+'s lag-time feature therefore cannot be reproduced on this "
@@ -93,6 +105,8 @@ def read_assistments_2009(path, *, raw_hash, encoding="latin-1"):
                 "correct": (row.get("correct") or "").strip(),
                 "order_key": (row.get("order_id") or "").strip(),
                 "attempt_count_raw": (row.get("attempt_count") or "").strip(),
+                "response_time_raw": (
+                    row.get("ms_first_response") or "").strip(),
                 "outcome_label": "correct" if (
                     row.get("correct") or "").strip() == "1" else "incorrect",
                 "occurred_at": None,          # this source has none

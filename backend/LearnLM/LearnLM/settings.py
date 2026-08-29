@@ -746,6 +746,10 @@ REST_FRAMEWORK = {
         # /code/next/ can trigger an LLM test-case generation.
         'judge0': '10/minute',
         'recommend': '30/minute',
+        # Each agent call can fan out to several tool calls and one LLM
+        # completion, so it is rated below /recommend even though it answers
+        # the same learner question.
+        'agent': '12/minute',
         # Token endpoints, keyed by IP for anonymous callers. Separate
         # buckets: 'auth' (login) is the credential-stuffing brake; refresh
         # presents an existing token (not guessable credentials) and gets a
@@ -892,6 +896,23 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 # curriculum gate). Off by default until after the demo window — the
 # frontend guard already prevents starting locked topics.
 CURRICULUM_GATE_ENFORCE = os.getenv("CURRICULUM_GATE_ENFORCE", "false").lower() == "true"
+
+# ── Agent orchestrator (M2 P2.14) ────────────────────────────────────────
+#
+# OFF by default. With this unset, /api/ai/agent/ answers from the
+# deterministic recommender — byte-identical to the pre-agent product — so
+# deploying the agent changes nothing until someone turns it on.
+AGENT_ORCHESTRATOR_ENABLED = os.getenv(
+    "AGENT_ORCHESTRATOR_ENABLED", "false").lower() == "true"
+
+# Offline export of knowledge-tracing predictions, read by the agent as an
+# ADVISORY signal. Empty by default: no export, no signal, and the endpoint
+# says so rather than inventing one.
+#
+# A path here does NOT load a model. The web tier has no tensor framework by
+# design (M1 P1.1 removed it), so the boundary is a file the research side
+# writes offline — never an import of `kt_research`.
+KT_PREDICTION_EXPORT = os.getenv("KT_PREDICTION_EXPORT", "")
 
 # --- SENTRY (M8 observability) ---
 # No-op unless SENTRY_DSN is provided (set it in the Render dashboard).

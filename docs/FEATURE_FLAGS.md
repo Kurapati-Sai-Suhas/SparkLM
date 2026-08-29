@@ -25,6 +25,23 @@ times (dead password validators, an inert throttle, a non-persisting cache).
 | Variable | Prod | Purpose | Added | Expiry | Decision |
 |---|---|---|---|---|---|
 | `CURRICULUM_GATE_ENFORCE` | `false` | Server-side enforcement of DAG prerequisites on `/api/code/next/`. When off, the gate is computed and returned but not enforced. | M7 (2026-07) | **2026-11-01** | **Stays off.** See below. |
+| `AGENT_ORCHESTRATOR_ENABLED` | `false` | Whether `/api/ai/agent/` invokes the LLM orchestrator. Off = the endpoint answers from the deterministic recommender, which is byte-identical to the pre-agent product. | M2 P2.14 (2026-08) | **2026-12-01** | **Off until the agent has run against real learners in staging.** See below. |
+
+### `AGENT_ORCHESTRATOR_ENABLED` — off by default, and safe either way
+
+The endpoint exists and is authenticated whether or not the flag is on. What the
+flag decides is only whether an LLM chooses the tool calls, or whether the same
+tools are called in a fixed order by the backend.
+
+Off is not a degraded mode — it is the recommendation the product already made.
+That is deliberate: it means deploying the agent cannot regress a learner's
+experience, and turning it on is reversible with one environment variable and no
+redeploy of behaviour anyone depends on.
+
+**Resolution condition.** Flip it on once the agent has served a real cohort in
+staging without a fallback rate above a threshold worth setting. Until the
+question bank has more than two trusted items, the agent has almost nothing to
+choose between, so there is little to learn from enabling it in production.
 
 ### `CURRICULUM_GATE_ENFORCE` — resolved, stays off
 
@@ -75,7 +92,8 @@ belongs to M6's decision about whether the routing engine earns further ML inves
 | `JUDGE0_MEMORY_LIMIT` | unset | KB sent as `memory_limit`. Same omit-by-default rule and the same rejection risk as above. | As above. |
 | `JUDGE0_PYTHON_LANGUAGE_ID` | `92` (Python 3.11.2) | Judge0 language id used for **every** Python execution — learner submissions, oracle runs, the quality gate and hidden-test reconciliation all resolve it from `common.languages`. Was `71` (Python 3.8.1), which cannot parse PEP 585 subscripted generics (`list[list[str]]` raises `TypeError: 'type' object is not subscriptable` at class-definition time); 772 of 2,926 Python starters use that syntax and could not execute at all. 3.11 is the oldest available option that supports PEP 585, chosen to minimise drift from 3.8. A non-integer value raises at import rather than falling back. | Rolling the runtime back (set `71`) or forward (`100` = 3.12.5, `109` = 3.13.2, `113` = 3.14.0) — all on the same Judge0 deployment and key, so this is a selection, not an upgrade. Verify equivalence on already-verified questions before changing it: q3309 reproduces all 12 stored outputs identically under both 71 and 92. |
 | `RESEED_GEMINI_MODEL` | `gemini-2.5-flash` | Model id used by the reseed content generator's Gemini provider (`groups/reseed_generation.py`). A model id is configuration, not code: `ai_services.py` hard-codes `llama-3.3-70b-versatile` at two call sites and that model has since been withdrawn, so every Groq path in the app now 404s and fixing it needs a code change. `probe_provider()` reports whether the configured id is actually offered by the key, by listing models rather than generating. | A provider retiring the model, or moving to a cheaper/stronger one. Free tier is 20 requests/day — exhausted by four questions at three attempts. |
-| `RESEED_GROQ_MODEL` | `openai/gpt-oss-120b` | Model id used by the reseed content generator's Groq provider. Default chosen because it is what the current key actually offers — verified by listing, not assumed. | As above. The generator fails fast on 404/429 rather than retrying, so a withdrawn model is reported once per question instead of three times. |
+| `RESEED_GROQ_MODEL` | `openai/gpt-oss-120b` | Model id used by the reseed content generator's Groq provider. Default chosen because it is what the current key actually offers — verified by listing, not assumed. **Also used by the agent orchestrator (M2 P2.14)**: `groups/agent/provider.py` reads the same registry rather than inheriting `ai_services`' hard-coded `llama-3.3-70b-versatile`, which is withdrawn and 404s. | As above. The generator fails fast on 404/429 rather than retrying, so a withdrawn model is reported once per question instead of three times. |
+| `KT_PREDICTION_EXPORT` | unset | Path to an offline knowledge-tracing prediction export, read by the agent as an **advisory** signal. Unset means no signal, reported as `unavailable` rather than invented. A path here does **not** load a model: the web tier has no tensor framework by design (M1 P1.1), so the research/production boundary is a file written offline by `kt_research.run_experiment export`, never an import of `kt_research`. Predictions are keyed by ASSISTments learner ids — the model has never seen a SparkLM learner, and every reading says so. | A model trained on SparkLM interactions, which needs a question bank that can produce them. |
 
 ---
 

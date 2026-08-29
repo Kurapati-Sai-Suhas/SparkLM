@@ -9,6 +9,7 @@ from common.auth_views import (
 from common.google_auth_views import GoogleAuthView
 from common.review_views import ReviewQueueView
 from common.dashboard_views import DashboardBootstrapView
+from groups.agent.views import AgentRecommendView
 
 from .views import (
     # Auth & User
@@ -76,6 +77,10 @@ urlpatterns = [
 
     # ── Module D: Hybrid Router ──────────────────────────────
     path('ai/recommend/',   HybridRouterView.as_view(), name='hybrid-router'),
+    # The agent orchestrates the services above; it does not replace them.
+    # Flag-gated: with AGENT_ORCHESTRATOR_ENABLED unset it answers from the
+    # deterministic recommender, which is the pre-agent behaviour.
+    path('ai/agent/',       AgentRecommendView.as_view(), name='ai-agent'),
     path('ai/mastery-map/', MasteryMapView.as_view(),   name='mastery-map'),
     path('review/queue/',   ReviewQueueView.as_view(),  name='review-queue'),
 

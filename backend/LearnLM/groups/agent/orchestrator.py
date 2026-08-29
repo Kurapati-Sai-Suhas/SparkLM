@@ -104,8 +104,19 @@ class Orchestrator:
 
             self._private.append(plan.get("reasoning"))
 
+            # An explicit give-up (M2 P2.14). A provider that is rate-limited,
+            # unreachable or returning unparseable output says so here, and
+            # gets the deterministic answer rather than a retry loop.
+            if "stop" in plan:
+                return self._stop(str(plan["stop"]))
+
             if "final" in plan:
-                return AgentResult(str(plan["final"]), self.transcript,
+                answer = plan["final"]
+                # A null or blank `final` is not an answer. Stringifying it
+                # would hand the learner the literal text "None".
+                if answer is None or not str(answer).strip():
+                    return self._stop("planner_returned_empty_answer")
+                return AgentResult(str(answer), self.transcript,
                                    self.calls, "final")
 
             name = plan.get("tool")

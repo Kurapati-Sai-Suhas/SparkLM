@@ -99,6 +99,10 @@ MATRIX = {
     "review-queue": SELF_SCOPED,
     "mastery-map": SELF_SCOPED,
     "hybrid-router": SELF_SCOPED,
+    # The agent answers about the CALLING learner only: its session is
+    # constructed from request.user and every tool reads through it, so there
+    # is no path to another learner's state (M2 P2.14).
+    "ai-agent": SELF_SCOPED,
     "save-quiz": SELF_SCOPED,
     "code-profile": SELF_SCOPED,
     "code-next-problem": SELF_SCOPED,

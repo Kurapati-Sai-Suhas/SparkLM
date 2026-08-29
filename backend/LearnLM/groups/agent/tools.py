@@ -38,7 +38,7 @@ from typing import Any, Callable
 
 from django.utils import timezone
 
-from groups import shadow
+from groups import glicko, shadow
 from groups.models import (CodeSubmission, Question, Topic, UserCodingProfile,
                            UserTopicMastery)
 
@@ -83,6 +83,39 @@ class Session:
 # The tools
 # ═════════════════════════════════════════════════════════════
 
+def _glicko_signal(user, mastery_rows):
+    """
+    Glicko-2 as a READ signal (M2 P2.14 §24D).
+
+    `shadow.current_ability` applies inactivity inflation for the caller and
+    PERSISTS NOTHING — merely looking at a learner does not age them. Elo is
+    untouched and remains the routing authority; this is an extra uncertainty
+    channel for the agent to reason over, not a second opinion that wins.
+
+    `confidence` is derived from RD, not invented: a fresh learner starts at
+    RD 350 and a well-evidenced one falls toward 50, so the ratio gives a
+    0-1 reading that means "how much evidence stands behind this rating".
+    """
+    from groups.models import Topic
+
+    readings = []
+    for row in mastery_rows[:5]:
+        topic = Topic.objects.filter(name=row["topic__name"]).first()
+        if topic is None:
+            continue
+        rating, deviation, evidence = shadow.current_ability(user, topic)
+        span = max(glicko.DEFAULT_RD - 50.0, 1.0)
+        confidence = 1.0 - min(max((deviation - 50.0) / span, 0.0), 1.0)
+        readings.append({
+            "topic": topic.name,
+            "rating": round(rating, 1),
+            "rating_deviation": round(deviation, 1),
+            "confidence": round(confidence, 3),
+            "evidence_count": evidence,
+        })
+    return readings
+
+
 def get_learner_state(session):
     """The learner's current standing. Reads; computes nothing new."""
     user = session.user
@@ -99,10 +132,16 @@ def get_learner_state(session):
     eligible = CodeSubmission.objects.filter(
         user=user, adaptive_eligible=True).count()
 
+    from groups.agent import kt_signal
+
     return {
         "elo_rating": round(profile.elo_rating, 2) if profile else None,
         "rating_engine": "EloEngine (live)",
         "glicko_shadow": "available, UNARMED — not the learner-visible rating",
+        # READ-ONLY signals (M2 P2.14). Both are advisory: Elo still decides
+        # what is served, and neither of these is written by anything here.
+        "glicko_readings": _glicko_signal(user, mastery),
+        "kt_prediction": kt_signal.predict(user),
         "distinct_questions_solved": solved,
         "submissions_admissible_as_evidence": eligible,
         "topic_mastery": [

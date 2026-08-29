@@ -1,7 +1,84 @@
 # P2.15 — Pilot reference decision pack
 
-**Status:** AWAITING OPERATOR DECISION. Nothing has been approved, promoted,
-published or executed.
+**Status:** DECIDED AND EXECUTED. Four references approved by the operator on
+2026-08-29; one Oracle execution run on q1974. Nothing promoted or published.
+
+---
+
+## Operator decision — recorded 2026-08-29
+
+| Reference | Question | Decision | Lifecycle reached |
+| --- | --- | --- | --- |
+| #4 | q1940 | **APPROVE** | APPROVED, not active |
+| #5 | q1974 | **APPROVE** | APPROVED + **ACTIVE** (canonical) |
+| #6 | q2057 | **APPROVE** | APPROVED, not active |
+| #7 | q2290 | **APPROVE** | APPROVED, not active |
+
+Oracle target chosen by the operator: **q1974**.
+
+Only #5 was activated. `activate` selects the canonical reference the Oracle
+runs, and only the question being executed needs one — the other three are
+approved and inert.
+
+### The precedent this sets
+
+Approving **#6** decides the open question the pack raised: `load_bearing`
+constrains the **result**, not the traversal. q2057's reference checks only
+the letters that appear rather than all twenty-six, produces identical output
+on every input, and was accepted on that basis.
+
+That now applies to every reference reviewed after this one. A future
+reference may take a different route through a specification provided its
+results are identical; a reviewer who wants the method pinned must say so in
+`required_operation`, not in `load_bearing`.
+
+### Verification after approval
+
+Every stored `source_hash` equals the digest published in this pack for
+review, so what was approved is what was reviewed:
+
+| Reference | `source_hash` | Matches pack |
+| --- | --- | --- |
+| #4 | `6e6e7573…8a85edb54` | ✓ |
+| #5 | `7c8748a0…8ccafbdc` | ✓ |
+| #6 | `ab53947a…955a57592` | ✓ |
+| #7 | `85cf0800…9c7cb664b` | ✓ |
+
+`approved_by = Suhas` and `approved_at` populated on all four; provenance
+reported `intact` for all four. Source is now frozen by a database constraint
+that recomputes the digest — an approved reference cannot be edited, only
+superseded.
+
+---
+
+## Oracle execution — q1974, 2026-08-29
+
+Dry run first (`record=False`): 14 agree, 0 conflict, 0 absent, 0 unsettled,
+and the command reported `DRY RUN — no provenance recorded`. Then one recorded
+execution (`--execute --operator Suhas --alias oracle`, role
+`learnlm_oracle_rw`), same result.
+
+| | |
+| --- | --- |
+| Cases | 14 agree · 0 conflict · 0 absent · 0 unsettled |
+| Rows written | **28** — see below |
+| Reference source hash on every row | `7c8748a078305212e05fb5318f86db68506fb576744f4dd89bc4253d8ccafbdc` |
+| Contract recorded | `v3`, matching the question |
+| `is_authoritative` | `False` on all 28 |
+| Status | `SUCCESS` on all 28 |
+| Hidden suite digest before and after | `ac416cbf8e8c4071116f0285fcd7d53b…` — unchanged |
+| q1974 status / trust after | `DRAFT` / `UNVERIFIED` — unchanged |
+
+**Why 28 rows for 14 cases.** The pipeline runs each case **twice** with
+`verify_determinism=False` and compares the two results itself, recording
+both executions. `OracleService.run` would have verified determinism
+internally and discarded the second result; hoisting it keeps both attempts
+as evidence. Exactly 2 rows per `case_digest`, ~1s apart, identical output on
+every pair — so the reference is deterministic on all 14 inputs, and that is
+now recorded rather than asserted.
+
+`is_authoritative = False` throughout: this is evidence, not grading truth.
+The command cannot write `expected_output` — no writer exists in this phase.
 
 **What this document is.** Everything needed to decide whether each of the four
 pilot references is correct, presented so the decision is yours. I did not

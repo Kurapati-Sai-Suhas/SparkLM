@@ -18,19 +18,19 @@
   "provenance": {
     "case_count": 13,
     "case_identities": [
-      "27d637edaf67a4d55677aeff027ef1ea6e9fc46f732c076a571017132c8b2f59",
-      "991a0528a61ec16f6efa1819ca1696a61a171236e9171c18891cd7f60181c970",
-      "34928cbd31f148f52df0ce86e941683940197327d576bc7234cc986d51a0de13",
-      "9d4f0fb3d9288ecef7864a4e57e988fff99dc618f0f382ac76a9bd658212eadd",
-      "e119c4822a150ba7499673fe5c063d0bac292f2d593b2b9873ecc6551c6fabd2",
-      "2978c895bea61618d17d66d9e987e8b112faa7809eeb9811c67644cfc3befb22",
-      "7db1b0447a8d3749fc0a4687a2438ed78c1652912610207682d797855fcab042",
-      "96cc8dddaa6cf263a15bf7679c37eebfe30520020f63e9f8a99c54b18ce58bac",
-      "18b08c768fc56ee147284cb0a51474bd3450a264f0efc771ff353288b4b15bc6",
-      "8215e6cf71534b0d89f742e862c54a94f6fa2ae114c3d2ea1d7a0e7b7ad83b4d",
-      "d6059cc5d318a60e87f730c255306f8bc7673a16980c58fbc802a6d6d4adf00c",
-      "0654532b27d48924811f27ac6f5d346ebad296e0545189c8fb3b4b09d76dcd8d",
-      "78e59f78aaab1597f3bbf7fbd407c7bd66c276629cd9ce0bf94698b08416d3f6"
+      "9ac106c815c7de60f66290dfdd2b10a03d59b6bc1d5fbd73f2bc1222dcf54905",
+      "d1f65e1a973eb034a1665b365da32d106c64ac08a73dd61a1fc64cfa1301e543",
+      "c9a059006b29686622efaad2c8e6ee712a11476637b1760f73d1c955291a9e20",
+      "60e7851a62df966d2dc766b70d3a1fb0c548b98b57bf30be973e193762908198",
+      "b14c584363cf953dbb79f120c99b1d1f5d46e86f1c2a44e54f9b0357a5da35bf",
+      "cc39772de0175f8623c3dc60d32265391f96b9beafc36bf8ed3e5e38f35f17e3",
+      "6c92692a86a524b0dc2385c8167a15ee3d93731138ae8e44ad632a607c5bf15b",
+      "93d6d5ba3659b2d4f5ba6b46349cd8b3d1301ac5aec619d8f7910d396ee54641",
+      "f5950761dbd33486cb3ebd3a52bc3bcdddf2f59b77d36fb5b7477d09d8f0e244",
+      "a0f9452b97e9a8001b7b4273247a4da53f210578868da9174d92acbc6ef8f311",
+      "f10b646a3c2e225d2e13844f38c9be35a52118032c604cc2946eb17184f6f1e6",
+      "f1858d5ef3ce76e38427e9d7ac5458dc0383160f9bbe1327c60c79e38ea6b4d8",
+      "08e6c1c60d5803e852f85d4675b302ae293b00c3e60e3c260247f0e720618632"
     ],
     "categories": [
       "alphabetical_trap",
@@ -44,14 +44,14 @@
     ],
     "execution_contract_version": "v3",
     "question_id": 1436,
-    "question_state_digest": "4f5748806c5212f5c2be26ac915956c1ed4bfa6bfa6d12ba237aadaea7dd3002",
+    "question_state_digest": "f9b1e1462253246ed8bcbc2785b88a1333c12049404ecfc61dcb70e298de15bf",
     "reference_id": 3,
     "reference_language": "python",
     "reference_source_hash": "2e0551949f7ca6ba6b5fa117b36e428b74e22e008c358937a0123e4ef889f10e",
     "results": [
       {
         "identifier": "t1-alphabetically-last",
-        "killed_by_case": 5,
+        "killed_by_case": 1,
         "outcome": "KILLED",
         "tier": 1
       },
@@ -63,7 +63,7 @@
       },
       {
         "identifier": "t1-last-edge-destination",
-        "killed_by_case": 6,
+        "killed_by_case": 2,
         "outcome": "KILLED",
         "tier": 1
       },
@@ -117,7 +117,7 @@
       },
       {
         "identifier": "t2-skip-first-edge",
-        "killed_by_case": 8,
+        "killed_by_case": 3,
         "outcome": "KILLED",
         "tier": 2
       },

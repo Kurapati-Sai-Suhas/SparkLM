@@ -1,0 +1,125 @@
+{
+  "input_contract": {
+    "accepts_empty_input": false,
+    "allows_duplicates": true,
+    "allows_negative": false,
+    "allows_zero": false,
+    "description": "A list of 2-1000 integers, each between 1 and 1000. Order-insensitive: only the minimum and maximum participate.",
+    "has_size_bounds": true,
+    "is_sequence": true,
+    "numeric": true,
+    "order_sensitive": false,
+    "overflow_sensitive": false
+  },
+  "mutants": [
+    {
+      "description": "folds gcd across the whole list",
+      "identifier": "t1-gcd-of-every-element",
+      "source": "\nimport math\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        result = nums[0]\n        for value in nums[1:]:\n            result = math.gcd(result, value)\n        return result\n",
+      "tier": 1
+    },
+    {
+      "description": "uses nums[0] and nums[-1] instead of min and max",
+      "identifier": "t1-first-and-last-element",
+      "source": "\nimport math\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        return math.gcd(nums[0], nums[-1])\n",
+      "tier": 1
+    },
+    {
+      "description": "returns min(nums) rather than a divisor",
+      "identifier": "t1-returns-the-smallest-value",
+      "source": "\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        return min(nums)\n",
+      "tier": 1
+    },
+    {
+      "description": "computes the least common multiple",
+      "identifier": "t1-lcm-instead-of-gcd",
+      "source": "\nimport math\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        low, high = min(nums), max(nums)\n        return low * high // math.gcd(low, high)\n",
+      "tier": 1
+    },
+    {
+      "description": "sorts and uses the second element as the minimum",
+      "identifier": "t1-second-smallest-and-largest",
+      "source": "\nimport math\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        ordered = sorted(nums)\n        return math.gcd(ordered[1], ordered[-1])\n",
+      "tier": 1
+    },
+    {
+      "description": "operand swap: gcd(max, max)",
+      "identifier": "t2-max-with-itself",
+      "source": "\nimport math\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        return math.gcd(max(nums), max(nums))\n",
+      "tier": 2
+    },
+    {
+      "description": "operator swap: max - min",
+      "identifier": "t2-difference-not-gcd",
+      "source": "\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        return max(nums) - min(nums)\n",
+      "tier": 2
+    },
+    {
+      "description": "EQUIVALENT: gcd(max, min) rather than gcd(min, max)",
+      "equivalence_argument": "gcd is commutative: the set of common divisors of {a, b} does not depend on the order of the pair, so gcd(a, b) = gcd(b, a) for all non-negative integers. math.gcd implements the mathematical function, so swapping the operands cannot change the result on any input.",
+      "identifier": "t2-operands-reversed",
+      "source": "\nimport math\nclass Solution:\n    def findGreatestCommonDivisorOfArray(self, nums: list) -> int:\n        return math.gcd(max(nums), min(nums))\n",
+      "tier": 2
+    }
+  ],
+  "provenance": {
+    "assessment_kind": "NEW RECONSTRUCTED QUALITY-GATE ASSESSMENT",
+    "authored_by": "assistant-drafted in M2 P2.18b, PENDING OPERATOR REVIEW",
+    "method": "Mutants were derived from the question's specification only. The stored hidden suite was NOT consulted while writing them, so the catalogue cannot have been biased toward mutants the suite already kills.",
+    "not_the_phase_19_artifact": "P2.7 Phase 19 authored these suites mutant-first and drove the gate to a pass in that session. Those mutant specifications were never persisted and are not recoverable. This catalogue is NEW and was written after the suites were already fixed. Any result from it is a reconstructed post-hoc assessment and must not be reported as the Phase 19 gate result.",
+    "reference_id": 5,
+    "reference_source_hash": "7c8748a078305212e05fb5318f86db68506fb576744f4dd89bc4253d8ccafbdc",
+    "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84"
+  },
+  "question": 1974,
+  "rationale": {
+    "t1-first-and-last-element": {
+      "distinguishing_input": "([6, 2, 3],)",
+      "mutant_result": "3",
+      "reference_result": "2",
+      "why_wrong": "A learner who assumes the list arrives sorted takes the ends as the extremes. The specification says explicitly that the list may be in any order."
+    },
+    "t1-gcd-of-every-element": {
+      "distinguishing_input": "([2, 5, 6, 9, 10],)",
+      "mutant_result": "1",
+      "reference_result": "2",
+      "why_wrong": "The specification's load-bearing sentence is that EXACTLY TWO values participate and every other element is ignored. 'Greatest common divisor of array' reads as the gcd of all of it, and that is what most learners will write."
+    },
+    "t1-lcm-instead-of-gcd": {
+      "distinguishing_input": "([2, 5, 6, 9, 10],)",
+      "mutant_result": "10",
+      "reference_result": "2",
+      "why_wrong": "gcd and lcm are the pair a learner most often swaps, and both are one call away in math."
+    },
+    "t1-returns-the-smallest-value": {
+      "distinguishing_input": "([7, 5, 6, 8, 3],)",
+      "mutant_result": "3",
+      "reference_result": "1",
+      "why_wrong": "Confuses 'greatest common divisor of the smallest and largest' with 'the smallest'. Correct whenever the minimum divides the maximum, which is common in small hand-written examples."
+    },
+    "t1-second-smallest-and-largest": {
+      "distinguishing_input": "([2, 5, 6, 9, 10],)",
+      "mutant_result": "5",
+      "reference_result": "2",
+      "why_wrong": "An off-by-one after sorting \u2014 sorted(nums)[1] instead of [0] \u2014 which a learner writes when they are mentally skipping a sentinel."
+    },
+    "t2-difference-not-gcd": {
+      "distinguishing_input": "([2, 5, 6, 9, 10],)",
+      "mutant_result": "8",
+      "reference_result": "2",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-max-with-itself": {
+      "distinguishing_input": "([2, 5, 6, 9, 10],)",
+      "mutant_result": "10",
+      "reference_result": "2",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-operands-reversed": {
+      "distinguishing_input": "none \u2014 declared equivalent",
+      "mutant_result": "n/a",
+      "reference_result": "n/a",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    }
+  }
+}

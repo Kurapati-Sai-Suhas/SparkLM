@@ -1,0 +1,125 @@
+{
+  "input_contract": {
+    "accepts_empty_input": false,
+    "allows_duplicates": false,
+    "allows_negative": false,
+    "allows_zero": false,
+    "description": "A single integer n between 1 and 10000. Overflow-sensitive: the count exceeds the modulus from about n = 23 onward.",
+    "has_size_bounds": true,
+    "is_sequence": false,
+    "numeric": true,
+    "order_sensitive": false,
+    "overflow_sensitive": true
+  },
+  "mutants": [
+    {
+      "description": "returns the count for a single side, not squared",
+      "identifier": "t1-one-side-only",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        MOD = 1000000007\n        a, b = 1, 2\n        for _ in range(n - 1):\n            a, b = b, (a + b) % MOD\n        return b % MOD\n",
+      "tier": 1
+    },
+    {
+      "description": "starts the recurrence at 1, 1",
+      "identifier": "t1-plain-fibonacci-base",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        MOD = 1000000007\n        a, b = 1, 1\n        for _ in range(n - 1):\n            a, b = b, (a + b) % MOD\n        return (b * b) % MOD\n",
+      "tier": 1
+    },
+    {
+      "description": "treats the two sides as one row of 2n plots",
+      "identifier": "t1-adjacency-across-the-street",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        MOD = 1000000007\n        a, b = 1, 2\n        for _ in range(2 * n - 1):\n            a, b = b, (a + b) % MOD\n        return b % MOD\n",
+      "tier": 1
+    },
+    {
+      "description": "returns the exact count without reducing",
+      "identifier": "t1-no-modulo-reduction",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        a, b = 1, 2\n        for _ in range(n - 1):\n            a, b = b, a + b\n        return b * b\n",
+      "tier": 1
+    },
+    {
+      "description": "iterates n times instead of n-1",
+      "identifier": "t1-loop-runs-n-times",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        MOD = 1000000007\n        a, b = 1, 2\n        for _ in range(n):\n            a, b = b, (a + b) % MOD\n        return (b * b) % MOD\n",
+      "tier": 1
+    },
+    {
+      "description": "boundary nudge: modulus 1000000006",
+      "identifier": "t2-modulus-off-by-one",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        MOD = 1000000006\n        a, b = 1, 2\n        for _ in range(n - 1):\n            a, b = b, (a + b) % MOD\n        return (b * b) % MOD\n",
+      "tier": 2
+    },
+    {
+      "description": "operator swap: 2*b rather than b*b",
+      "identifier": "t2-doubles-instead-of-squaring",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        MOD = 1000000007\n        a, b = 1, 2\n        for _ in range(n - 1):\n            a, b = b, (a + b) % MOD\n        return (2 * b) % MOD\n",
+      "tier": 2
+    },
+    {
+      "description": "EQUIVALENT: no intermediate reduction, one modulo at the end",
+      "equivalence_argument": "Modular reduction is a ring homomorphism: (x + y) mod m = ((x mod m) + (y mod m)) mod m, and the same for multiplication. Reducing at every step and reducing once at the end therefore give the same residue. Python integers are arbitrary precision, so the unreduced intermediate cannot overflow and the only cost is speed. Equal on every n in the specification's range.",
+      "identifier": "t2-reduce-only-at-the-end",
+      "source": "\nclass Solution:\n    def countNumberOfWaysToPlaceHouses(self, n: int) -> int:\n        MOD = 1000000007\n        a, b = 1, 2\n        for _ in range(n - 1):\n            a, b = b, a + b\n        return (b * b) % MOD\n",
+      "tier": 2
+    }
+  ],
+  "provenance": {
+    "assessment_kind": "NEW RECONSTRUCTED QUALITY-GATE ASSESSMENT",
+    "authored_by": "assistant-drafted in M2 P2.18b, PENDING OPERATOR REVIEW",
+    "method": "Mutants were derived from the question's specification only. The stored hidden suite was NOT consulted while writing them, so the catalogue cannot have been biased toward mutants the suite already kills.",
+    "not_the_phase_19_artifact": "P2.7 Phase 19 authored these suites mutant-first and drove the gate to a pass in that session. Those mutant specifications were never persisted and are not recoverable. This catalogue is NEW and was written after the suites were already fixed. Any result from it is a reconstructed post-hoc assessment and must not be reported as the Phase 19 gate result.",
+    "reference_id": 7,
+    "reference_source_hash": "85cf0800aa7b2b6c7cd8f516630f7ae1e038de71274f0b869ff80829c7cb664b",
+    "specification_digest": "37f4230790e3c76074bc7dff6a56977a1be3091130c47bb5557710ecef6e4a20"
+  },
+  "question": 2290,
+  "rationale": {
+    "t1-adjacency-across-the-street": {
+      "distinguishing_input": "(1,)",
+      "mutant_result": "3",
+      "reference_result": "4",
+      "why_wrong": "The specification says the adjacency restriction applies only within a side and that a house places no restriction on the plot opposite it. Modelling the street as a single row imposes a constraint that does not exist."
+    },
+    "t1-loop-runs-n-times": {
+      "distinguishing_input": "(1,)",
+      "mutant_result": "9",
+      "reference_result": "4",
+      "why_wrong": "Classic off-by-one when the base case already covers the first plot. Shifts every answer one step along the recurrence."
+    },
+    "t1-no-modulo-reduction": {
+      "distinguishing_input": "(22,)",
+      "mutant_result": "2149991424",
+      "reference_result": "149991410",
+      "why_wrong": "The specification says the result is reduced modulo 1000000007 rather than reported exactly. In Python nothing overflows, so this is invisible until n is large enough for the square to exceed the modulus \u2014 around n = 23."
+    },
+    "t1-one-side-only": {
+      "distinguishing_input": "(1,)",
+      "mutant_result": "2",
+      "reference_result": "4",
+      "why_wrong": "The specification's load-bearing sentence is that the total is the count for one side multiplied by itself. Solving one side and forgetting the street has two is the central trap of this problem."
+    },
+    "t1-plain-fibonacci-base": {
+      "distinguishing_input": "(1,)",
+      "mutant_result": "1",
+      "reference_result": "4",
+      "why_wrong": "Recognising the Fibonacci shape but not re-deriving the base case. With n = 1 there are two arrangements per side, not one \u2014 the empty plot counts."
+    },
+    "t2-doubles-instead-of-squaring": {
+      "distinguishing_input": "(2,)",
+      "mutant_result": "6",
+      "reference_result": "9",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-modulus-off-by-one": {
+      "distinguishing_input": "(22,)",
+      "mutant_result": "149991412",
+      "reference_result": "149991410",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-reduce-only-at-the-end": {
+      "distinguishing_input": "none \u2014 declared equivalent",
+      "mutant_result": "n/a",
+      "reference_result": "n/a",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    }
+  }
+}

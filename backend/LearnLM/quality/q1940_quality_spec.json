@@ -1,0 +1,137 @@
+{
+  "input_contract": {
+    "accepts_empty_input": false,
+    "allows_duplicates": true,
+    "allows_negative": false,
+    "allows_zero": false,
+    "description": "A string of 1-100 lowercase letters and a round count k between 1 and 10. Order-sensitive because the positions are concatenated, not added.",
+    "has_size_bounds": true,
+    "is_sequence": true,
+    "numeric": false,
+    "order_sensitive": true,
+    "overflow_sensitive": false
+  },
+  "mutants": [
+    {
+      "description": "adds the alphabet positions instead of concatenating them",
+      "identifier": "t1-sums-positions-instead-of-concatenating",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = sum(ord(c) - 96 for c in s)\n        for _ in range(k):\n            value = sum(int(d) for d in str(value))\n        return value\n",
+      "tier": 1
+    },
+    {
+      "description": "maps a to 0 instead of 1",
+      "identifier": "t1-alphabet-is-zero-based",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = int(''.join(str(ord(c) - 97) for c in s))\n        for _ in range(k):\n            value = sum(int(d) for d in str(value))\n        return value\n",
+      "tier": 1
+    },
+    {
+      "description": "performs one digit-summing round regardless of k",
+      "identifier": "t1-single-round-ignores-k",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = int(''.join(str(ord(c) - 96) for c in s))\n        return sum(int(d) for d in str(value))\n",
+      "tier": 1
+    },
+    {
+      "description": "sums digits until one digit remains, ignoring k",
+      "identifier": "t1-digital-root-instead-of-k-rounds",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = int(''.join(str(ord(c) - 96) for c in s))\n        while value >= 10:\n            value = sum(int(d) for d in str(value))\n        return value\n",
+      "tier": 1
+    },
+    {
+      "description": "performs k-1 rounds",
+      "identifier": "t1-rounds-run-k-minus-one-times",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = int(''.join(str(ord(c) - 96) for c in s))\n        for _ in range(k - 1):\n            value = sum(int(d) for d in str(value))\n        return value\n",
+      "tier": 1
+    },
+    {
+      "description": "boundary nudge: ord(c) - 95",
+      "identifier": "t2-position-offset-95",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = int(''.join(str(ord(c) - 95) for c in s))\n        for _ in range(k):\n            value = sum(int(d) for d in str(value))\n        return value\n",
+      "tier": 2
+    },
+    {
+      "description": "operator swap: max of the digits instead of sum",
+      "identifier": "t2-max-digit-not-sum",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = int(''.join(str(ord(c) - 96) for c in s))\n        for _ in range(k):\n            value = max(int(d) for d in str(value))\n        return value\n",
+      "tier": 2
+    },
+    {
+      "description": "loop bound short by one: s[:-1]",
+      "identifier": "t2-drops-last-character",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        value = int(''.join(str(ord(c) - 96) for c in s[:-1]) or '0')\n        for _ in range(k):\n            value = sum(int(d) for d in str(value))\n        return value\n",
+      "tier": 2
+    },
+    {
+      "description": "EQUIVALENT: sums digits off the string without the int round trip",
+      "equivalence_argument": "The reference computes int(text) and then sums its decimal digits. No alphabet position is 0, so text has no leading zero and int(text) round-trips to exactly text \u2014 the digit multiset is identical. Summing the digits of text directly therefore produces the same first-round value, and the remaining k-1 rounds are identical. Equal on every input in the specification's range.",
+      "identifier": "t2-sum-digits-from-string-directly",
+      "source": "\nclass Solution:\n    def sumOfDigitsOfStringAfterConvert(self, s: str, k: int) -> int:\n        text = ''.join(str(ord(c) - 96) for c in s)\n        value = sum(int(d) for d in text)\n        for _ in range(k - 1):\n            value = sum(int(d) for d in str(value))\n        return value\n",
+      "tier": 2
+    }
+  ],
+  "provenance": {
+    "assessment_kind": "NEW RECONSTRUCTED QUALITY-GATE ASSESSMENT",
+    "authored_by": "assistant-drafted in M2 P2.18b, PENDING OPERATOR REVIEW",
+    "method": "Mutants were derived from the question's specification only. The stored hidden suite was NOT consulted while writing them, so the catalogue cannot have been biased toward mutants the suite already kills.",
+    "not_the_phase_19_artifact": "P2.7 Phase 19 authored these suites mutant-first and drove the gate to a pass in that session. Those mutant specifications were never persisted and are not recoverable. This catalogue is NEW and was written after the suites were already fixed. Any result from it is a reconstructed post-hoc assessment and must not be reported as the Phase 19 gate result.",
+    "reference_id": 4,
+    "reference_source_hash": "6e6e7573b44e997839c897af170d48f9aea7eda1c3d062bc374344f8a85edb54",
+    "specification_digest": "3e837b04ce81d24f2f3c5b94024c4f62a492b3750cbd9ab8f8215eff3ff8e4ac"
+  },
+  "question": 1940,
+  "rationale": {
+    "t1-alphabet-is-zero-based": {
+      "distinguishing_input": "('a', 1)",
+      "mutant_result": "0",
+      "reference_result": "1",
+      "why_wrong": "The specification says a is 1 and z is 26. A learner reaching for ord(c) - ord('a') gets a zero-based alphabet, which is the standard Python idiom and wrong here."
+    },
+    "t1-digital-root-instead-of-k-rounds": {
+      "distinguishing_input": "('zz', 1)",
+      "mutant_result": "7",
+      "reference_result": "16",
+      "why_wrong": "'Repeatedly replace by the digit sum' reads as the digital root to anyone who has met that idea before. It agrees with the reference whenever k is large enough to reach a fixed point, so it hides behind most tests."
+    },
+    "t1-rounds-run-k-minus-one-times": {
+      "distinguishing_input": "('z', 1)",
+      "mutant_result": "26",
+      "reference_result": "8",
+      "why_wrong": "Counting the conversion itself as the first round is a natural off-by-one when the problem describes 'transform, then repeat'."
+    },
+    "t1-single-round-ignores-k": {
+      "distinguishing_input": "('zz', 2)",
+      "mutant_result": "16",
+      "reference_result": "7",
+      "why_wrong": "The specification says the round runs exactly k times, no more and no fewer. A learner who reads 'sum the digits' as a single step ignores k entirely, and every k=1 test still passes."
+    },
+    "t1-sums-positions-instead-of-concatenating": {
+      "distinguishing_input": "('zz', 1)",
+      "mutant_result": "7",
+      "reference_result": "16",
+      "why_wrong": "The specification's load-bearing sentence is that the conversion CONCATENATES positions rather than adding them. Adding is the more natural reading of 'convert the letters to numbers' and is the single likeliest misreading of this problem."
+    },
+    "t2-drops-last-character": {
+      "distinguishing_input": "('a', 1)",
+      "mutant_result": "0",
+      "reference_result": "1",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-max-digit-not-sum": {
+      "distinguishing_input": "('z', 1)",
+      "mutant_result": "6",
+      "reference_result": "8",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-position-offset-95": {
+      "distinguishing_input": "('a', 1)",
+      "mutant_result": "2",
+      "reference_result": "1",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-sum-digits-from-string-directly": {
+      "distinguishing_input": "none \u2014 declared equivalent",
+      "mutant_result": "n/a",
+      "reference_result": "n/a",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    }
+  }
+}

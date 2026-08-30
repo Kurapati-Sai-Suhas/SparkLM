@@ -1,0 +1,125 @@
+{
+  "input_contract": {
+    "accepts_empty_input": false,
+    "allows_duplicates": true,
+    "allows_negative": false,
+    "allows_zero": false,
+    "description": "Two equal-length strings of 1-100 lowercase letters. Order-insensitive: only per-letter frequencies matter.",
+    "has_size_bounds": true,
+    "is_sequence": true,
+    "numeric": false,
+    "order_sensitive": false,
+    "overflow_sensitive": false
+  },
+  "mutants": [
+    {
+      "description": "requires the difference to be strictly under 3",
+      "identifier": "t1-strict-less-than-three",
+      "source": "\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        return all(abs(word1.count(c) - word2.count(c)) < 3\n                   for c in set(word1) | set(word2))\n",
+      "tier": 1
+    },
+    {
+      "description": "bounds the SUM of all differences by 3",
+      "identifier": "t1-total-difference-across-letters",
+      "source": "\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        total = sum(abs(word1.count(c) - word2.count(c))\n                    for c in set(word1) | set(word2))\n        return total <= 3\n",
+      "tier": 1
+    },
+    {
+      "description": "checks the INTERSECTION of the two letter sets",
+      "identifier": "t1-only-letters-in-both-words",
+      "source": "\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        return all(abs(word1.count(c) - word2.count(c)) <= 3\n                   for c in set(word1) & set(word2))\n",
+      "tier": 1
+    },
+    {
+      "description": "drops abs, comparing a signed difference",
+      "identifier": "t1-signed-difference-no-absolute-value",
+      "source": "\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        return all(word1.count(c) - word2.count(c) <= 3\n                   for c in set(word1) | set(word2))\n",
+      "tier": 1
+    },
+    {
+      "description": "treats the words as almost equivalent only when they are anagrams",
+      "identifier": "t1-compares-sorted-strings",
+      "source": "\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        return sorted(word1) == sorted(word2)\n",
+      "tier": 1
+    },
+    {
+      "description": "boundary nudge: <= 4",
+      "identifier": "t2-threshold-four",
+      "source": "\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        return all(abs(word1.count(c) - word2.count(c)) <= 4\n                   for c in set(word1) | set(word2))\n",
+      "tier": 2
+    },
+    {
+      "description": "quantifier swap: any instead of all",
+      "identifier": "t2-any-instead-of-all",
+      "source": "\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        return any(abs(word1.count(c) - word2.count(c)) <= 3\n                   for c in set(word1) | set(word2))\n",
+      "tier": 2
+    },
+    {
+      "description": "EQUIVALENT: iterates the full alphabet rather than the letters present",
+      "equivalence_argument": "A letter absent from both words has count 0 in each, so its difference is 0, which satisfies <= 3 unconditionally. The full alphabet therefore adds only clauses that are always true, and a conjunction is unchanged by adding true conjuncts. This is the traversal the specification's load_bearing field describes; the operator approved the union form in P2.15 on exactly this equivalence, and recording it here makes that ruling machine-checked.",
+      "identifier": "t2-iterates-all-twenty-six-letters",
+      "source": "\nimport string\nclass Solution:\n    def checkWhetherTwoStringsAreAlmostEquivalent(self, word1: str, word2: str) -> bool:\n        return all(abs(word1.count(c) - word2.count(c)) <= 3\n                   for c in string.ascii_lowercase)\n",
+      "tier": 2
+    }
+  ],
+  "provenance": {
+    "assessment_kind": "NEW RECONSTRUCTED QUALITY-GATE ASSESSMENT",
+    "authored_by": "assistant-drafted in M2 P2.18b, PENDING OPERATOR REVIEW",
+    "method": "Mutants were derived from the question's specification only. The stored hidden suite was NOT consulted while writing them, so the catalogue cannot have been biased toward mutants the suite already kills.",
+    "not_the_phase_19_artifact": "P2.7 Phase 19 authored these suites mutant-first and drove the gate to a pass in that session. Those mutant specifications were never persisted and are not recoverable. This catalogue is NEW and was written after the suites were already fixed. Any result from it is a reconstructed post-hoc assessment and must not be reported as the Phase 19 gate result.",
+    "reference_id": 6,
+    "reference_source_hash": "ab53947a8ace447facfb01d28585d470f5ac9ea089587d325d89262955a57592",
+    "specification_digest": "d8febbe3bb5f02ae0cf72181a65f4788fd8dd5e9db7499f399f0c22e26a55d26"
+  },
+  "question": 2057,
+  "rationale": {
+    "t1-compares-sorted-strings": {
+      "distinguishing_input": "('abcdeef', 'abaaacc')",
+      "mutant_result": "False",
+      "reference_result": "True",
+      "why_wrong": "Confuses 'almost equivalent' with 'same letters'. Passes every test where the answer is true because the words are permutations of each other."
+    },
+    "t1-only-letters-in-both-words": {
+      "distinguishing_input": "('aaaa', 'bccb')",
+      "mutant_result": "True",
+      "reference_result": "False",
+      "why_wrong": "The near-miss of the approved reference. The reference iterates the union, which is safe; the intersection silently skips any letter present in one word and absent from the other \u2014 exactly the letters whose counts differ most."
+    },
+    "t1-signed-difference-no-absolute-value": {
+      "distinguishing_input": "('bcde', 'aaaa')",
+      "mutant_result": "True",
+      "reference_result": "False",
+      "why_wrong": "The specification says the difference is a size and is never negative. Without abs, a letter that is far more frequent in word2 than word1 produces a large negative number that passes the test."
+    },
+    "t1-strict-less-than-three": {
+      "distinguishing_input": "('abcdeef', 'abaaacc')",
+      "mutant_result": "False",
+      "reference_result": "True",
+      "why_wrong": "The specification says a difference of exactly three is still acceptable. 'Differ by at most 3' is routinely coded as < 3."
+    },
+    "t1-total-difference-across-letters": {
+      "distinguishing_input": "('abcdeef', 'abaaacc')",
+      "mutant_result": "False",
+      "reference_result": "True",
+      "why_wrong": "Reads the threshold as a budget over the whole word rather than a per-letter condition. Agrees with the reference on every pair that differs in only one letter, which is most small examples."
+    },
+    "t2-any-instead-of-all": {
+      "distinguishing_input": "('aaaa', 'bccb')",
+      "mutant_result": "True",
+      "reference_result": "False",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-iterates-all-twenty-six-letters": {
+      "distinguishing_input": "none \u2014 declared equivalent",
+      "mutant_result": "n/a",
+      "reference_result": "n/a",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    },
+    "t2-threshold-four": {
+      "distinguishing_input": "('aaaa', 'bccb')",
+      "mutant_result": "True",
+      "reference_result": "False",
+      "why_wrong": "Mechanical Tier-2 mutation; see description."
+    }
+  }
+}

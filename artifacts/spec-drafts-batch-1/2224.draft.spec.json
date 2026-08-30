@@ -1,0 +1,16 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "n/a",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "draft_digest": "a13f0712a7100e6b323e94a85cce3c9d60750c764f413870d5b44d3fe5012016",
+  "externally_verified": false,
+  "not_drafted_reason": "'Design Video Sharing Platform' is a DESIGN problem requiring a stateful class with several public methods called in sequence. The execution contract admits exactly one public method and one call per test case, so it cannot be made runnable under the current harness whatever its specification says.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2224,
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "STRUCTURALLY_BLOCKED",
+  "title": "Design Video Sharing Platform",
+  "topic": "Hash Table"
+}

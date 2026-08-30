@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "medium",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "constraints": "n is between 1 and 200. Each travel time is a positive integer. At most one connection joins any pair of nodes.",
+  "draft_digest": "47f423dc26f60b78c36c6f27c7c685b6d7b2d283e91aaecc41f250c8066f15ba",
+  "edge_cases": "When the first and last node are the same, one path exists.",
+  "externally_verified": false,
+  "input_semantics": "Two parameters. The first, n, is the number of nodes, labelled 0 to n-1. The second, roads, is a list of entries, each giving two node labels and the travel time between them.",
+  "load_bearing": "Only paths of MINIMUM total travel time are counted. The result is reduced modulo 1000000007 rather than reported exactly.",
+  "output_semantics": "A single integer: the number of shortest paths, reduced modulo 1000000007.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1971,
+  "required_operation": "In a weighted undirected graph, count the shortest paths from the first node to the last node, and report that count reduced modulo one thousand million and seven.",
+  "review_risk": "MEDIUM",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Number of Ways to Arrive at Destination",
+  "topic": "Dynamic Programming"
+}

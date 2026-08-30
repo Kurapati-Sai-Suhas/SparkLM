@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "medium",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "constraints": "k is between 2 and 9. n is between 1 and 30.",
+  "draft_digest": "efc185160c7f57cb55bf666805c130a48cea3e50c30e843adfa6536bcaa19f4c",
+  "edge_cases": "Single-digit positive integers are mirrored in every base above them.",
+  "externally_verified": false,
+  "input_semantics": "Two parameters. The first, k, is the other base. The second, n, is how many such numbers to collect.",
+  "load_bearing": "A qualifying number is mirrored in BOTH bases at once, the numbers collected are the n SMALLEST such, and the value reported is their sum.",
+  "output_semantics": "A single integer: the sum of the n smallest qualifying numbers.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2070,
+  "required_operation": "A number is mirrored in a base when its digits in that base read identically forwards and backwards. Find the smallest n positive integers that are mirrored both in base ten and in a given base, and report their sum.",
+  "review_risk": "MEDIUM",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Sum of k-Mirror Numbers",
+  "topic": "Math"
+}

@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1000.0,
+  "constraints": "patterns holds between 1 and 100 strings; each string and word hold between 1 and 100 lowercase English letters.",
+  "draft_digest": "0f4203448a113ce3c1936cd2d361a42655893e294921655d7412d15adb3491ba",
+  "edge_cases": "A pattern equal to word counts. Repeated identical patterns are each counted separately.",
+  "externally_verified": false,
+  "input_semantics": "Two parameters. The first, patterns, is a list of strings. The second, word, is a single string.",
+  "load_bearing": "Occurrence is as a CONTIGUOUS substring, and the quantity reported is the number of qualifying patterns rather than the number of occurrences.",
+  "output_semantics": "A single integer: how many entries of patterns occur as a contiguous substring of word.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1962,
+  "required_operation": "Count how many strings in a collection appear as a contiguous substring of a given word, and report that count.",
+  "review_risk": "LOW",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Number of Strings That Appear as Substrings in Word",
+  "topic": "Array"
+}

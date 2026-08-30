@@ -1,0 +1,16 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "none",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "draft_digest": "12c2a0176e09e0cd2cce2b8a46d68f825fc758ae6e56a1ef42df6096b0fe887c",
+  "externally_verified": false,
+  "not_drafted_reason": "The behaviour of 'Maximum Cost of Trip With K Highways' is not known to the author with enough confidence to write a specification safely. Sourcing the statement is an operator action.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2217,
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "NOT_DRAFTED",
+  "title": "Maximum Cost of Trip With K Highways",
+  "topic": "Dynamic Programming"
+}

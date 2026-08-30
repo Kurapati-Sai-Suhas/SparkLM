@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1000.0,
+  "constraints": "Both values are between 0 and 2^31 - 1.",
+  "draft_digest": "c29a735be7152f6341805b1428d4f5d659f0950a586c81c108b73138b4c353a5",
+  "edge_cases": "Two equal values differ in no positions. Leading zeros are shared and contribute nothing.",
+  "externally_verified": false,
+  "input_semantics": "Two parameters, x and y, both non-negative integers.",
+  "load_bearing": "The count is of POSITIONS where the two binary representations hold different bits.",
+  "output_semantics": "A single integer: the number of differing bit positions.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 3343,
+  "required_operation": "Count the bit positions at which two integers differ, and report that count.",
+  "review_risk": "LOW",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Hamming Distance",
+  "topic": "Bit Manipulation"
+}

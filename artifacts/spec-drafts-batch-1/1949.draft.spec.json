@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "medium",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "constraints": "neededApples is between 1 and 10^15 inclusive.",
+  "draft_digest": "131fc62621ccbb584ee0747fdf9b77d96a9e7daf36cf3a47d679d1c44a9ba267",
+  "edge_cases": "The plot is axis-aligned and centred on the origin, so its side length is an even number and its perimeter is a multiple of eight.",
+  "externally_verified": false,
+  "input_semantics": "One parameter, neededApples, a positive integer giving the minimum number of apples to collect.",
+  "load_bearing": "Apples are counted for every tree inside the plot and on its boundary. The answer is the PERIMETER, not the side length.",
+  "output_semantics": "A single integer: the smallest qualifying perimeter.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1949,
+  "required_operation": "A square plot is centred on the origin of an infinite grid. The tree at each integer coordinate holds a number of apples equal to the sum of the absolute values of its coordinates. Find the smallest even perimeter of such a plot whose enclosed trees, including those on the boundary, hold at least the required number of apples, and report that perimeter.",
+  "review_risk": "MEDIUM",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Minimum Garden Perimeter to Collect Enough Apples",
+  "topic": "Math"
+}

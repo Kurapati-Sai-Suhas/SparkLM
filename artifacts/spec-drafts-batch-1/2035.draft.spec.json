@@ -1,0 +1,16 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "n/a",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "draft_digest": "d5383c3b37d841ed0f4ea33d8b228f5ded6942de6ce13a4beb936819b8172f06",
+  "externally_verified": false,
+  "not_drafted_reason": "The input is the head of a linked list. Arguments reach a solution through a JSON envelope of plain values, which cannot carry a node object, and no harness in this project builds a linked list from one. The question is unrunnable under the current contract regardless of its specification.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2035,
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "STRUCTURALLY_BLOCKED",
+  "title": "Sort Linked List Already Sorted Using Absolute Values",
+  "topic": "Linked List"
+}

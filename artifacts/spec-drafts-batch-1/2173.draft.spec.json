@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "medium",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "constraints": "n is between 3 and 10^5. Weights are non-negative integers.",
+  "draft_digest": "d6b2e52207487a1ad28685552190a51fa3dee4e97bca3335946dc706df6a8fd6",
+  "edge_cases": "Edges shared by the two routes are counted once. When either source cannot reach the destination the answer is -1.",
+  "externally_verified": false,
+  "input_semantics": "Five parameters: n, the number of nodes labelled 0 to n-1; edges, a list of entries each giving a source, a target and a weight; and src1, src2 and dest, three node labels.",
+  "load_bearing": "Both sources must reach the destination within the SAME chosen set of edges, and the total counts each edge once however many routes use it.",
+  "output_semantics": "A single integer: the smallest achievable total weight, or -1 when no such subgraph exists.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2173,
+  "required_operation": "In a directed weighted graph, find the smallest total edge weight of a subgraph in which two given sources can each reach a given destination, counting each chosen edge once, and report that total.",
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Minimum Weighted Subgraph With the Required Paths",
+  "topic": "Graph"
+}

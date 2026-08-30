@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "constraints": "n is between 2 and 10^5. Times are positive integers. A person does not meet themselves.",
+  "draft_digest": "4e42dd39a75319e2068349378d14f02455371af8edf854ac600aa8e3f288d168",
+  "edge_cases": "Person 0 and firstPerson know the secret before any meeting. Meetings sharing a time propagate the secret among all of them together.",
+  "externally_verified": false,
+  "input_semantics": "Three parameters: n, the number of people labelled 0 to n-1; meetings, a list of entries each giving two people and a time; and firstPerson, the person who is told the secret at the start.",
+  "load_bearing": "Meetings take effect in increasing order of time, and simultaneous meetings are resolved as one group so the secret can pass through several of them at that instant.",
+  "output_semantics": "A list of the people who know the secret, in any order.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2081,
+  "required_operation": "A secret starts with person 0 and one other person. People meet in pairs at given times, and anyone who knows the secret at the moment of a meeting shares it with the other attendee. Meetings at the same time all take effect together. Report every person who knows the secret once all meetings have happened.",
+  "review_risk": "MEDIUM",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Find All People With Secret",
+  "topic": "Depth-First Search"
+}

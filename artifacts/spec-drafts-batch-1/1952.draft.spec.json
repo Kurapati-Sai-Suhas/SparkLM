@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1000.0,
+  "constraints": "s holds between 1 and 10^5 characters.",
+  "draft_digest": "4a300d0005997eb8e8d99c17a5f458e9425d81447ba704660d53a011cd910bef",
+  "edge_cases": "A run of exactly two identical characters is kept in full. A run of length k above two is reduced to two characters.",
+  "externally_verified": false,
+  "input_semantics": "One parameter, s, a string of lowercase English letters.",
+  "load_bearing": "Only consecutive repetition matters; the same character may appear many times in the result provided no three sit adjacent. Characters are removed, and the order of those that remain is preserved.",
+  "output_semantics": "The resulting string.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1952,
+  "required_operation": "Remove the fewest characters from a string so that no character appears three or more times consecutively, and report the resulting string.",
+  "review_risk": "LOW",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Delete Characters to Make Fancy String",
+  "topic": "String"
+}

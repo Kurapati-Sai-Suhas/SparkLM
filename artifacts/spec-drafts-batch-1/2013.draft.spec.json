@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "constraints": "answerKey holds between 1 and 5*10^4 characters. k is between 1 and the length of answerKey.",
+  "draft_digest": "99a8ad0c2e43dc93d0b9cb7358cf1e43e73421a61a3c0a58fb9ff2ca0481a7d9",
+  "edge_cases": "When k is at least the length of the string, the whole string can be made uniform.",
+  "externally_verified": false,
+  "input_semantics": "Two parameters. The first, answerKey, is a string of the characters T and F. The second, k, is the number of changes permitted.",
+  "load_bearing": "At most k characters are changed IN TOTAL, and the run reported is contiguous.",
+  "output_semantics": "A single integer: the length of the longest achievable run of identical characters.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2013,
+  "required_operation": "A string records answers as T and F. Any single character may be changed at most k times in total. Find the longest run of identical characters obtainable, and report its length.",
+  "review_risk": "LOW",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Maximize the Confusion of an Exam",
+  "topic": "String"
+}

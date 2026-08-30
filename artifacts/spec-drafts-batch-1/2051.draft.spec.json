@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1000.0,
+  "constraints": "word holds between 1 and 100 characters.",
+  "draft_digest": "cae512fecc5c0b7d64f07a13774cd53603f9366c1faf6140b79450f8010e57ef",
+  "edge_cases": "A qualifying substring is at least five characters long. Substrings are counted by position, so identical text at different positions counts more than once.",
+  "externally_verified": false,
+  "input_semantics": "One parameter, word, a string of lowercase English letters.",
+  "load_bearing": "Every character of a qualifying substring is a vowel, and all five vowels appear within it.",
+  "output_semantics": "A single integer: the number of qualifying substrings.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2051,
+  "required_operation": "Count the contiguous substrings of a string that consist only of vowels and contain every one of the five vowels at least once, and report that count.",
+  "review_risk": "MEDIUM",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Count Vowel Substrings of a String",
+  "topic": "Hash Table"
+}

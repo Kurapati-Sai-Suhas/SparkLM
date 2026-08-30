@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "medium",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "constraints": "The list holds between 1 and 10^5 integers, each between 1 and 10^7.",
+  "draft_digest": "09d23a6835bbd576c671e20c1cf5a10323dd2bbae4037f73ed3d7eaa0f2c5ad5",
+  "edge_cases": "The course must include the obstacle at its own position, so every answer is at least one.",
+  "externally_verified": false,
+  "input_semantics": "One parameter, obstacles, a list of integers giving the heights.",
+  "load_bearing": "Heights along a course are NON-DECREASING, so equal heights may follow one another. Positions chosen for a course keep their original order but need not be adjacent.",
+  "output_semantics": "A list of integers of the same length as the input, giving the answer for each position in order.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1959,
+  "required_operation": "For each position in a sequence of obstacle heights, find the length of the longest course that ends at that position and whose heights are non-decreasing, and report those lengths in order.",
+  "review_risk": "MEDIUM",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Find the Longest Valid Obstacle Course at Each Position",
+  "topic": "Array"
+}

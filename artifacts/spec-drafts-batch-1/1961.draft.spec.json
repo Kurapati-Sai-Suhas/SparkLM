@@ -1,0 +1,16 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "none",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "draft_digest": "37b8ffc591091b7ca7821b55c8b2498c464353d175de2fd299e5aef79da4ee76",
+  "externally_verified": false,
+  "not_drafted_reason": "The behaviour of 'Binary Searchable Numbers in an Unsorted Array' is not known to the author with enough confidence to write a specification that later work would bind to. Sourcing the statement is an operator action.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1961,
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "NOT_DRAFTED",
+  "title": "Binary Searchable Numbers in an Unsorted Array",
+  "topic": "Array"
+}

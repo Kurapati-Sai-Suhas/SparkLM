@@ -1,0 +1,16 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "none",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "draft_digest": "1688b0e2d14aee43fe94626b95365455cc3d81dbf4c2d3a3ba20eab24bdac1c4",
+  "externally_verified": false,
+  "not_drafted_reason": "The behaviour of 'Number of Nodes With Value One' is not known to the author with enough confidence to write a specification safely. Sourcing the statement is an operator action.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2415,
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "NOT_DRAFTED",
+  "title": "Number of Nodes With Value One",
+  "topic": "Tree"
+}

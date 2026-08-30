@@ -1,0 +1,16 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "n/a",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "draft_digest": "b7b595a8f4216330fcb308575281f36470f086b11e3da5d4335eb40062e1c386",
+  "externally_verified": false,
+  "not_drafted_reason": "'Stock Price Fluctuation' is a DESIGN problem: it requires a stateful class exposing several public methods that are called in sequence. The execution contract admits exactly one public method and one call per test case, so no specification can make this question runnable under the current harness. Reseeding it needs a contract that can express a call sequence.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2023,
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "STRUCTURALLY_BLOCKED",
+  "title": "Stock Price Fluctuation",
+  "topic": "Hash Table"
+}

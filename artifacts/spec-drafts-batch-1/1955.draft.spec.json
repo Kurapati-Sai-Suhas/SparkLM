@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "medium",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "constraints": "s holds between 2 and 10^5 characters.",
+  "draft_digest": "dbd81359f2f3f4e3ff259028afb209a6bceb52338ffa7ed7bdd6896412fe0598",
+  "edge_cases": "A single character is a palindrome of length one, so a product is always available.",
+  "externally_verified": false,
+  "input_semantics": "One parameter, s, a string of lowercase English letters.",
+  "load_bearing": "Both substrings have ODD length, they do not share any position, and the quantity maximised is the product of their lengths.",
+  "output_semantics": "A single integer: the largest achievable product of the two lengths.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1955,
+  "required_operation": "Find two non-overlapping palindromic substrings of a string, each of odd length, whose lengths have the largest possible product, and report that product.",
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Maximum Product of the Length of Two Palindromic Substrings",
+  "topic": "String"
+}

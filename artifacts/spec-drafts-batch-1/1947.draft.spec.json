@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1000.0,
+  "constraints": "n is between 1 and 10000 inclusive.",
+  "draft_digest": "5f9f5e2bddfe0568a1777107f0cb95c9402796745eb5441c5f9b91397b153b3c",
+  "edge_cases": "1 has a single divisor. A prime has two. The count includes 1 and n themselves.",
+  "externally_verified": false,
+  "input_semantics": "One parameter, n, a positive integer.",
+  "load_bearing": "The count is of DISTINCT divisors, and the required count is exactly three \u2014 neither fewer nor more.",
+  "output_semantics": "A boolean: true when n has exactly three distinct positive divisors, false otherwise.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 1947,
+  "required_operation": "Decide whether a positive integer has exactly three distinct positive divisors, and report that decision.",
+  "review_risk": "LOW",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Three Divisors",
+  "topic": "Math"
+}

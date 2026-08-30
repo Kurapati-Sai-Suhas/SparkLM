@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "medium",
+  "authoritative": false,
+  "base_difficulty": 1600.0,
+  "constraints": "n is between 2 and 10^4. Times and intervals are positive integers. The graph is connected and holds no self-loops or repeated edges.",
+  "draft_digest": "3f9d5005b0c893d84f917cbf59d4f3782a05924e5e997f3c4ded1d53fb7f21f8",
+  "edge_cases": "The second smallest time is strictly greater than the smallest; two routes taking equal time count once between them.",
+  "externally_verified": false,
+  "input_semantics": "Four parameters: n, the number of nodes labelled 1 to n; edges, a list of node pairs; time, the time to cross one edge; and change, the interval at which the signals switch.",
+  "load_bearing": "Departure is permitted only during an allowing interval, so waiting time is part of the total. The value reported is the SECOND smallest distinct total time.",
+  "output_semantics": "A single integer: the second smallest achievable total time.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2034,
+  "required_operation": "Every edge of an undirected graph takes the same time to cross. Signals at every node alternate between allowing and blocking departure on a fixed repeating cycle, and a traveller arriving while departure is blocked waits until it is allowed. Find the second smallest total time in which the first node can reach the last node, and report it.",
+  "review_risk": "MEDIUM",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Second Minimum Time to Reach Destination",
+  "topic": "Breadth-First Search"
+}

@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "constraints": "n is between 1 and 1000. The graph holds no cycles and no repeated edges.",
+  "draft_digest": "0fe6860febe90de86d8d3c4c79604581b06bd0848329f7b3306123ea294580b5",
+  "edge_cases": "A node with no incoming path has an empty list. A node is not its own ancestor.",
+  "externally_verified": false,
+  "input_semantics": "Two parameters. The first, n, is the number of nodes labelled 0 to n-1. The second, edges, is a list of directed node pairs.",
+  "load_bearing": "An ancestor is any node with a directed path of one or more edges to the node, and each node's list is sorted ascending and free of repeats.",
+  "output_semantics": "A list of n lists. The entry at each position holds that node's ancestors in ascending order.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2162,
+  "required_operation": "For every node of a directed acyclic graph, find all nodes from which it can be reached, and report them in ascending order.",
+  "review_risk": "LOW",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "All Ancestors of a Node in a Directed Acyclic Graph",
+  "topic": "Depth-First Search"
+}

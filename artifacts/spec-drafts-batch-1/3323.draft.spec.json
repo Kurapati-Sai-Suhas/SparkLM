@@ -1,0 +1,21 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "high",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "constraints": "Both bounds are between 0 and 2^31 - 1.",
+  "draft_digest": "f9ba201c0a628b4c3bd5b5ae01d9176a5a960d116c5071d5fbf587d24235da54",
+  "edge_cases": "When the bounds are equal the answer is that value. A range spanning a power of two yields zero in the bits below it.",
+  "externally_verified": false,
+  "input_semantics": "Two parameters, left and right, giving the inclusive bounds of the range with left no greater than right.",
+  "load_bearing": "Every integer in the range participates, and the operation applied across them is bitwise AND.",
+  "output_semantics": "A single integer: the bitwise AND of all integers from left to right inclusive.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 3323,
+  "required_operation": "Compute the bitwise AND of every integer in an inclusive range, and report the result.",
+  "review_risk": "LOW",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "DRAFTED",
+  "title": "Bitwise AND of Numbers Range",
+  "topic": "Bit Manipulation"
+}

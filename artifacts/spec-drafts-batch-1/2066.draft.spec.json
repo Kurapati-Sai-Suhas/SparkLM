@@ -1,0 +1,16 @@
+{
+  "author": "assistant (claude-opus-5), M2 P2.22",
+  "author_confidence": "none",
+  "authoritative": false,
+  "base_difficulty": 1300.0,
+  "draft_digest": "a98d6a7263d44c1f3ae17b5091b723222ff029a791664fa27f7514520d71e085",
+  "externally_verified": false,
+  "not_drafted_reason": "The behaviour of 'Paths in Maze That Lead to Same Room' is not known to the author with enough confidence to write a specification safely. Sourcing the statement is an operator action.",
+  "provenance": "ASSISTANT_DRAFTED_PENDING_OPERATOR_VERIFICATION",
+  "question_id": 2066,
+  "review_risk": "HIGH",
+  "source_basis": "The question title and the boilerplate method name, both from this project's own bank. The bank stores NO problem description \u2014 its content field holds a placeholder and a generic example \u2014 so the behaviour described here comes from the assistant's own knowledge of the canonical task. No sentence is copied from any external problem statement.",
+  "status": "NOT_DRAFTED",
+  "title": "Paths in Maze That Lead to Same Room",
+  "topic": "Graph"
+}

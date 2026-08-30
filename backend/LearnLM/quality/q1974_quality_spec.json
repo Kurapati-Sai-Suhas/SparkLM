@@ -69,7 +69,8 @@
     "not_the_phase_19_artifact": "P2.7 Phase 19 authored these suites mutant-first and drove the gate to a pass in that session. Those mutant specifications were never persisted and are not recoverable. This catalogue is NEW and was written after the suites were already fixed. Any result from it is a reconstructed post-hoc assessment and must not be reported as the Phase 19 gate result.",
     "reference_id": 5,
     "reference_source_hash": "7c8748a078305212e05fb5318f86db68506fb576744f4dd89bc4253d8ccafbdc",
-    "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84"
+    "specification_digest": "eb8458fd460a64b62bc129e0662f3af509523dace43db127afdb0e90d01ffc84",
+    "substitution_note": "The `substitutions` entry was added AFTER the operator approved the mutant catalogue, in response to the gate reporting `missing categories: singleton`. It is an input-contract declaration, not a mutant, and it changed the q1974 verdict from FAIL to PASS. The stored suite was NOT modified: the `singleton_pair` case it points at was already present. Recorded here so the change is visible rather than implied by a passing report."
   },
   "question": 1974,
   "rationale": {
@@ -121,5 +122,12 @@
       "reference_result": "n/a",
       "why_wrong": "Mechanical Tier-2 mutation; see description."
     }
-  }
+  },
+  "substitutions": [
+    {
+      "name": "singleton_pair",
+      "reason": "A length-1 list is NOT A VALID INPUT here: the specification states the list holds between 2 and 1000 integers, so the generic singleton case cannot be constructed and testing it would be testing behaviour outside the contract. The degeneracy the rule guards against \u2014 the two participating values collapsing to one \u2014 is reached when the minimum equals the maximum, and the stored suite already carries exactly that case under the label `singleton_pair`, placed when the suite was authored. This substitution names the case that exists; it does not add or relabel one.",
+      "replaces": "singleton"
+    }
+  ]
 }

@@ -1,6 +1,79 @@
 # P2.18b — Mutant review pack
 
-**Status:** AWAITING OPERATOR DECISION. The quality gate has **not** been run.
+**Status:** DECIDED AND RUN. All 33 mutants approved by the operator on
+2026-08-29; the gate ran against the stored production suites. **All four
+PASS.** No approval, promotion or publication followed — those are separate
+states with separate commands.
+
+---
+
+## Gate results — 2026-08-29
+
+| Question | Verdict | Tier-1 | Tier-2 (equivalents excluded) | Blockers |
+| --- | --- | --- | --- | --- |
+| q1940 | **PASS** | 1.0 (5/5) | 1.0 (3/3) | none |
+| q1974 | **PASS** | 1.0 (5/5) | 1.0 (2/2) | none |
+| q2057 | **PASS** | 1.0 (5/5) | 1.0 (2/2) | none |
+| q2290 | **PASS** | 1.0 (5/5) | 1.0 (2/2) | none |
+
+Thresholds used are the project's existing ones: Tier-1 ≥ 1.0, Tier-2 ≥ 0.80,
+minimum 12 hidden tests. Zero malformed cases, zero duplicates, no missing
+categories on any of the four.
+
+All four declared equivalents were recognised as `EQUIVALENT` and excluded
+from both numerator and denominator, exactly as designed — none was counted
+as a kill.
+
+Canonical digests (of the parsed JSON, so they are stable regardless of line
+endings — the raw files are CRLF on this platform):
+
+| Question | Spec digest | Report digest |
+| --- | --- | --- |
+| q1940 | `b5021f82e0a293931e462cc7613d94fe…` | `85b068b6825ede7bc56702a05490f392…` |
+| q1974 | `bd542ce671a26b442c1ea3e777dd6f6f…` | `5846337642cfd6aca9d5aec9c0a67072…` |
+| q2057 | `31b54d8b920a888bce6a856d081b6f44…` | `88c03edc2b44a6df7ae99449be66d0d0…` |
+| q2290 | `c88c74f43037ec8047e781a29b24c832…` | `92d2c3bd169ac837d85b9c024c1831ce…` |
+
+> The raw-byte digests quoted lower down in this document were computed
+> before the files were committed, when they still had LF endings. They no
+> longer match the files on disk. The canonical digests above are the ones to
+> use.
+
+### q1974 failed first, and why
+
+The first q1974 run returned **FAIL** — not on mutants, which were already
+1.0/1.0, but on `missing categories: singleton`.
+
+The generic `singleton` rule fires for any sequence problem. q1974's
+specification requires **2–1000** integers, so a length-1 list is not a valid
+input and testing it would test behaviour outside the contract. That is what
+`CategorySubstitution` exists for, and the reconstructed spec omitted one.
+
+The stored suite already carried the right case, labelled **`singleton_pair`**
+— the degeneracy where minimum equals maximum and the participating pair
+collapses to one value. Phase 19 named it that deliberately. A substitution
+was added pointing at that existing label.
+
+**The suite was not modified.** No case was added, relabelled or removed; the
+substitution names a case that was already there. This is recorded in the
+spec's `provenance.substitution_note`, because it was added *after* the
+operator approved the mutant catalogue and it changed the verdict.
+
+### What the gate confirmed about coverage
+
+Two of the mutants written expecting them to survive were killed:
+
+- **q2057 `t1-only-letters-in-both-words`** — the near-miss of the approved
+  reference, killed by case 1. The suite does catch the intersection bug.
+- **q2290 `t1-no-modulo-reduction`** — invisible until n ≈ 23, killed by case
+  8. The suite does carry a large-n case.
+
+Coverage is assessed by the `category` label on each stored case, not by
+analysing inputs. All 59 cases across the four suites are labelled.
+
+---
+
+*The original review pack follows, unchanged apart from this header.*
 
 > ## NEW RECONSTRUCTED QUALITY-GATE ASSESSMENT
 >

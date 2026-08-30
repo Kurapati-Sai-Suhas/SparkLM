@@ -1,0 +1,107 @@
+{
+  "blockers": [],
+  "mutant_identifiers": [
+    "t1-adjacency-across-the-street",
+    "t1-loop-runs-n-times",
+    "t1-no-modulo-reduction",
+    "t1-one-side-only",
+    "t1-plain-fibonacci-base",
+    "t2-doubles-instead-of-squaring",
+    "t2-modulus-off-by-one",
+    "t2-reduce-only-at-the-end"
+  ],
+  "provenance": {
+    "case_count": 14,
+    "case_identities": [
+      "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+      "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+      "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+      "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+      "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
+      "f5ca38f748a1d6eaf726b8a42fb575c3c71f1864a8143301782de13da2d9202b",
+      "1a6562590ef19d1045d06c4055742d38288e9e6dcd71ccde5cee80f1d5a774eb",
+      "ad57366865126e55649ecb23ae1d48887544976efea46a48eb5d85a6eeb4d306",
+      "40510175845988f13f6162ed8526f0b09f73384467fa855e1e79b44a56562a58",
+      "7902699be42c8a8e46fbbb4501726517e86b22c56a189f7625a6da49081b2451",
+      "0f8eb4b72b6e0c9e88b388eb967b49e067ef1004bf07bffc22c3acb13b43580a",
+      "888df25ae35772424a560c7152a1de794440e0ea5cfee62828333a456a506e05",
+      "39e5b4830d4d9c14db7368a95b65d5463ea3d09520373723430c03a5a453b5df"
+    ],
+    "categories": [
+      "beyond_fib_intuition",
+      "double_digit",
+      "fifth_term",
+      "fourth_term",
+      "hundred",
+      "maximum_boundary",
+      "mid_range",
+      "minimum_boundary",
+      "near_maximum",
+      "overflow_sensitive",
+      "seventh_term",
+      "small",
+      "small_growth",
+      "thousand"
+    ],
+    "execution_contract_version": "v1",
+    "question_id": 2290,
+    "question_state_digest": "e551d48a344cc699002857b392ed03006e6d98bad9b1252c0a21f1bdc05f082e",
+    "reference_id": 7,
+    "reference_language": "python",
+    "reference_source_hash": "85cf0800aa7b2b6c7cd8f516630f7ae1e038de71274f0b869ff80829c7cb664b",
+    "results": [
+      {
+        "identifier": "t1-adjacency-across-the-street",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-loop-runs-n-times",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-no-modulo-reduction",
+        "killed_by_case": 8,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-one-side-only",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-plain-fibonacci-base",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t2-doubles-instead-of-squaring",
+        "killed_by_case": 2,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-modulus-off-by-one",
+        "killed_by_case": 8,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-reduce-only-at-the-end",
+        "killed_by_case": null,
+        "outcome": "EQUIVALENT",
+        "tier": 2
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "tier1_kill_rate": 1.0,
+  "tier2_kill_rate": 1.0
+}

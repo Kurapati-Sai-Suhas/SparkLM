@@ -1,0 +1,107 @@
+{
+  "blockers": [],
+  "mutant_identifiers": [
+    "t1-first-and-last-element",
+    "t1-gcd-of-every-element",
+    "t1-lcm-instead-of-gcd",
+    "t1-returns-the-smallest-value",
+    "t1-second-smallest-and-largest",
+    "t2-difference-not-gcd",
+    "t2-max-with-itself",
+    "t2-operands-reversed"
+  ],
+  "provenance": {
+    "case_count": 14,
+    "case_identities": [
+      "d8ce3972ed117d6b369ed4cbe4dd67a43a0ff7c8e183c07967a72718e4de3209",
+      "4c96db924309037327153941396704504fba5116e639c15c659e37df76472aa3",
+      "88612c6c2a5cfb8b25427700128454c0a0a8c7ea891711e54e898f0bfc59ac88",
+      "80e89ff641d3c1d4843866a5ae66e7e31a06f80ad1b0ae66b42ad387fdc95f51",
+      "6155c1aa74f07e7169067ae07a98278efb71ac421f18acb75ab2302f58f0241a",
+      "a89f2d6d31293116494ffcaea0409f8e3c041ebe6d9d1bbdf7d737130b3e647a",
+      "7bbb0d9eed8e0e29f77c2ab07d2752d492589357ef5db8f09f75f28b0239e2bb",
+      "243cd062f45ae960620beaa583d4d22aa665bb7e91291f95db9f7741af96c109",
+      "56d3f7df16148bf093257d30952445afa1eee92f948cda8b0db750d3de6e8127",
+      "72d76fd948d909c7109733fcf9a08fe1d45912d63e8efde39aac741758ed8d66",
+      "60536a79f0ede1f79936b0bdc6e220534ef591151e0a26c57c8eb5ddc7aa3015",
+      "2b6f742eddfb1d926f59673bc25a799674d534be27f013cc6564d85c7be409d6",
+      "fcad55c1db16db2de2b3090205124ca73860bc4dbd4057d7bca94f79a7671efc",
+      "5ba9d371764609ceb000d90390bc89483b096196be07b083c3265ffbe466665d"
+    ],
+    "categories": [
+      "canonical",
+      "coprime_middle",
+      "descending",
+      "discriminating",
+      "duplicate_values",
+      "even_run",
+      "extremes",
+      "gcd-one",
+      "maximum_boundary",
+      "minimum_boundary",
+      "order_invariance",
+      "power_chain",
+      "singleton_pair",
+      "unsorted_extremes"
+    ],
+    "execution_contract_version": "v3",
+    "question_id": 1974,
+    "question_state_digest": "10f58da0c22644936ddf14ab52d6e5930182faf7713923b87d67266d3b4dffca",
+    "reference_id": 5,
+    "reference_language": "python",
+    "reference_source_hash": "7c8748a078305212e05fb5318f86db68506fb576744f4dd89bc4253d8ccafbdc",
+    "results": [
+      {
+        "identifier": "t1-first-and-last-element",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-gcd-of-every-element",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-lcm-instead-of-gcd",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-returns-the-smallest-value",
+        "killed_by_case": 13,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-second-smallest-and-largest",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t2-difference-not-gcd",
+        "killed_by_case": 2,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-max-with-itself",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-operands-reversed",
+        "killed_by_case": null,
+        "outcome": "EQUIVALENT",
+        "tier": 2
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "tier1_kill_rate": 1.0,
+  "tier2_kill_rate": 1.0
+}

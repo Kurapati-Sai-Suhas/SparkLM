@@ -1,0 +1,116 @@
+{
+  "blockers": [],
+  "mutant_identifiers": [
+    "t1-alphabet-is-zero-based",
+    "t1-digital-root-instead-of-k-rounds",
+    "t1-rounds-run-k-minus-one-times",
+    "t1-single-round-ignores-k",
+    "t1-sums-positions-instead-of-concatenating",
+    "t2-drops-last-character",
+    "t2-max-digit-not-sum",
+    "t2-position-offset-95",
+    "t2-sum-digits-from-string-directly"
+  ],
+  "provenance": {
+    "case_count": 15,
+    "case_identities": [
+      "4180443dbd635184607733ccac66c6a0248502b2386210cd7f2c15e815cf4879",
+      "c9f1a28a07fbbf0b7e61e70ae4e5510eba995130172d7ae7586abcb9573c22b6",
+      "0550640d1e0cd5f6c19c01acdc0be68bbbe983e6d34b0eb21248daf2f5ac2d71",
+      "fd0755092b342c95764c342a4e51b13b757664e6615a78ced621b2d0b67a25b3",
+      "a87a15e3b4d554d6a3c43b72f547f3b58b314fc4c15e6d5ec2f991f85c6c5ea6",
+      "31965d9aef0cadfdd95c168654b4bc5f596bd6009b42d78e1ae1f92355829227",
+      "4880e265cd4bb7da725f6b8de4461b768e1e44fdc8f2c61c2e0a5bf822bffa40",
+      "47b7dfcdd22908e34cabf43245e99272b43d900923ec21a16d51af05f5fb064b",
+      "ba632347ea27545a40b6f99223a3f3b33562573260c4288f82633b62a78a900f",
+      "5d9567b67dab59404724bc6a3436a58d451aae9cd68e880cd474f81a09bce525",
+      "446ec9df0332b38dd8d5ea386d8d29f6fbd2b2dc1bd5847edddb4c79d40d0f8b",
+      "4b547fd691c7073550fcd8114e85235278d758b0baece575ddf70980de5de6af",
+      "2bd7217e4f02a090173649102805212ddf15af7f769c91b883368f5616e14eb3",
+      "e07dbc72bc64bb5dd95d8c4a8feb171612ff74f597bf484c901a73c7892ec772",
+      "12cc5f37f61c73991e4140b72e2119d601cfdab79bd38febc707a9a5fe881355"
+    ],
+    "categories": [
+      "canonical",
+      "deep_rounds",
+      "duplicate_values",
+      "idempotent_rounds",
+      "long_tail",
+      "maximum_boundary",
+      "minimum_boundary",
+      "mixed_widths",
+      "multi_round",
+      "near_upper_letter",
+      "order_invariance",
+      "single_round_no_collapse",
+      "singleton",
+      "two_digit_positions",
+      "wordlike"
+    ],
+    "execution_contract_version": "v1",
+    "question_id": 1940,
+    "question_state_digest": "7ab65751e7c4a8128eea757903b4d9a55e573364d0fbe37a65e7b67f1d2b7d84",
+    "reference_id": 4,
+    "reference_language": "python",
+    "reference_source_hash": "6e6e7573b44e997839c897af170d48f9aea7eda1c3d062bc374344f8a85edb54",
+    "results": [
+      {
+        "identifier": "t1-alphabet-is-zero-based",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-digital-root-instead-of-k-rounds",
+        "killed_by_case": 3,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-rounds-run-k-minus-one-times",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-single-round-ignores-k",
+        "killed_by_case": 7,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-sums-positions-instead-of-concatenating",
+        "killed_by_case": 3,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t2-drops-last-character",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-max-digit-not-sum",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-position-offset-95",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-sum-digits-from-string-directly",
+        "killed_by_case": null,
+        "outcome": "EQUIVALENT",
+        "tier": 2
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "tier1_kill_rate": 1.0,
+  "tier2_kill_rate": 1.0
+}

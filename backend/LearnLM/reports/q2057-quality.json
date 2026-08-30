@@ -1,0 +1,111 @@
+{
+  "blockers": [],
+  "mutant_identifiers": [
+    "t1-compares-sorted-strings",
+    "t1-only-letters-in-both-words",
+    "t1-signed-difference-no-absolute-value",
+    "t1-strict-less-than-three",
+    "t1-total-difference-across-letters",
+    "t2-any-instead-of-all",
+    "t2-iterates-all-twenty-six-letters",
+    "t2-threshold-four"
+  ],
+  "provenance": {
+    "case_count": 16,
+    "case_identities": [
+      "13471c034a23f8633f2797350a8c82644d250ee590f5c89844a2a2fc18f739a5",
+      "8e05adea0e2d42edc9f1b7e534cdc31dddce8cddb3d6aa744010777fb53514a9",
+      "4a362fea4c22f9b26f964d9b2869e79d5a2f38c28d18973fd7a273d8338b0acc",
+      "d2408ed867bd4a5146961b9a5d0e4492ee555231866f9d5b064a6368e13d6cde",
+      "37946b6e7c98445737e3fb179d2204111d6ab67627a95bf3b580949fd76be501",
+      "fa31c62ad2ca713f0fc14a6555d04ba4c1921f9df1802ed4d32ecb0c3087c068",
+      "dd677215dea572e4babed7372ac4ac212e8bbfb4fa9bf859aabb1ef5d966783b",
+      "4b3312cdf1e478750f94a285fdbb6f17f47a2f023c5a0aabee3ac3ba000ca342",
+      "8fcdd86ab68b40e43df99587411438209d6bd18e84ea4b14cf63086ceed596c5",
+      "1337a011c7010af4d1d63e792bcca9ee2ae1968e7b4cd9781325987c596b4943",
+      "e0e6ba27cc0758ff6281ab8ee88842928251505461e135f47b7b2793a89abe33",
+      "1f87819a26b230db29c601be83602ecd107619da4ecf7cbfe185ff0a0543f2a6",
+      "389a24067f2f1095427670fff330401822dec1745e45ee7b4108223b0703d68d",
+      "ee78eefe8ef0470a874bf9156b4dc4379798531251d005268df0ecabd9f81615",
+      "455fe653051417a03b54fa86f20bb24cacfecfeab519ff7cc3e07b0ba10257fa",
+      "6be5346fea5b631af69fd1b82983117270b7e3e38ce1d037dc0484fd78374012"
+    ],
+    "categories": [
+      "alternating",
+      "boundary_just_outside",
+      "boundary_within",
+      "canonical",
+      "disjoint_letters",
+      "duplicate_values",
+      "maximum_boundary",
+      "minimum_boundary",
+      "near_identical",
+      "order_invariance",
+      "same_counts_regrouped",
+      "singleton",
+      "threshold_exactly_three",
+      "threshold_four",
+      "word2_excess",
+      "word2_only_letter"
+    ],
+    "execution_contract_version": "v1",
+    "question_id": 2057,
+    "question_state_digest": "adec98b326899fc68270232f0e403a442ea06684e28a7f9ed1f1ec2d89a386cd",
+    "reference_id": 6,
+    "reference_language": "python",
+    "reference_source_hash": "ab53947a8ace447facfb01d28585d470f5ac9ea089587d325d89262955a57592",
+    "results": [
+      {
+        "identifier": "t1-compares-sorted-strings",
+        "killed_by_case": 3,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-only-letters-in-both-words",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-signed-difference-no-absolute-value",
+        "killed_by_case": 4,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-strict-less-than-three",
+        "killed_by_case": 7,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t1-total-difference-across-letters",
+        "killed_by_case": 7,
+        "outcome": "KILLED",
+        "tier": 1
+      },
+      {
+        "identifier": "t2-any-instead-of-all",
+        "killed_by_case": 1,
+        "outcome": "KILLED",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-iterates-all-twenty-six-letters",
+        "killed_by_case": null,
+        "outcome": "EQUIVALENT",
+        "tier": 2
+      },
+      {
+        "identifier": "t2-threshold-four",
+        "killed_by_case": 4,
+        "outcome": "KILLED",
+        "tier": 2
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "tier1_kill_rate": 1.0,
+  "tier2_kill_rate": 1.0
+}

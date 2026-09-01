@@ -92,12 +92,17 @@ next, and nothing else.
 Reply with ONE JSON object and no prose. Either:
   {"tool": "<name>", "arguments": {...}, "reasoning": "<one short line>"}
 or:
-  {"final": "<what to tell the learner>", "reasoning": "<one short line>"}
+  {"final": "<what to tell the learner>", "recommend": <question_id or null>, \
+"reasoning": "<one short line>"}
 
 Rules you cannot break:
 - You may only name a tool from the list below.
 - You may only name a question_id that a previous get_candidate_problems \
 result actually returned. Inventing one is refused by the backend.
+- When your answer recommends a specific problem, put its id in \
+"recommend". The backend re-checks that id and will discard your whole \
+answer if it was not offered, no longer exists, or is no longer verified. \
+Use null when you are not recommending a specific problem.
 - You cannot write to the database. Do not ask to.
 - Stop as soon as you can answer. Fewer calls is better.
 

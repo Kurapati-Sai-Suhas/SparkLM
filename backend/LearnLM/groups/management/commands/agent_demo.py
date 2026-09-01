@@ -54,24 +54,30 @@ def scripted_planner(question_id_holder):
         {"tool": "get_candidate_problems", "arguments": {"limit": 5},
          "reasoning": "only the backend may decide what is servable"},
     ]
+    # Filled in by handle() once the backend has offered candidates, so the
+    # prerequisite read names a topic that actually exists.
+    steps_extra = question_id_holder.setdefault("extra_steps", [])
     produced = {"n": 0}
 
     def plan(observation):
         index = produced["n"]
         produced["n"] += 1
 
-        if index < len(steps):
-            return steps[index]
+        combined = steps + steps_extra
+        if index < len(combined):
+            return combined[index]
 
         # Read the first candidate the BACKEND offered — never an id of the
         # planner's own invention.
-        if index == len(steps) and question_id_holder.get("id"):
+        if index == len(combined) and question_id_holder.get("id"):
             return {"tool": "get_problem_context",
                     "arguments": {"question_id": question_id_holder["id"]},
                     "reasoning": "read the one I intend to recommend"}
 
         return {"final": question_id_holder.get("answer")
                 or "There is no verified problem to recommend yet.",
+                # The backend re-validates this id at the answer boundary.
+                "recommend": question_id_holder.get("id"),
                 "reasoning": "explain the choice"}
 
     return plan
@@ -107,12 +113,24 @@ class Command(BaseCommand):
         # doing it here keeps the script honest rather than clairvoyant.
         offered = toolkit.get_candidate_problems(session, limit=5)
         candidate = (offered.get("candidates") or [None])[0]
+        prereq = None
         if candidate:
             holder["id"] = candidate["question_id"]
             holder["answer"] = (
                 f"Practise \"{candidate['title']}\" next. It is the closest "
                 f"trusted problem to your current level (difficulty "
                 f"{candidate['difficulty']}).")
+            # Resolve the candidate's topic against the production DAG, and
+            # let the planner read it too — the prerequisite signal is part
+            # of the chain this demo exists to show.
+            if candidate.get("topic"):
+                holder.setdefault("extra_steps", []).append({
+                    "tool": "get_prerequisites",
+                    "arguments": {"topic": candidate["topic"]},
+                    "reasoning": "check the curriculum position",
+                })
+                prereq = toolkit.get_prerequisites(
+                    session, candidate["topic"])
 
         if options["live"]:
             from groups.agent import provider
@@ -137,15 +155,19 @@ class Command(BaseCommand):
                 "result": result.as_dict(),
                 "glicko_readings": state["glicko_readings"],
                 "kt_prediction": kt_reading,
+                "prerequisite_signal": prereq,
+                "recommendation_validated": result.recommendation,
                 "wrote_nothing": before == after,
             }, indent=2, default=str))
             return
 
-        self._render(mode, result, state, kt_reading, offered, before, after)
+        self._render(mode, result, state, kt_reading, offered, prereq,
+                     before, after)
 
     # ── output ────────────────────────────────────────────────────────
 
-    def _render(self, mode, result, state, kt_reading, offered, before, after):
+    def _render(self, mode, result, state, kt_reading, offered,
+                prereq, before, after):
         write, style = self.stdout.write, self.style
 
         write(style.MIGRATE_HEADING(f"AGENT DEMO — {mode}"))
@@ -195,7 +217,20 @@ class Command(BaseCommand):
                   f"{row['difficulty']}")
         write("")
 
-        write(style.MIGRATE_HEADING("5. Agent loop"))
+        write(style.MIGRATE_HEADING("5. Prerequisite signal (production DAG)"))
+        if prereq:
+            write(f"  topic                 {prereq['topic']}")
+            write(f"  subject               {prereq['subject']}")
+            write(f"  prerequisites         "
+                  f"{', '.join(prereq['prerequisites']) or 'none'}")
+            write(f"  unlocks               "
+                  f"{', '.join(prereq['unlocks']) or 'none'}")
+            write(f"  source                {prereq['source']}")
+        else:
+            write("  no candidate topic to resolve against the DAG")
+        write("")
+
+        write(style.MIGRATE_HEADING("6. Agent loop"))
         for step, phrase in enumerate(result.transcript, start=1):
             write(f"  {step}. {phrase}")
         for call in result.calls:
@@ -203,7 +238,24 @@ class Command(BaseCommand):
                   f"reads_only={call.get('reads_only')}")
         write("")
 
-        write(style.MIGRATE_HEADING("6. Recommendation"))
+        write(style.MIGRATE_HEADING("7. Backend validation of the answer"))
+        if result.recommendation:
+            rec = result.recommendation
+            write(style.SUCCESS(
+                f"  ACCEPTED  #{rec['question_id']} {rec['title'][:40]}"))
+            write(f"  trust_state           {rec['trust_state']}")
+            write(f"  validated_by          {rec['validated_by']}")
+            write("  checks: offered this session, exists, adaptive-eligible, "
+                  "servable")
+        elif result.stopped_because == "recommendation_rejected":
+            write(style.ERROR(
+                "  REJECTED — the model named a question the backend will "
+                "not stand behind; the deterministic floor answered instead"))
+        else:
+            write("  no specific question was recommended")
+        write("")
+
+        write(style.MIGRATE_HEADING("8. Recommendation"))
         for line in _wrap(result.answer, 68):
             write(f"  {line}")
         write(f"  (stopped_because: {result.stopped_because})")

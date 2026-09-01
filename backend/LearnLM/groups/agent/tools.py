@@ -79,6 +79,77 @@ class Session:
                 f"reaching a learner.")
 
 
+class RecommendationRejected(Exception):
+    """
+    The model named a question the backend will not stand behind.
+
+    Distinct from ToolDenied: that guards a tool CALL, this guards the
+    ANSWER. Both exist because the model can reach a learner two ways.
+    """
+
+
+def validate_recommendation(session, question_id):
+    """
+    Re-check, at the answer boundary, a question id the model chose.
+
+    The tool boundary already refuses an id the backend never offered, but
+    it only guards tool CALLS. A plan may carry `recommend` alongside its
+    prose, and that value has been nowhere near `require_offered` — so
+    without this the model could name any integer in its answer and the
+    backend would relay it.
+
+    Four independent checks, deliberately not collapsed into the offered-set
+    membership test alone: the set is a record of what WAS offered, and the
+    other three ask whether the backend would stand behind it NOW. A question
+    demoted between the offer and the answer must not be recommended, and
+    that is a real window — trust transitions are a separate write path.
+
+    Returns the validated payload; raises RecommendationRejected otherwise.
+    """
+    try:
+        question_id = int(question_id)
+    except (TypeError, ValueError):
+        raise RecommendationRejected(
+            f"recommend must be a question id, got {question_id!r}")
+
+    # 1. offered in THIS session
+    if question_id not in self_offered(session):
+        raise RecommendationRejected(
+            f"question {question_id} was never offered in this session")
+
+    # 2. exists
+    question = (Question.objects.select_related("topic")
+                .filter(pk=question_id).first())
+    if question is None:
+        raise RecommendationRejected(f"question {question_id} does not exist")
+
+    # 3. still trusted, re-read from the row rather than from the offer
+    if not question.is_adaptive_eligible:
+        raise RecommendationRejected(
+            f"question {question_id} is no longer PUBLISHED and "
+            f"ORACLE_VERIFIED")
+
+    # 4. still deliverable under the backend's own serving rule
+    from groups.coding_views import _servable_questions
+    if not _servable_questions().filter(pk=question_id).exists():
+        raise RecommendationRejected(
+            f"question {question_id} is not servable")
+
+    return {
+        "question_id": question.pk,
+        "title": question.title.strip(),
+        "topic": question.topic.name if question.topic_id else None,
+        "difficulty": question.base_difficulty,
+        "validated_by": "backend",
+        "trust_state": question.trust_state,
+    }
+
+
+def self_offered(session):
+    """The session's offered set. A function so tests can assert on it."""
+    return session.offered_question_ids
+
+
 # ═════════════════════════════════════════════════════════════
 # The tools
 # ═════════════════════════════════════════════════════════════

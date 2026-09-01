@@ -63,12 +63,18 @@ class AgentRecommendView(APIView):
     Ask the practice planner a question.
 
     POST body:   {"request": "...", "topic": "Arrays"}   topic optional
-    Response:    {answer, transcript, tool_calls, source, stopped_because,
-                  prompt_version}
+    Response:    {answer, transcript, tool_calls, recommendation, source,
+                  stopped_because, prompt_version}
 
     `source` names which of the three layers actually answered, so a caller
     can tell an agent recommendation from a deterministic one rather than
     guessing from the prose.
+
+    `recommendation` is either null or a question the BACKEND re-validated
+    after the model named it — offered in this session, still present, still
+    PUBLISHED and ORACLE_VERIFIED, still servable. A client should render
+    that object and never parse a question out of `answer`: the prose is
+    the model's, the object is the backend's.
     """
 
     permission_classes = [IsAuthenticated]
@@ -120,15 +126,25 @@ class AgentRecommendView(APIView):
             return {
                 "answer": "I could not fetch a recommendation just now. "
                           "Nothing was changed.",
-                "transcript": [], "tool_calls": [],
+                "transcript": [], "tool_calls": [], "recommendation": None,
                 "source": "unavailable", "stopped_because": reason,
                 "prompt_version": None,
             }
 
         candidate = (offered.get("candidates") or [None])[0]
+        recommendation = None
         if candidate:
             answer = (f"Try {candidate['title']} next "
                       f"(difficulty {candidate['difficulty']}).")
+            # Through the same validator the agent's answer goes through, so
+            # the response shape does not depend on which layer answered and
+            # a caller cannot tell "validated" from "trusted because we
+            # picked it ourselves". The backend chose this id, so it passes.
+            try:
+                recommendation = toolkit.validate_recommendation(
+                    session, candidate["question_id"])
+            except toolkit.RecommendationRejected:
+                logger.exception("backend-chosen candidate failed validation")
         else:
             answer = ("There is no verified problem available to recommend "
                       "yet.")
@@ -139,6 +155,7 @@ class AgentRecommendView(APIView):
             "answer": answer,
             "transcript": ["Answering directly"],
             "tool_calls": [],
+            "recommendation": recommendation,
             "source": "deterministic",
             "stopped_because": reason,
             "prompt_version": None,

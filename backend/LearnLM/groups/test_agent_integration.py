@@ -11,6 +11,7 @@ unparseable, hallucinating — is exercised deterministically.
 """
 
 import json
+import logging
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -87,6 +88,22 @@ def scripted_provider(*payloads):
         return queue.pop(0) if queue else None
 
     return generate
+
+
+def scripted_planner(*plans):
+    """
+    A planner callable for driving `Orchestrator` directly.
+
+    `scripted_provider` stands in for the raw JSON generator; this is one
+    level up — the thing `Orchestrator` actually calls. Repeats the last
+    plan once exhausted so a loop that asks again does not IndexError.
+    """
+    queue = list(plans)
+
+    def plan(_observation):
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    return plan
 
 
 def exploding_provider(exception):
@@ -849,3 +866,148 @@ def test_a_long_tool_result_is_truncated_before_it_reaches_the_prompt():
 
     assert len(prompt) < 6_000
     assert "truncated" in prompt
+
+
+# ═════════════════════════════════════════════════════════════════════
+# The ANSWER boundary (M2 P2.23)
+#
+# `require_offered` guards tool CALLS. These cover the second way the model
+# reaches a learner: the question id it names in its own answer.
+# ═════════════════════════════════════════════════════════════════════
+
+def test_a_recommendation_the_backend_never_offered_is_rejected(learner):
+    """The whole plan is refused, not just the id — and the floor answers."""
+    session = toolkit.Session(user=learner)
+    planner = scripted_planner(
+        {"final": "Try question 424242.", "recommend": 424242})
+
+    result = Orchestrator(session, planner).run("what next?")
+
+    assert result.stopped_because == "recommendation_rejected"
+    assert result.recommendation is None
+    assert "424242" not in result.answer
+
+
+def test_a_recommendation_the_backend_did_offer_is_validated_and_returned(
+        learner, trusted_question):
+    session = toolkit.Session(user=learner)
+    toolkit.get_candidate_problems(session)
+    planner = scripted_planner(
+        {"final": "Try this one.", "recommend": trusted_question.pk})
+
+    result = Orchestrator(session, planner).run("what next?")
+
+    assert result.stopped_because == "final"
+    assert result.recommendation["question_id"] == trusted_question.pk
+    assert result.recommendation["validated_by"] == "backend"
+
+
+def test_a_question_demoted_after_being_offered_is_refused_at_the_answer(
+        learner, trusted_question):
+    """
+    The offered set records what WAS offered. Trust can change underneath it,
+    so membership alone is not sufficient — this is why the validator
+    re-reads the row instead of trusting the set.
+    """
+    session = toolkit.Session(user=learner)
+    toolkit.get_candidate_problems(session)
+
+    trusted_question.trust_state = Question.TRUST_UNVERIFIED
+    trusted_question.save(update_fields=["trust_state"])
+
+    with pytest.raises(toolkit.RecommendationRejected):
+        toolkit.validate_recommendation(session, trusted_question.pk)
+
+
+def test_a_non_integer_recommendation_is_refused(learner):
+    session = toolkit.Session(user=learner)
+    with pytest.raises(toolkit.RecommendationRejected):
+        toolkit.validate_recommendation(session, "DROP TABLE questions")
+
+
+def test_the_deterministic_layer_returns_the_same_validated_shape(
+        client, trusted_question, settings):
+    """A caller must not be able to tell which layer answered by shape."""
+    settings.AGENT_ORCHESTRATOR_ENABLED = False
+
+    response = client.post("/api/ai/agent/", {"request": "what next?"},
+                           format="json")
+
+    assert response.status_code == 200
+    assert "recommendation" in response.data
+    assert response.data["recommendation"]["validated_by"] == "backend"
+    assert response.data["source"] == "deterministic"
+
+
+def test_the_prompt_teaches_the_recommend_field(learner):
+    prompt = provider.build_prompt({"request": "hi", "results": []})
+    assert '"recommend"' in prompt
+    assert "backend re-checks" in prompt
+
+
+def test_the_decision_log_carries_no_reasoning(learner, trusted_question,
+                                               caplog):
+    """
+    Chain-of-thought must not reach the log. The planner's `reasoning` is
+    kept in `_private`; the structured line must never quote it.
+    """
+    session = toolkit.Session(user=learner)
+    toolkit.get_candidate_problems(session)
+    secret_reasoning = "INTERNAL-CHAIN-OF-THOUGHT-SENTINEL"
+    planner = scripted_planner(
+        {"final": "Try this one.", "recommend": trusted_question.pk,
+         "reasoning": secret_reasoning})
+
+    with caplog.at_level(logging.INFO):
+        Orchestrator(session, planner).run("what next?")
+
+    assert "agent decision" in caplog.text
+    assert secret_reasoning not in caplog.text
+
+
+def test_the_decision_log_is_structured_and_parseable(learner, caplog):
+    session = toolkit.Session(user=learner)
+    planner = scripted_planner({"final": "No recommendation.",
+                                "recommend": None})
+
+    with caplog.at_level(logging.INFO):
+        Orchestrator(session, planner).run("hello")
+
+    line = [r for r in caplog.records if "agent decision" in r.getMessage()][0]
+    payload = json.loads(line.getMessage().split("agent decision ", 1)[1])
+    assert payload["outcome"] == "final"
+    assert payload["selected_question_id"] is None
+    assert payload["latency_ms"] is not None
+    assert set(payload) >= {"request_id", "learner_id", "tools_invoked",
+                            "candidates_offered", "rejected_recommendation"}
+
+
+def test_the_dag_signal_reads_the_production_graph(learner, topic):
+    """
+    §11: the prerequisite signal must come from the production curriculum
+    graph, not a second traversal built inside the agent. A topic absent
+    from every graph returns an explicit empty answer rather than raising.
+    """
+    session = toolkit.Session(user=learner)
+
+    signal = toolkit.get_prerequisites(session, topic.name)
+
+    assert signal["topic"] == topic.name
+    assert "prerequisites" in signal and "unlocks" in signal
+    assert "read-only" in signal["source"] or "not present" in signal["source"]
+
+
+def test_an_unknown_topic_returns_an_empty_dag_signal_not_an_error(learner):
+    session = toolkit.Session(user=learner)
+
+    signal = toolkit.get_prerequisites(session, "NoSuchTopicAnywhere")
+
+    assert signal["subject"] is None
+    assert signal["prerequisites"] == []
+    assert "not present" in signal["source"]
+
+
+def test_the_dag_signal_needs_a_topic(learner):
+    session = toolkit.Session(user=learner)
+    with pytest.raises(toolkit.ToolError):
+        toolkit.get_prerequisites(session, "")

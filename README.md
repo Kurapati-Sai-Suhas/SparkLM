@@ -537,7 +537,8 @@ feature deep dives.
 | Agent | Custom orchestrator (`groups/agent/`) | 6 tools, bounded loop | 🟡 **FLAGGED OFF** by default |
 | Learner modelling | Elo | **The live rating** — UI and selector | ✅ LIVE |
 | Learner modelling | Half-life regression (SM-2 update) | Memory, review queue | ✅ LIVE |
-| Learner modelling | Traffic Cop (runs test + RandomForest) | Route selection | ✅ LIVE |
+| Learner modelling | Traffic Cop — Wald–Wolfowitz runs test | Route selection | ✅ LIVE |
+| Learner modelling | Traffic Cop — RandomForest branch | Would score both routes | ⚠️ **CODE ONLY** — no trained artifact exists, so the heuristic always decides. 35 labelled outcomes against a ≥100 training gate |
 | Learner modelling | NetworkX | Curriculum DAG, cycle detection | ✅ LIVE (gate flag off) |
 | Learner modelling | 3PL IRT | Onboarding cold-start calibration | ✅ LIVE |
 | Learner modelling | Heuristic explainer | Four-axis attribution payload | ✅ LIVE |

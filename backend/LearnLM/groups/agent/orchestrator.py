@@ -32,6 +32,7 @@ showing it invites a learner to trust the wrong half.
 import json
 import logging
 import time
+import uuid
 
 from groups.agent import tools as toolkit
 
@@ -43,16 +44,20 @@ MAX_CONSECUTIVE_ERRORS = 3
 
 
 class AgentResult:
-    def __init__(self, answer, transcript, calls, stopped_because):
+    def __init__(self, answer, transcript, calls, stopped_because,
+                 recommendation=None):
         self.answer = answer
         self.transcript = transcript
         self.calls = calls
         self.stopped_because = stopped_because
+        #: Backend-validated question, or None. Never the model's raw claim.
+        self.recommendation = recommendation
 
     def as_dict(self):
         return {"answer": self.answer, "transcript": self.transcript,
                 "tool_calls": self.calls,
-                "stopped_because": self.stopped_because}
+                "stopped_because": self.stopped_because,
+                "recommendation": self.recommendation}
 
 
 class Orchestrator:
@@ -76,11 +81,17 @@ class Orchestrator:
         self.transcript = []
         self.calls = []
         self._private = []
+        #: Set when the answer boundary refuses a model-chosen question.
+        self.rejected_recommendation = None
+        #: Correlates the log lines for one request. Not a learner id.
+        self.request_id = uuid.uuid4().hex[:12]
+        self._started_at = None
 
     # ── the loop ──────────────────────────────────────────────────────
 
     def run(self, request):
         started = self.clock()
+        self._started_at = started
         observation = {"request": request, "results": []}
         errors = 0
 
@@ -116,8 +127,28 @@ class Orchestrator:
                 # would hand the learner the literal text "None".
                 if answer is None or not str(answer).strip():
                     return self._stop("planner_returned_empty_answer")
+
+                # The ANSWER boundary (M2 P2.23). `require_offered` guards
+                # tool calls; a plan may also carry `recommend`, which has
+                # been nowhere near it. Validate here or the model can name
+                # any integer in its answer and the backend relays it.
+                recommendation = None
+                if plan.get("recommend") is not None:
+                    try:
+                        recommendation = toolkit.validate_recommendation(
+                            self.session, plan["recommend"])
+                    except toolkit.RecommendationRejected as rejected:
+                        # Not a retry: the model already committed to an
+                        # answer. Refuse the whole plan and take the floor,
+                        # which recommends only what the backend chose.
+                        logger.warning("recommendation rejected: %s", rejected)
+                        self.rejected_recommendation = str(rejected)
+                        return self._stop("recommendation_rejected")
+
+                self._log_decision("final", recommendation)
                 return AgentResult(str(answer), self.transcript,
-                                   self.calls, "final")
+                                   self.calls, "final",
+                                   recommendation=recommendation)
 
             name = plan.get("tool")
             arguments = plan.get("arguments") or {}
@@ -180,7 +211,7 @@ class Orchestrator:
         Reached whenever the loop gives up. It is deliberately dull: state,
         and one trusted question if one exists.
         """
-        logger.info("agent fell back: %s", reason)
+        self._log_decision(reason, None)
         self.transcript.append("Falling back to a direct answer")
         try:
             state = toolkit.get_learner_state(self.session)
@@ -201,6 +232,49 @@ class Orchestrator:
         if state.get("elo_rating") is not None:
             answer += f" Your current rating is {state['elo_rating']}."
         return AgentResult(answer, self.transcript, self.calls, reason)
+
+
+    def _log_decision(self, outcome, recommendation):
+        """
+        One structured line per request (M2 P2.23 §9).
+
+        Carries no secrets, no hidden tests, no expected outputs, no
+        reference source and NO chain-of-thought: `self._private` holds the
+        model's reasoning and is deliberately not referenced here. Question
+        ids and titles are already learner-visible; source code is not, and
+        `_loggable` truncates it out of the per-call record.
+
+        Wrapped whole, because an observability path must never be able to
+        break a learner's request. The clock is the specific hazard: it is
+        an injected callable, so a caller supplying a finite fake clock (the
+        timeout test does) would otherwise have logging raise underneath it.
+        """
+        try:
+            elapsed = None
+            if self._started_at is not None:
+                elapsed = round((self.clock() - self._started_at) * 1000, 1)
+        except Exception:                                     # noqa: BLE001
+            elapsed = None
+
+        try:
+            logger.info(
+                "agent decision %s",
+                json.dumps({
+                    "request_id": self.request_id,
+                    "learner_id": getattr(self.session.user, "pk", None),
+                    "outcome": outcome,
+                    "tools_invoked": [c.get("tool") for c in self.calls],
+                    "tool_call_count": len(self.calls),
+                    "candidates_offered": len(
+                        self.session.offered_question_ids),
+                    "selected_question_id": (
+                        recommendation or {}).get("question_id"),
+                    "rejected_recommendation": self.rejected_recommendation,
+                    "latency_ms": elapsed,
+                }, default=str),
+            )
+        except Exception:                                     # noqa: BLE001
+            logger.warning("agent decision log failed")
 
 
 def _loggable(arguments):

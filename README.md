@@ -3,7 +3,7 @@
 [![CI](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions/workflows/ci.yml/badge.svg)](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions)
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://spark-lm-3y3e.vercel.app)
 
-SparkLM is an adaptive coding-practice platform: it models a student's skill (Elo, weighted by runtime/memory efficiency) and memory (a spaced-repetition half-life curve), then routes them through a prerequisite curriculum DAG using a hybrid statistical/ML engine — a Wald–Wolfowitz runs-test streakiness check backing a RandomForest classifier — rather than a static problem list. Code runs in a sandboxed Judge0 pipeline across 5 languages; every recommendation ships with a real explainability payload (SHAP over a trained GCN, when enabled). Built on Django REST Framework + Channels, React/TypeScript, and PostgreSQL with pgvector, covered by a ~3,400-test suite that mocks every third party (Judge0, Groq, Gemini) for a fully offline CI run.
+SparkLM is an adaptive coding-practice platform: it models a student's skill (Elo, weighted by runtime/memory efficiency) and memory (a spaced-repetition half-life curve), then routes them through a prerequisite curriculum DAG using a hybrid statistical/ML engine — a Wald–Wolfowitz runs-test streakiness check backing a RandomForest classifier — rather than a static problem list. Code runs in a sandboxed Judge0 pipeline across 5 languages; every recommendation ships with an explainability payload — a four-axis breakdown, the dominant factor, and a coaching line. Built on Django REST Framework + Channels, React/TypeScript, and PostgreSQL with pgvector, covered by a ~3,400-test suite that mocks every third party (Judge0, Groq, Gemini) for a fully offline CI run.
 
 **The current engineering focus is not the adaptive engine — it is the evidence the engine learns from.** Milestone 2 / P2.7 exists because an adaptive system trained on unverified answer keys learns confidently wrong things. So the platform now carries an explicit **content-trust architecture**: a question lifecycle, a trust lifecycle, an approved-reference oracle, a mutation-tested hidden-test quality gate, and column-scoped database roles so that no single credential can both change a question and declare it verified. Today **6 of 2,926 questions are `ORACLE_VERIFIED`**, and only verified questions may teach the learner model. Everything else is served, graded, and deliberately ignored by the adaptive layer.
 
@@ -15,23 +15,23 @@ Platforms like LeetCode treat every user identically. SparkLM makes three bets:
 
 1. **Routing should be earned by data.** A probabilistic *Traffic Cop* inspects the mean and the streakiness (Wald–Wolfowitz runs test) of your last 20 submissions. Oscillating pass/fail or struggling? You get Elo-matched flat practice to rebuild confidence. Consistent — or breaking through after a failure streak? You advance through a prerequisite curriculum graph. Every decision is logged with its predicted success probability and closed out with the real outcome — and a retraining pipeline learns which engine actually works for which students.
 2. **Grades should reflect engineering quality, not just correctness.** The Elo engine reads Judge0's execution telemetry: an O(n) solution under 60 ms earns a 1.5× rating multiplier; a memory-hungry brute force gets penalized. Re-solving an old problem earns exactly zero (anti-farming), while still refreshing your spaced-repetition schedule.
-3. **Recommendations should explain themselves.** Every served problem ships with an explainability payload — a four-axis radar (time, space, logic, recency), the dominant factor (real SHAP attributions over a trained graph network when enabled), and a concrete coaching line: *"Your weakest area is Hash Table (55%) — practice hash-map lookups that replace nested loops."*
+3. **Recommendations should explain themselves.** Every served problem ships with an explainability payload — a four-axis radar (time, space, logic, recency), the dominant factor, and a concrete coaching line: *"Your weakest area is Hash Table (55%) — practice hash-map lookups that replace nested loops."* This is a deterministic heuristic over the learner's own feature tensor. A SHAP-over-GCN branch used to sit in front of it and was removed in M1/P1.1 — see feature 7.
 
 ## Feature highlights
 
 | Area | What's inside |
 |---|---|
-| **Adaptive routing** | Hybrid Traffic Cop (heuristic + trained outcome model), 19-node curriculum DAG with DB-enforced acyclicity, Elo-nearest problem selection, placeholder-content quarantine |
+| **Adaptive routing** | Hybrid Traffic Cop (heuristic + trained outcome model), curriculum DAG over 22 topics with DB-enforced acyclicity (17 topics carry edges, 19 edges total), Elo-nearest problem selection, placeholder-content quarantine |
 | **Skill modeling** | Elo with efficiency multipliers and anti-farming clamps, per-topic mastery (accuracy ≥ 80% over ≥ 3 reviews), inactivity decay with double-charge protection |
 | **Memory modeling** | SM-2 style half-life regression `P(t) = 2^(−t/h)`, graph-decay cross-pollination (failing a foundation penalizes dependent topics), **Review Queue**: practiced topics ranked by predicted recall with due-for-review flags and effective mastery (skill × retention) |
-| **Explainability** | SHAP over a trained PyTorch-Geometric GCN (feature-flagged), torch-free heuristic fallback with identical schema, weak-topic coach recommendations |
+| **Explainability** | Deterministic four-axis attribution over the learner feature tensor, dominant-factor selection, weak-topic coach recommendations. Torch-free and always on — the SHAP/GCN branch was deleted in M1/P1.1 |
 | **Grading pipeline** | Judge0 sandbox, per-language harnesses (Python/Java/JavaScript generic + per-question wrappers), normalized output comparison, honest status mapping (TLE/compile/runtime) |
 | **AI coach** | Escalating hints on consecutive failures: Socratic nudge (3) → pseudocode (5) → worked example (7+), via n8n/LLM webhook with resilient fallbacks |
 | **Content pipeline** | 2,900+ problem bank maintained by quota-aware, idempotent LLM batch commands (generation, validation gates, multi-language starter code, backfill, restore) |
 | **Collaboration** | JWT-authenticated WebSocket group chat, CRDT (Yjs) collaborative editor, study groups, quizzes, document RAG, visual search |
 | **Auth** | Google Sign-In (server-verified ID token, account linked by email) alongside password auth with enforced complexity (length + uppercase + number + symbol), case-insensitive unique username/email |
 | **Content trust** *(current focus)* | Question lifecycle (DRAFT → PENDING_REVIEW → PUBLISHED), trust lifecycle (UNVERIFIED → ORACLE_VERIFIED), approved-reference oracle with two-agreeing-runs provenance, mutation-tested hidden-test quality gate, ten column-scoped Postgres roles, pre-image capture and rollback for every content write |
-| **Ops discipline** | ~3,000-test offline suite (all third parties mocked, incl. threaded race tests), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), Sentry error tracking + per-request access log, environment-driven config, tested backup/restore |
+| **Ops discipline** | ~3,400-test offline suite (all third parties mocked, incl. threaded race tests), CI with a Postgres service container, scoped API throttling (incl. spoof-resistant auth brute-force brake), composite index catalog, monthly-partitioned submissions table with self-healing maintenance, row-locked learner-state transactions (race-free Elo/mastery updates), Sentry error tracking + per-request access log, environment-driven config, tested backup/restore |
 
 ## Architecture
 
@@ -48,10 +48,16 @@ flowchart LR
       TC[Traffic Cop] --> DAG[Curriculum DAG]
       TC --> ELO[Elo Engine]
       HLR[Half-Life Regression]
-      XAI[SHAP / GCN Explainer]
+      XAI[Heuristic Explainer]
+      GL[Glicko-2 shadow<br/>writes only]
     end
     DRF --- Engines
 ```
+
+**What is live above:** everything except `Glicko-2 shadow`, which writes
+`LearnerTopicSkill` / `QuestionSkill` on every eligible submission and is read
+by nothing. Knowledge tracing does not appear in this diagram because no model
+runs in the request path — see *Learner modelling*.
 
 ---
 
@@ -180,7 +186,7 @@ retroactively turn past evidence into trusted evidence.
 
 ### Reseed architecture — IN PROGRESS
 
-1,141 questions still carry a templated placeholder instead of a statement.
+1,137 questions still carry a templated placeholder instead of a statement.
 The reseed pipeline replaces them, and its central design decision is that
 **the LLM is a formatter, not a source of truth**:
 
@@ -260,7 +266,7 @@ cases replaced, zero exposed inputs surviving.
 
 | | |
 |---|---|
-| Architecture, migrations, generator | implemented; migration `0048` applied |
+| Architecture, migrations, generator | implemented; schema at migration `0051` |
 | Five pilot specifications | **operator-verified**, digests frozen |
 | Offline artifacts | generated and gated |
 | Early example verifier | ready |
@@ -300,7 +306,7 @@ Stated plainly, because it is easy to over-read the roadmap:
 | **Elo skill rating** | **CURRENT — live** | Still the rating the UI shows and the selector matches on. Efficiency multipliers, anti-farming clamp, inactivity decay. |
 | **Half-life regression (memory)** | **CURRENT — live** | `P(t) = 2^(−t/h)`, review queue, graph decay. |
 | **Hybrid Traffic Cop router** | **CURRENT — live** | Runs-test streakiness + RandomForest over logged outcomes. |
-| **SHAP / GCN explainability** | **CURRENT — feature-flagged** | Torch-free heuristic fallback with an identical schema. |
+| **Explainability payload** | **CURRENT — live, single path** | A deterministic heuristic over the learner feature tensor. **The SHAP-over-GCN branch was deleted in M1/P1.1** and is not feature-flagged — it is gone. It could never have run in production anyway: `render.yaml` installs `requirements.txt` only, so torch, shap and the GCN artifacts were absent from the web tier and the flag shipped `false`. Every response the frontend has ever rendered came from the heuristic. The response schema is unchanged, including a key still named `shap_values` — renaming it would break the SPA's radar chart for no gain. |
 | **Glicko-2 two-sided rating** | **IN PROGRESS — shadow, UNARMED** | `groups/shadow.py` runs beside production on the same evidence so the two can be compared. It reaches no learner: the selector, the displayed rating and mastery are untouched. Consumes only `adaptive_eligible` submissions. |
 | **Knowledge Tracing (BKT / DKT / Transformer / TA-GTKT)** | **RESEARCH — trained, NOT production-integrated** | Four models are trained in `kt_research/`, on the **public ASSISTments 2009–10 benchmark** — never on SparkLM data. No model runs in the request path, and nothing a learner sees is produced by one. `kt_readiness` / `kt_data_readiness` answer one question — *how many interactions are actually eligible for training?* — and gate on `NOT_READY` / `RESEARCH_READY` / `TRAINING_READY`. With **6 verified questions and 0 adaptive-eligible submissions**, the honest answer today is **not ready**, and that is a successful outcome for that phase rather than a failure. See `docs/P2_12_KT_BASELINES.md` and `docs/P2_13_TA_GTKT.md`. |
 | **Graph / Memory-and-Forgetting Knowledge Tracing** | **RESEARCH — NOT IMPLEMENTED** | No model exists. SAKT and AKT are declared `NOT IMPLEMENTED` in `kt_research/models.py`. |
@@ -323,15 +329,15 @@ Every choice below was made against a real alternative, not by default. The shor
 | **Python 3.12 + Django 5.2** | Web framework, ORM, admin site | The admin site alone (question-bank curation, submission inspection) would take weeks to hand-build; a FastAPI rewrite was considered and rejected — it would trade the ORM, admin, and Channels integration for a latency gain nobody would notice |
 | **Django REST Framework 3.17** | API layer — serializers, permissions, throttling | Declarative validation and object-level permissions for ~50 endpoints without hand-rolling request parsing on every view |
 | **Django Channels 4 + Daphne (ASGI)** | WebSocket layer — chat, notifications, collaborative editing | Lets *one* process serve REST and WebSocket traffic together. The alternative — a separate Node/Socket.io service — means a second deployable, a second auth story, and a second thing to keep in sync; not worth it before there's a reason to scale them independently |
-| **PostgreSQL 15+ with pgvector** | Primary datastore, incl. vector similarity search | Relational integrity (DAG-acyclicity constraints, uniqueness, the locked multi-row learner-state transaction) is load-bearing here — a document store would make that *harder*, not easier. pgvector means visual-search embeddings live in the same database as everything else instead of a bolted-on vector DB |
+| **PostgreSQL with pgvector** *(17.11 on Neon in production)* | Primary datastore, incl. vector similarity search | Relational integrity (DAG-acyclicity constraints, uniqueness, the locked multi-row learner-state transaction) is load-bearing here — a document store would make that *harder*, not easier. pgvector means visual-search embeddings live in the same database as everything else instead of a bolted-on vector DB. **Column-level grants** are what make the ten-role content-trust boundary enforceable by the database rather than by code review |
 | **Redis 7** | Cache, DRF throttle storage, Channels layer | One instance backs three different subsystems — cheaper to run and reason about than three |
 | **SimpleJWT** | Stateless access/refresh token auth | A decoupled SPA + API doesn't want server-side session state |
 | **scikit-learn (RandomForest)** | The Traffic Cop's trained routing classifier | Deliberately *not* a deep model: 4 engineered features (accuracy, runs-test z-score, Elo, engine flag) don't need one, and a shallow model is cheap to retrain nightly, easy to inspect, and needs no GPU in the serving path |
 | **NetworkX** | Curriculum prerequisite DAG | Real cycle-detection and graph traversal instead of hand-rolled adjacency-list code that would eventually reinvent NetworkX badly |
-| **PyTorch + PyTorch-Geometric** *(optional, `requirements-ml.txt`)* | The GCN knowledge-graph engine, SHAP explanations | Deliberately isolated from the web tier — production runs `requirements.txt` alone (torch-free), ~2 GB lighter and no PyTorch cold-start tax on a free-tier instance. The heuristic explainer covers the same response schema when this isn't installed |
-| **ONNX Runtime** | Serving the trained GCN without PyTorch | Export once, then infer without the ~2 GB PyTorch dependency in the request path |
+| **PyTorch + transformers** *(optional, `requirements-ml.txt`)* | CLIP embeddings for visual search — **and nothing else** | Deliberately isolated from the web tier: production installs `requirements.txt` alone (torch-free), ~2 GB lighter with no PyTorch cold-start tax on a 512 MB instance. Imported lazily inside `try/except ImportError`, so a slim install degrades rather than failing to boot. `torch-geometric`, `onnxruntime` and `shap` were **removed in M1/P1.1** once the GCN engine, SHAP explainer, ONNX export, MIRT engine and synthetic data generator were deleted and a repo-wide scan found zero importers |
 | **Judge0 (RapidAPI)** | Sandboxed code execution | Untrusted student code must never run in-process — Judge0 isolates it completely, in 5 languages (Python, Java, C++, C, JavaScript) |
-| **Groq (Llama 3.3 70B)** | Quiz and question-content generation | Fast, cheap, strong structured-JSON output — the right tool for "generate 4 test cases as JSON," not the right tool for open-ended reasoning |
+| **Groq** | Question-content generation (reseed), quizzes | Fast, cheap, strong structured-JSON output. The reseed path reads its model id from `RESEED_GROQ_MODEL` (default `openai/gpt-oss-120b`) precisely so a withdrawn model is a config change. **`ai_services.py` has not been migrated** and still hard-codes `llama-3.3-70b-versatile` at three call sites; that model was withdrawn, so those paths currently 404 |
+| **NVIDIA NIM** | LLM fallback when the daily Groq quota is exhausted | A second provider behind one interface. Note it fires on *quota* errors only, so it does not cover the 404 above |
 | **Google Gemini** | Vision (image explanation), text embeddings | Groq doesn't do multimodal; Gemini's `gemini-2.5-flash` and `text-embedding-004` cover the vision and embedding gaps |
 | **Google Identity Services + google-auth** | OAuth sign-in | Token verified server-side against Google's public keys — the frontend's claim of identity is never trusted on its own |
 
@@ -357,7 +363,7 @@ Every choice below was made against a real alternative, not by default. The shor
 | **Upstash** | Managed Redis (TLS) | Same reasoning as Neon: pay-per-request Redis instead of a paid always-on instance |
 | **Render** | Daphne ASGI hosting | `render.yaml` blueprint deploy — the whole service definition is configuration, not manual dashboard clicks |
 | **Vercel** | SPA hosting | Instant global CDN, zero-config Vite detection, free preview deployments per branch |
-| **GitHub Actions** | CI + keepalive | Pytest against a real Postgres *service container* (not SQLite) on every push, plus a 5-minute healthz ping keeping both Render and Neon's free tiers warm |
+| **GitHub Actions** | CI, keepalive, nightly maintenance, nightly bank validation | Pytest against a real Postgres *service container* (not SQLite) on every push. Four workflows, because Render's free tier has no cron and no background worker. The warm-keeper does **not** achieve a 5-minute cadence: free-tier cron was measured firing at 54–213 minute gaps (mean 104.5), so the job holds an in-run 45-minute loop instead, and is documented as a mitigation rather than a fix |
 
 The staged scaling plan (Celery workers, a self-hosted judge fleet, a read replica) is triggered by *measured load* — thread saturation, submission volume — not a calendar date; none of it is provisioned today because none of it is needed yet.
 
@@ -535,7 +541,7 @@ The "effective mastery" framing (skill × retention, rather than mutating the sk
 </details>
 
 <details>
-<summary><strong>4. Curriculum Structure — Prerequisite DAG and the Graph Neural Network Engine</strong></summary>
+<summary><strong>4. Curriculum Structure — the Prerequisite DAG</strong></summary>
 
 #### Problem Statement
 
@@ -543,51 +549,75 @@ The "effective mastery" framing (skill × retention, rather than mutating the sk
 
 #### Solution
 
-A directed acyclic graph over curriculum topics, enforced at the database-write level (not just assumed), traversed by two engines: a deterministic shallowest-unmastered-node walk, and — optionally — a trained graph neural network that predicts per-node success probability from graph structure and student state.
+A directed acyclic graph over curriculum topics, enforced at the database-write level (not just assumed), traversed by a deterministic shallowest-unmastered-node walk. A trained graph neural network used to sit beside that walk; it was deleted in M1/P1.1 and the design record is preserved at the end of this section.
 
 #### Methodology & Architecture
 
 `TopicPrerequisite` edges form a NetworkX `DiGraph`; `clean()` runs real cycle-detection before any edge is saved, rejecting the edit rather than silently allowing a curriculum to stop being a DAG. The graph is cached per-portal for 30 minutes and invalidated immediately (not on TTL alone) via a `post_save`/`post_delete` signal, including bulk/queryset-level deletes. Mastery for unlock purposes uses the same shared definition everywhere it's checked: accuracy ≥ 0.8 over ≥ 3 reviews. `HierarchicalEngine.get_next_topic` walks the DAG for the shallowest unmastered node whose prerequisites are all satisfied.
 
-The GNN architecture (`TrueGCNKnowledgeGraph`):
-```
-Input: [accuracy, retention, volume_score, elo_percentile]  (per node, 4-dim)
-          │
-   GCNConv(4 → 16)
-          │
-         ReLU
-          │
-   dropout(p=0.2)
-          │
-   GCNConv(16 → 8)
-          │
-         ReLU
-          │
-   Linear(8 → 1)
-          │
-       sigmoid
-          │
-Output: per-node success probability
-```
-Trained on synthetic student-archetype data (fast/struggling/erratic learner profiles walked over the real prerequisite graph). Serves either directly via PyTorch or, when exported, via ONNX Runtime for lighter-weight inference.
+Today the graph holds **22 topics, of which 17 carry prerequisite edges — 19 edges in total.**
 
 #### Tech Stack & Why
 
 | Technology | Why here specifically |
 |---|---|
 | NetworkX | Real cycle-detection and graph traversal instead of hand-rolled adjacency-list code that would eventually reinvent (worse) what NetworkX already does correctly |
-| PyTorch-Geometric | Implements the graph-convolution message-passing operator directly (`GCNConv`) rather than requiring it be hand-derived from a dense adjacency matrix |
-| ONNX Runtime | Serves the same trained GCN without the full PyTorch dependency in the request path |
-
-#### Research References
-
-1. Kipf, T. N., & Welling, M. (2017). "Semi-Supervised Classification with Graph Convolutional Networks." *International Conference on Learning Representations* (ICLR 2017). [arXiv:1609.02907](https://arxiv.org/abs/1609.02907)
-
-PyTorch-Geometric's `GCNConv` is a direct implementation of this paper's propagation rule. The application — predicting a *student's* success probability at a curriculum *node* from graph structure, rather than the paper's own citation-network node-classification setting — is this project's adaptation, not the paper's own use case; the underlying operator is unmodified.
+| PostgreSQL constraints | Acyclicity and uniqueness are enforced at write time, so "prerequisite" cannot quietly stop meaning anything |
 
 #### Observations
 
-A real, subtle bug lived here: the per-node mastery lookup dictionary was originally keyed by the `Topic` model instance, but the graph's own nodes are plain name strings — every lookup silently missed, and the GNN saw hardcoded cold-start features (`0.5, 0, 0.4, 0`) for *every* node, every user, every time, with no error or exception anywhere in the path. It never crashed; it just quietly never used any real student data. This is the clearest example in the codebase of a bug that produces plausible-looking output — the fix (re-keying by `topic.name`) was found by deliberately tracing a known user's expected features through the code, not by anything failing loudly.
+Enforcement is currently **informative, not blocking**: `CURRICULUM_GATE_ENFORCE`
+defaults to `false` in `render.yaml`. The DAG steers routing, and it does not
+refuse a learner. With 22 topics and 6 trusted questions, hard-gating would
+make an already-thin experience thinner — but the flag is the honest place to
+look before assuming a gate is on.
+
+<details>
+<summary>Design record: the retired GCN knowledge-graph engine</summary>
+
+**Removed in M1/P1.1. Nothing below runs.** Kept because the bug it produced is
+worth reading.
+
+A trained graph neural network (`TrueGCNKnowledgeGraph`) predicted per-node
+success probability from graph structure plus student state:
+
+```
+Input: [accuracy, retention, volume_score, elo_percentile]  (per node, 4-dim)
+          │
+   GCNConv(4 → 16) → ReLU → dropout(p=0.2)
+          │
+   GCNConv(16 → 8) → ReLU
+          │
+   Linear(8 → 1) → sigmoid
+          │
+Output: per-node success probability
+```
+
+Trained on synthetic student-archetype data (fast / struggling / erratic
+profiles walked over the real prerequisite graph), served via PyTorch or an
+ONNX export. It was grounded in Kipf & Welling (2017), *Semi-Supervised
+Classification with Graph Convolutional Networks*, ICLR
+([arXiv:1609.02907](https://arxiv.org/abs/1609.02907)) — `GCNConv` implements
+that paper's propagation rule directly. Predicting a *student's* success at a
+curriculum *node*, rather than the paper's citation-network node
+classification, was this project's adaptation; the operator was unmodified.
+
+**Why it went.** The web tier installs `requirements.txt` only and runs on a
+512 MB instance with ~202 MiB already resident; torch adds ~2 GB. The engine
+could not execute where it was deployed. A repo-wide scan then found zero
+importers of `torch-geometric`, `onnxruntime` or `shap`, and all three left the
+dependency set.
+
+**The bug worth keeping.** The per-node mastery lookup was keyed by the `Topic`
+model instance while the graph's nodes are plain name strings. Every lookup
+silently missed, so the GCN saw hardcoded cold-start features
+(`0.5, 0, 0.4, 0`) for *every* node, *every* user, *every* time — with no
+error anywhere in the path. It never crashed; it just never used real student
+data. That is the clearest example in this codebase of a bug that produces
+plausible-looking output, and it was found by tracing a known user's expected
+features through the code rather than by anything failing loudly.
+
+</details>
 
 </details>
 
@@ -678,7 +708,7 @@ The diagnostic value of the three-dimensional split shows up directly in the AI 
 </details>
 
 <details>
-<summary><strong>7. Explainability — Heuristic and Real SHAP Attribution</strong></summary>
+<summary><strong>7. Explainability — the Attribution Payload</strong></summary>
 
 #### Problem Statement
 
@@ -686,7 +716,7 @@ A recommendation with no explanation is a black box a student has no reason to t
 
 #### Solution
 
-Every served problem carries a four-axis explanation (time / space / logic / recency) — a cheap, always-available heuristic by default, and real model-attribution values when a heavier explainability path is enabled — both returned in the identical response shape.
+Every served problem carries a four-axis explanation (time / space / logic / recency), computed by a cheap, always-available, torch-free heuristic. There is exactly one path. A SHAP-over-GCN branch used to sit in front of it, selected by `ENABLE_SHAP_XAI`; it was deleted in M1/P1.1 and the design record is at the end of this section. The response schema is the contract and did not change when the branch went — including a key still named `shap_values`, which no longer has anything to do with SHAP.
 
 #### Methodology & Architecture
 
@@ -1181,7 +1211,12 @@ A real, serious data-loss incident happened here and is worth being explicit abo
 
 ## Quickstart (local development)
 
-**Prerequisites:** Python 3.12, Node 20, Docker Desktop.
+**Prerequisites:** Python 3.12, Node 24.x, Docker Desktop.
+
+> Node 24, not 20. `jsdom` requires `^22.22.2 || ^24.15.0 || >=26.0.0`; on Node 20
+> the Vitest forks worker fails to start and both test files error out *before
+> running*, which reads as a red build over tests that never executed. CI pins
+> the same major for that reason.
 
 ```bash
 # 1. Database
@@ -1274,7 +1309,8 @@ start if that role holds more privilege than the operation needs.
 
 ```bash
 cd backend/LearnLM
-python -m pytest --ignore=scripts -q     # ~3,000 tests, fully offline (Judge0 + LLMs mocked)
+python -m pytest --ignore=scripts -q     # 3,400 tests, fully offline (Judge0 + LLMs mocked)
+python -m pytest groups common -q        # 3,188 — the narrower scope CI runs
 ```
 
 `--ignore=scripts` is required: `scripts/test_judge*.py` are ad-hoc Judge0
@@ -1304,7 +1340,7 @@ results are recorded per phase in `docs/P2_7_*.md`.
 
 ## Deployment
 
-Everything is configuration, not code. The zero-cost stack — **Neon** (Postgres) + **Upstash** (Redis) + **Render** (Daphne via `render.yaml`) + **Vercel** (SPA via `vercel.json`) — is fully scripted: follow [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). The web tier deploys torch-free (`requirements.txt` only, ~2 GB lighter); SHAP falls back to the heuristic explainer with the identical response schema, and visual search degrades cleanly. ML artifacts (e.g. the routing classifier) load once per process — after `retrain_ai`, restart the service (deliberate: models never hot-swap past the evaluation gate).
+Everything is configuration, not code. The zero-cost stack — **Neon** (Postgres) + **Upstash** (Redis) + **Render** (Daphne via `render.yaml`) + **Vercel** (SPA via `vercel.json`) — is fully scripted: follow [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). The web tier deploys torch-free (`requirements.txt` only, ~2 GB lighter): the explainer is the heuristic path and needs nothing extra, and visual search degrades cleanly when torch is absent. ML artifacts (e.g. the routing classifier) load once per process — after `retrain_ai`, restart the service (deliberate: models never hot-swap past the evaluation gate).
 
 A full Software Requirements Specification lives in [`docs/SparkLM_SRS_v2.docx`](docs/SparkLM_SRS_v2.docx) — architecture, every adaptive-learning formula, the full API/data model, security model, and real engineering case studies.
 
@@ -1312,26 +1348,28 @@ A full Software Requirements Specification lives in [`docs/SparkLM_SRS_v2.docx`]
 
 | Area | Status | Notes |
 |---|---|---|
-| Adaptive routing, Elo, half-life memory, XAI | **COMPLETE** | Live and serving |
+| Adaptive routing, Elo, half-life memory, explainability | **COMPLETE** | Live and serving |
 | Grading pipeline (Judge0, 5 languages) | **COMPLETE** | Python on 3.11.2 |
 | Question / trust / reference lifecycles | **COMPLETE** | Single writer per column |
 | Hidden-test quality gate (mutation-tested) | **COMPLETE** | Tier-1 = 1.0, Tier-2 ≥ 0.80 |
-| Oracle + provenance | **COMPLETE** | Two agreeing runs; q3309 and q1436 verified |
+| Oracle + provenance | **COMPLETE** | Two agreeing runs; 6 questions verified, 238 executions recorded |
 | Ten column-scoped database roles | **COMPLETE** | Gates refuse over-granted roles |
 | Pre-image capture / rollback | **COMPLETE** | No pre-image, no write |
-| `ReseedLedger` + migration `0048` | **COMPLETE** | Applied; 0 rows |
+| `ReseedLedger` + reseed migrations | **COMPLETE** | Applied; 0 rows. Schema now at `0051` |
 | Reseed generator + conformance + presentation gates | **COMPLETE** | Offline, file-only |
 | Early example verifier | **COMPLETE** | Explicitly not oracle evidence |
 | Five pilot specifications | **COMPLETE** | Operator-verified, digests frozen |
 | Glicko-2 shadow rating | **IN PROGRESS** | Unarmed; reaches no learner |
-| **Production reseed of 1,141 candidates** | **BLOCKED** | Needs a contract census (v3 for single-container signatures) and human-reviewed reference implementations |
+| **Production reseed of ~1,136 candidates** | **BLOCKED** | The contract census is complete. What is missing is operator-authored specifications — the first 24-question slice was blocked because none of them had one |
 | Bulk specification authoring | **BLOCKED** | No authoritative source exists; each specification needs an operator |
 | BKT / DKT / Transformer / TA-GTKT | **RESEARCH (trained, not integrated)** | Trained on public ASSISTments 2009–10, never on SparkLM data; readiness gate says *not ready* at 6 verified questions and 0 eligible submissions |
 | SAKT / AKT / Graph / Memory-and-Forgetting KT | **PLANNED (research)** | Declared `NOT IMPLEMENTED` in `kt_research/models.py` |
 | Elo-matched 1v1 duels; post-solve LLM code review | **PLANNED** | |
 | Router prediction-accuracy dashboard | **PLANNED** | On the existing recommendation/outcome logs |
 | Async grading queue (Celery) with per-test-case progress | **PLANNED** | |
-| Migration off the deprecated `google-generativeai` SDK | **PLANNED** | Also: `ai_services.py` hard-codes a withdrawn Groq model and currently 404s |
+| Migration off the deprecated `google-generativeai` SDK | **PLANNED** | |
+| Point `ai_services.py` at `PROVIDER_MODELS` | **OPEN DEFECT** | It hard-codes the withdrawn `llama-3.3-70b-versatile` at three call sites, so those paths 404. The reseed path already reads `RESEED_GROQ_MODEL` and is unaffected |
+| Trust-aware serving | **OPEN GAP** | `_servable_questions()` filters on deliverability, not trust: 1,788 questions are reachable, 6 are verified |
 
 ### Phase records
 

@@ -35,29 +35,131 @@ Platforms like LeetCode treat every user identically. SparkLM makes three bets:
 
 ## Architecture
 
+Two diagrams, because there are two systems. The **request path** is what a
+learner touches. The **content-trust pipeline** runs offline and decides what
+the request path is allowed to serve.
+
+### Request path
+
 ```mermaid
-flowchart LR
-    SPA[React + TS SPA] -->|REST /api| DRF[Django REST / Daphne ASGI]
-    SPA -->|WebSocket /ws| CH[Channels: chat + CRDT]
-    DRF --> PG[(PostgreSQL + pgvector)]
-    DRF --> RD[(Redis: cache, throttles, channels)]
-    DRF -->|sandboxed exec| J0[Judge0 API]
-    DRF -->|content generation| LLM[Groq / Gemini]
-    DRF -->|coach hints| N8N[n8n webhook]
-    subgraph Engines
-      TC[Traffic Cop] --> DAG[Curriculum DAG]
-      TC --> ELO[Elo Engine]
-      HLR[Half-Life Regression]
-      XAI[Heuristic Explainer]
-      GL[Glicko-2 shadow<br/>writes only]
-    end
-    DRF --- Engines
+flowchart TD
+    L(["Learner"]) --> SPA["React 18 + Vite SPA<br/>Vercel"]
+    SPA -->|"REST /api"| API["Django REST Framework<br/>Daphne ASGI · Render"]
+    SPA -->|"WebSocket /ws"| CH["Channels<br/>chat + CRDT editing"]
+
+    API --> AUTH["SimpleJWT<br/>+ optional Google IdS"]
+    AUTH --> THR["Throttling<br/>Redis-backed, per scope"]
+    THR --> ADM["Admission control<br/>12 in flight, else 503"]
+
+    ADM --> ROUTE{"Routing layer"}
+    ROUTE -->|"default"| TC["Traffic Cop<br/>runs test + RandomForest"]
+    ROUTE -->|"flag on"| AG["Agent orchestrator<br/>6 tools · max 8 calls · 30 s"]
+
+    TC --> SERV["_servable_questions()<br/>placeholder + hidden-tests filter<br/>NOT trust-filtered · 1,788 reachable"]
+    AG --> TRUST["get_candidate_problems<br/>PUBLISHED + ORACLE_VERIFIED only<br/>6 reachable"]
+
+    SERV --> DAG["Curriculum DAG<br/>22 topics · 19 edges<br/>gate flag OFF"]
+    TRUST --> DAG
+    DAG --> SEL["Elo-matched selection"]
+    SEL --> Q["Problem<br/>sample case only"]
+    Q --> J0["Judge0 sandbox<br/>5 languages · 1 call per test case"]
+
+    J0 --> TX["ProgressionService.apply_submission<br/>ONE row-locked transaction<br/>no network calls inside"]
+
+    TX --> ELO["Elo engine"]
+    TX --> HLR["Half-life memory"]
+    TX --> XAI["Heuristic explainer"]
+    TX -.->|"after commit<br/>own savepoint"| GL["Glicko-2"]
+
+    ELO --> NEXT(["Next recommendation"])
+    HLR --> NEXT
+    XAI --> NEXT
+
+    API --> PG[("PostgreSQL 17 + pgvector<br/>Neon")]
+    API --> RD[("Redis<br/>cache · throttles · channels")]
+    API --> RAG["RAG doubt-solver<br/>Gemini embeddings"]
+    API --> N8N["n8n webhook<br/>escalating hints"]
+
+    KT["KT research export<br/>read as a FILE, never a model"] -.->|"advisory"| AG
+
+    classDef live fill:#dcfce7,stroke:#166534,color:#052e16
+    classDef shadow fill:#fef9c3,stroke:#854d0e,color:#3f2d00
+    classDef research fill:#e0e7ff,stroke:#3730a3,color:#1e1b4b
+    classDef gap fill:#fee2e2,stroke:#991b1b,color:#450a0a
+
+    class SPA,API,CH,AUTH,THR,ADM,TC,DAG,SEL,Q,J0,TX,ELO,HLR,XAI,PG,RD,RAG,N8N,NEXT,TRUST live
+    class GL shadow
+    class KT research
+    class SERV gap
+    class AG shadow
 ```
 
-**What is live above:** everything except `Glicko-2 shadow`, which writes
-`LearnerTopicSkill` / `QuestionSkill` on every eligible submission and is read
-by nothing. Knowledge tracing does not appear in this diagram because no model
-runs in the request path — see *Learner modelling*.
+| | |
+|---|---|
+| 🟩 **LIVE** | Everything a learner touches today |
+| 🟨 **SHADOW / FLAGGED** | `Glicko-2` writes real state that **nothing reads**. The `agent orchestrator` is wired and reachable but `AGENT_ORCHESTRATOR_ENABLED` defaults to `false` |
+| 🟦 **RESEARCH** | The KT signal is read from an **offline file export**. No model runs in the request path |
+| 🟥 **KNOWN GAP** | `_servable_questions()` filters on deliverability, not trust — 1,788 reachable, 6 verified. The agent path does **not** have this gap |
+
+### Content-trust pipeline (offline)
+
+```mermaid
+flowchart TD
+    subgraph authoring["1 — Authoring · operator-driven"]
+        SPEC["Operator-written specification<br/>frozen + digested"]
+        GEN["reseed_generate<br/>LLM as FORMATTER, files only"]
+        SPEC --> GEN
+    end
+
+    subgraph gates["2 — Offline gates · no DB writes"]
+        STRUCT["Structural + signature validation"]
+        CONF["Specification conformance<br/>requirement-loss detector"]
+        PRES["Presentation gate<br/>no spec labels / meta-commentary"]
+        EX["Early example check<br/>NOT oracle evidence"]
+        GEN --> STRUCT --> CONF --> PRES --> EX
+    end
+
+    HR{{"HUMAN REVIEW<br/>the gate that actually blocks"}}
+    EX --> HR
+
+    subgraph write["3 — Production writes · one column per role"]
+        ST["reseed_statement<br/>content"]
+        SIG["declare_signature<br/>boilerplate_code"]
+        CTR["remediate_contract<br/>execution_contract_version"]
+        HT["expand_hidden_tests<br/>hidden_test_cases"]
+        HR --> ST --> SIG --> CTR --> HT
+    end
+
+    PI["preimage_capture<br/>no pre-image, no write"]
+    PI -.-> ST
+    PI -.-> SIG
+    PI -.-> CTR
+    PI -.-> HT
+
+    subgraph trust["4 — Trust · separate authorities, separate roles"]
+        QG["quality_gate<br/>Tier-1 = 1.0 · Tier-2 &ge; 0.80 · &ge; 12 cases"]
+        REF["reference_create / reference_review<br/>human-approved, canonical"]
+        OR["oracle_execute<br/>every case, twice, provenance recorded"]
+        AP["question_approve"]
+        PR["question_promote<br/>trust_state"]
+        PU["question_status<br/>status"]
+        HT --> QG --> REF --> OR --> AP --> PR --> PU
+    end
+
+    PU --> SERVE(["PUBLISHED + ORACLE_VERIFIED<br/>= adaptive_eligible"])
+
+    classDef done fill:#dcfce7,stroke:#166534,color:#052e16
+    classDef human fill:#fef3c7,stroke:#92400e,color:#451a03
+    classDef block fill:#fee2e2,stroke:#991b1b,color:#450a0a
+    class GEN,STRUCT,CONF,PRES,EX,ST,SIG,CTR,HT,QG,REF,OR,AP,PR,PU,SERVE,PI done
+    class HR human
+    class SPEC block
+```
+
+**Every stage above has a working command and 6 questions have been through
+all of them.** The red box is the bottleneck: only 5 operator specifications
+exist in the repository, so the pipeline starves at its first step. That is
+human authoring time, not compute.
 
 ---
 
@@ -70,41 +172,11 @@ runs in the request path — see *Learner modelling*.
 
 ### The pipeline
 
-```mermaid
-flowchart TD
-    subgraph authoring["Authoring — operator-driven"]
-        SPEC["Operator-written specification<br/>(frozen + digested)"]
-        GEN["LLM as FORMATTER<br/>reseed_generate"]
-        SPEC --> GEN
-    end
+Diagrammed above under [Architecture](#content-trust-pipeline-offline).
+Four authorities in sequence, each writing exactly one column, with a
+human review gate between generation and any production write. The
+sections below define each lifecycle it moves a question through.
 
-    subgraph gates["Offline gates — no DB writes"]
-        STRUCT["Structural + signature<br/>validation"]
-        CONF["Specification conformance<br/>requirement-loss detector"]
-        PRES["Presentation gate<br/>no spec labels / meta-commentary"]
-        EX["Early example check<br/>NOT oracle evidence"]
-        GEN --> STRUCT --> CONF --> PRES --> EX
-    end
-
-    subgraph write["Production writes — one column per role"]
-        ST["reseed_statement<br/>content"]
-        SIG["declare_signature<br/>boilerplate_code"]
-        CTR["remediate_contract<br/>execution_contract_version"]
-        HT["expand_hidden_tests<br/>hidden_test_cases"]
-        EX -.human review.-> ST --> SIG --> CTR --> HT
-    end
-
-    subgraph trust["Trust — separate authorities"]
-        QG["quality_gate<br/>Tier-1 + Tier-2 mutants"]
-        OR["oracle_execute<br/>approved reference, 2 agreeing runs"]
-        AP["question_approve"]
-        PR["question_promote<br/>trust_state"]
-        PU["question_status<br/>status"]
-        HT --> QG --> OR --> AP --> PR --> PU
-    end
-
-    PU --> SERVE["PUBLISHED + ORACLE_VERIFIED<br/>= adaptive_eligible"]
-```
 
 ### Question lifecycle — CURRENT
 
@@ -318,6 +390,76 @@ Stated plainly, because it is easy to over-read the roadmap:
 > data-readiness contract written *before* any model, precisely so that nobody
 > trains a Transformer on verdicts produced by answer keys nobody has checked.
 
+## Agent orchestrator — what it does and does not control
+
+**Status: wired and reachable, `AGENT_ORCHESTRATOR_ENABLED` defaults to
+`false`.** With the flag off, `POST /api/ai/agent/` answers from the
+deterministic recommender — exactly the pre-agent behaviour.
+
+A learner can ask an open question ("what should I work on and why?") and get
+an answer composed from real backend state, instead of every phrasing needing
+its own endpoint. The loop is `observe → plan → tool → result → next action →
+final response`, in about thirty lines. **No LangChain, no LangGraph** — a
+framework would add a dependency, a vocabulary and an upgrade treadmill in
+exchange for indirection over `while`, and every guarantee below is something
+that has to be tested regardless.
+
+| | |
+|---|---|
+| Endpoint | `POST /api/ai/agent/` |
+| Auth | `IsAuthenticated`, registered `SELF_SCOPED` in the authorization-matrix test |
+| Throttle | `ClientIPScopedRateThrottle`, scope `agent` — **12/minute** |
+| Provider | Groq via `PROVIDER_MODELS`, verified by **listing** models rather than generating |
+| Bounds | `MAX_TOOL_CALLS = 8` · `TIMEOUT_SECONDS = 30.0` · `MAX_CONSECUTIVE_ERRORS = 3` |
+| Candidate cap | `max_candidates = 20` |
+
+### The six tools
+
+| Tool | Reads only | What it reaches |
+|---|---|---|
+| `get_learner_state` | yes | Rating, solved count, topic mastery — **plus** a Glicko-2 shadow reading labelled `UNARMED — not the learner-visible rating`, and a KT prediction read from an offline file export |
+| `get_candidate_problems` | yes | **`PUBLISHED` + `ORACLE_VERIFIED` only.** The trust filter the legacy serving path lacks |
+| `get_prerequisites` | yes | The production curriculum DAG |
+| `get_problem_context` | yes | Learner-visible detail for one offered question |
+| `get_tutor_context` | yes | Grounding for an explanation, including the learner's own attempts |
+| `grade_submission` | **no** | Judge0. Persists **only** when the orchestrator commits — and `commit` is stripped from every model-supplied payload |
+
+### What it cannot do
+
+- **It cannot widen its own candidate set.** The set is held by the *session*,
+  not the model: an id that did not come back from `get_candidate_problems`
+  *in this session* is refused, counted, and fed back as an error. A
+  hallucinated id cannot reach a learner.
+- **It cannot commit a submission.** `commit` is stripped from model payloads.
+- **It cannot write grading truth** — no `expected_output`, `hidden_test_cases`,
+  `status` or `trust_state`.
+- **It cannot change Elo, Glicko or mastery.**
+- **It cannot act on another learner.** The endpoint is self-scoped.
+- **It cannot expose its reasoning.** Planning text stays in `_private`; the UI
+  gets a `transcript` of short phrases ("Checking learner state").
+  Chain-of-thought is frequently wrong even when the answer is right, and
+  showing it invites a learner to trust the wrong half.
+
+### When the provider fails
+
+Three layers, and the response carries a `source` field so a caller can tell
+which one answered rather than guessing from the prose:
+
+1. The provider returns `{"stop": reason}` rather than a null answer. *(This
+   was a real bug: `{"final": None}` would have rendered the string "None" to
+   a learner.)*
+2. Repeated failure falls through to a backend-only fallback with **no model
+   involved**.
+3. Flag off, or provider absent → the deterministic recommender.
+
+Provider exceptions are redacted before logging, because `exc_info=True` on a
+provider error can log a key the SDK echoed back.
+
+> **Note the asymmetry.** The agent path is trust-safe — it can only offer the
+> 6 verified questions. The legacy deterministic path is not, and can serve
+> 1,788. That is backwards from what you would expect, and it is a known gap
+> on the legacy side rather than a feature of the agent.
+
 ## Tech stack — what, and why
 
 Every choice below was made against a real alternative, not by default. The short version: Django because the ORM/admin/Channels combo beats hand-wiring a faster framework for a solo-maintained project; Postgres+pgvector because relational integrity and vector search can live in one database instead of two; a modulith (one deployable backend, strictly layered internals) instead of microservices, because operational cost is unjustified below roughly a ten-engineer team.
@@ -366,6 +508,48 @@ Every choice below was made against a real alternative, not by default. The shor
 | **GitHub Actions** | CI, keepalive, nightly maintenance, nightly bank validation | Pytest against a real Postgres *service container* (not SQLite) on every push. Four workflows, because Render's free tier has no cron and no background worker. The warm-keeper does **not** achieve a 5-minute cadence: free-tier cron was measured firing at 54–213 minute gaps (mean 104.5), so the job holds an in-run 45-minute loop instead, and is documented as a mitigation rather than a fix |
 
 The staged scaling plan (Celery workers, a self-hosted judge fleet, a read replica) is triggered by *measured load* — thread saturation, submission volume — not a calendar date; none of it is provisioned today because none of it is needed yet.
+
+### Status at a glance
+
+Every technology actually present, and what state it is in. Nothing retired
+appears here — retired designs live in the collapsed design records inside the
+feature deep dives.
+
+| Category | Technology | Current role | Status |
+|---|---|---|---|
+| Frontend | React 18 · TypeScript 5 · Vite 7 | SPA | ✅ LIVE |
+| Frontend | Tailwind · shadcn/ui (Radix) | Styling, accessible components | ✅ LIVE |
+| Frontend | Monaco Editor | Code editor | ✅ LIVE |
+| Frontend | Yjs · y-monaco · y-websocket | CRDT collaborative editing | ✅ LIVE |
+| Frontend | TanStack Query · Axios wrapper | Server state; partial migration | ✅ LIVE |
+| Frontend | Recharts | Explainability radar, dashboards | ✅ LIVE |
+| Backend | Python 3.12 · Django 5.2 | Framework, ORM, admin | ✅ LIVE |
+| Backend | Django REST Framework 3.17 | ~47 endpoints, default-deny permissions | ✅ LIVE |
+| Backend | Channels 4 · Daphne | WebSockets in the same process | ✅ LIVE |
+| Backend | SimpleJWT · Google Identity Services | Auth | ✅ LIVE |
+| Database | PostgreSQL 17.11 + pgvector (Neon) | Primary store, vector search, **column-level grants** | ✅ LIVE |
+| Cache | Redis 7 (Upstash) | Cache · throttles · channel layer | ✅ LIVE |
+| Code execution | Judge0 (RapidAPI) | Sandbox, 5 languages | ✅ LIVE |
+| LLM | Groq | Reseed generation via `RESEED_GROQ_MODEL` | ✅ LIVE |
+| LLM | Groq in `ai_services.py` | Quizzes, study tools | ⚠️ **BROKEN** — hard-codes the withdrawn `llama-3.3-70b-versatile`, 404s |
+| LLM | NVIDIA NIM | Fallback on Groq **quota** errors only | ✅ LIVE |
+| LLM | Google Gemini | Vision, `text-embedding-004`, reseed provider | ✅ LIVE (20 req/day free tier) |
+| Agent | Custom orchestrator (`groups/agent/`) | 6 tools, bounded loop | 🟡 **FLAGGED OFF** by default |
+| Learner modelling | Elo | **The live rating** — UI and selector | ✅ LIVE |
+| Learner modelling | Half-life regression (SM-2 update) | Memory, review queue | ✅ LIVE |
+| Learner modelling | Traffic Cop (runs test + RandomForest) | Route selection | ✅ LIVE |
+| Learner modelling | NetworkX | Curriculum DAG, cycle detection | ✅ LIVE (gate flag off) |
+| Learner modelling | 3PL IRT | Onboarding cold-start calibration | ✅ LIVE |
+| Learner modelling | Heuristic explainer | Four-axis attribution payload | ✅ LIVE |
+| Learner modelling | Glicko-2 | Two-sided rating; **writes state nothing reads** | 🟡 SHADOW |
+| Knowledge tracing | BKT · DKT · Transformer · TA-GTKT | Trained on **public ASSISTments 2009–10** | 🔬 RESEARCH |
+| Knowledge tracing | PyTorch + transformers | KT training; CLIP for visual search | 🔬 RESEARCH / optional (`requirements-ml.txt`) |
+| Knowledge tracing | SAKT · AKT · TA-GTKT-P | — | ⏳ FUTURE — declared `NOT IMPLEMENTED` |
+| Content trust | Oracle · quality gate · 10 scoped roles | The pipeline above | ✅ LIVE (6 questions through it) |
+| Content trust | Bulk reseed | ~1,136 candidates | ⚠️ BLOCKED — no specifications |
+| Deployment | Vercel · Render · Neon · Upstash | Hosting | ✅ LIVE |
+| Testing | pytest · Vitest | 3,400 backend · 161 frontend | ✅ LIVE |
+| CI/CD | GitHub Actions ×4 | CI, keepalive, maintenance, bank validation | ✅ LIVE (no deploy gate) |
 
 ---
 
@@ -1346,30 +1530,58 @@ A full Software Requirements Specification lives in [`docs/SparkLM_SRS_v2.docx`]
 
 ## Project status
 
+Labels are literal. **✅ LIVE** means a learner touches it today.
+**🟡 SHADOW / FLAGGED** means it runs but reaches nobody. **🔬 RESEARCH** means
+it exists outside the application. **⏳ FUTURE** means it does not exist.
+**⚠️ BLOCKED / DEFECT** means it is known-broken or stuck.
+
+### Production
+
 | Area | Status | Notes |
 |---|---|---|
-| Adaptive routing, Elo, half-life memory, explainability | **COMPLETE** | Live and serving |
-| Grading pipeline (Judge0, 5 languages) | **COMPLETE** | Python on 3.11.2 |
-| Question / trust / reference lifecycles | **COMPLETE** | Single writer per column |
-| Hidden-test quality gate (mutation-tested) | **COMPLETE** | Tier-1 = 1.0, Tier-2 ≥ 0.80 |
-| Oracle + provenance | **COMPLETE** | Two agreeing runs; 6 questions verified, 238 executions recorded |
-| Ten column-scoped database roles | **COMPLETE** | Gates refuse over-granted roles |
-| Pre-image capture / rollback | **COMPLETE** | No pre-image, no write |
-| `ReseedLedger` + reseed migrations | **COMPLETE** | Applied; 0 rows. Schema now at `0051` |
-| Reseed generator + conformance + presentation gates | **COMPLETE** | Offline, file-only |
-| Early example verifier | **COMPLETE** | Explicitly not oracle evidence |
-| Five pilot specifications | **COMPLETE** | Operator-verified, digests frozen |
-| Glicko-2 shadow rating | **IN PROGRESS** | Unarmed; reaches no learner |
-| **Production reseed of ~1,136 candidates** | **BLOCKED** | The contract census is complete. What is missing is operator-authored specifications — the first 24-question slice was blocked because none of them had one |
-| Bulk specification authoring | **BLOCKED** | No authoritative source exists; each specification needs an operator |
-| BKT / DKT / Transformer / TA-GTKT | **RESEARCH (trained, not integrated)** | Trained on public ASSISTments 2009–10, never on SparkLM data; readiness gate says *not ready* at 6 verified questions and 0 eligible submissions |
-| SAKT / AKT / Graph / Memory-and-Forgetting KT | **PLANNED (research)** | Declared `NOT IMPLEMENTED` in `kt_research/models.py` |
-| Elo-matched 1v1 duels; post-solve LLM code review | **PLANNED** | |
-| Router prediction-accuracy dashboard | **PLANNED** | On the existing recommendation/outcome logs |
-| Async grading queue (Celery) with per-test-case progress | **PLANNED** | |
-| Migration off the deprecated `google-generativeai` SDK | **PLANNED** | |
-| Point `ai_services.py` at `PROVIDER_MODELS` | **OPEN DEFECT** | It hard-codes the withdrawn `llama-3.3-70b-versatile` at three call sites, so those paths 404. The reseed path already reads `RESEED_GROQ_MODEL` and is unaffected |
-| Trust-aware serving | **OPEN GAP** | `_servable_questions()` filters on deliverability, not trust: 1,788 questions are reachable, 6 are verified |
+| Production routing — Traffic Cop → DAG → Elo-matched selection | ✅ LIVE | The rating the UI shows and the selector matches on is **Elo** |
+| Elo, half-life memory, 3PL IRT onboarding, explainability payload | ✅ LIVE | Explainability is a single heuristic path; SHAP/GCN was deleted in M1/P1.1 |
+| Grading pipeline (Judge0, 5 languages) | ✅ LIVE | Python on 3.11.2 (`language_id 92`) |
+| Deployment — Vercel · Render · Neon · Upstash | ✅ LIVE | Blueprint + config; Vercel Root Directory is a dashboard setting |
+| CI — 4 GitHub Actions workflows | ✅ LIVE | Postgres service container, pip-audit, frontend build. **No deploy gate, no staging, no automated rollback** |
+
+### Content trust
+
+| Area | Status | Notes |
+|---|---|---|
+| Question / trust / reference lifecycles | ✅ LIVE | Single writer per column |
+| Hidden-test quality gate (mutation-tested) | ✅ LIVE | Tier-1 = 1.0, Tier-2 ≥ 0.80, ≥ 12 cases |
+| Oracle + provenance | ✅ LIVE | Two agreeing runs; **238 executions**, 8 approvals |
+| Ten column-scoped database roles | ✅ LIVE | Gates refuse over-granted roles; two real mistakes caught |
+| Pre-image capture / rollback | ✅ LIVE | No pre-image, no write; rollback proven |
+| Reseed generator + conformance + presentation gates | ✅ LIVE | Offline, file-only |
+| **Pilot — questions end-to-end through the lifecycle** | ✅ **COMPLETE (6)** | q1436, q1940, q1974, q2057, q2290, q3309 |
+| **Controlled bulk slice (20–25 questions)** | ⚠️ **BLOCKED** | Selected deterministically; **24 of 24 skipped** — no operator specification exists for any of them |
+| **Full-bank reseed (~1,136 candidates)** | ⚠️ **NOT STARTED** | Gated behind the slice above |
+| Bulk specification authoring | ⚠️ **BLOCKED — the real bottleneck** | 5 specifications exist repository-wide, 4 of them the published pilot. 24 drafts await operator review |
+| Trust-aware serving | ⚠️ **OPEN GAP** | `_servable_questions()` filters on deliverability, not trust: **1,788 reachable, 6 verified** |
+
+### Learner modelling and research
+
+| Area | Status | Notes |
+|---|---|---|
+| Glicko-2 two-sided rating | 🟡 SHADOW | Writes `LearnerTopicSkill`/`QuestionSkill` on every eligible submission; **nothing reads it**. Deployment gate unmet (needs ≥30 days and ≥10,000 shadow decisions against 44 total submissions) |
+| Agent orchestrator | 🟡 FLAGGED OFF | `AGENT_ORCHESTRATOR_ENABLED` defaults `false`; falls back to the deterministic recommender |
+| BKT · DKT · Transformer · TA-GTKT | 🔬 RESEARCH | Trained on **public ASSISTments 2009–10**, never on SparkLM data. No model in the request path. Readiness gate: `NOT_READY` at 0 eligible submissions |
+| KT signal in the agent | 🧪 EXPERIMENTAL | Reads an offline **file** export, never a model. Absent export → absent signal |
+| SAKT · AKT · TA-GTKT-P | ⏳ FUTURE | Declared `NOT IMPLEMENTED` in `kt_research/models.py` |
+
+### Known defects and planned work
+
+| Area | Status | Notes |
+|---|---|---|
+| `ai_services.py` LLM model id | ⚠️ **OPEN DEFECT** | Hard-codes the withdrawn `llama-3.3-70b-versatile` at three call sites, so those paths 404. The reseed path reads `RESEED_GROQ_MODEL` and is unaffected |
+| Stale root `package.json` still tracked | ⚠️ OPEN | If the Vercel Root Directory setting is lost, `vite build` exits 127 again |
+| Empty-string arguments in stored stdin | ⚠️ STRUCTURAL | `execution_adapter` filters blank lines; the workaround is a single-line JSON envelope |
+| Migration off the deprecated `google-generativeai` SDK | ⏳ FUTURE | |
+| Router prediction-accuracy dashboard | ⏳ FUTURE | On the existing recommendation/outcome logs |
+| Async grading queue (Celery), self-hosted judge fleet | ⏳ FUTURE | Triggered by measured load, not a date |
+| Elo-matched 1v1 duels; post-solve LLM code review | ⏳ FUTURE | |
 
 ### Phase records
 

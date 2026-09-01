@@ -3,9 +3,9 @@
 [![CI](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions/workflows/ci.yml/badge.svg)](https://github.com/Kurapati-Sai-Suhas/SparkLM/actions)
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://spark-lm-3y3e.vercel.app)
 
-SparkLM is an adaptive coding-practice platform: it models a student's skill (Elo, weighted by runtime/memory efficiency) and memory (a spaced-repetition half-life curve), then routes them through a prerequisite curriculum DAG using a hybrid statistical/ML engine — a Wald–Wolfowitz runs-test streakiness check backing a RandomForest classifier — rather than a static problem list. Code runs in a sandboxed Judge0 pipeline across 4 languages; every recommendation ships with a real explainability payload (SHAP over a trained GCN, when enabled). Built on Django REST Framework + Channels, React/TypeScript, and PostgreSQL with pgvector, covered by a ~3,000-test suite that mocks every third party (Judge0, Groq, Gemini) for a fully offline CI run.
+SparkLM is an adaptive coding-practice platform: it models a student's skill (Elo, weighted by runtime/memory efficiency) and memory (a spaced-repetition half-life curve), then routes them through a prerequisite curriculum DAG using a hybrid statistical/ML engine — a Wald–Wolfowitz runs-test streakiness check backing a RandomForest classifier — rather than a static problem list. Code runs in a sandboxed Judge0 pipeline across 5 languages; every recommendation ships with a real explainability payload (SHAP over a trained GCN, when enabled). Built on Django REST Framework + Channels, React/TypeScript, and PostgreSQL with pgvector, covered by a ~3,400-test suite that mocks every third party (Judge0, Groq, Gemini) for a fully offline CI run.
 
-**The current engineering focus is not the adaptive engine — it is the evidence the engine learns from.** Milestone 2 / P2.7 exists because an adaptive system trained on unverified answer keys learns confidently wrong things. So the platform now carries an explicit **content-trust architecture**: a question lifecycle, a trust lifecycle, an approved-reference oracle, a mutation-tested hidden-test quality gate, and column-scoped database roles so that no single credential can both change a question and declare it verified. Today **2 of 2,926 questions are `ORACLE_VERIFIED`**, and only verified questions may teach the learner model. Everything else is served, graded, and deliberately ignored by the adaptive layer.
+**The current engineering focus is not the adaptive engine — it is the evidence the engine learns from.** Milestone 2 / P2.7 exists because an adaptive system trained on unverified answer keys learns confidently wrong things. So the platform now carries an explicit **content-trust architecture**: a question lifecycle, a trust lifecycle, an approved-reference oracle, a mutation-tested hidden-test quality gate, and column-scoped database roles so that no single credential can both change a question and declare it verified. Today **6 of 2,926 questions are `ORACLE_VERIFIED`**, and only verified questions may teach the learner model. Everything else is served, graded, and deliberately ignored by the adaptive layer.
 
 ---
 
@@ -232,14 +232,29 @@ anything is generated from them.
 
 ### Verified pilot questions — CURRENT
 
-| Question | Status | Trust | Contract | Hidden tests | Adaptive-eligible |
-|---|---|---|---|---|---|
-| **q3309** | `PUBLISHED` | `ORACLE_VERIFIED` | v3 | 12 | yes |
-| **q1436** | `PUBLISHED` | `ORACLE_VERIFIED` | v3 | 13 | yes |
+| Question | Title | Status | Trust | Contract | Hidden tests | Adaptive-eligible |
+|---|---|---|---|---|---|---|
+| **q1436** | Destination City | `PUBLISHED` | `ORACLE_VERIFIED` | v3 | 13 | yes |
+| **q1940** | Sum of Digits of String After Convert | `PUBLISHED` | `ORACLE_VERIFIED` | v1 | 15 | yes |
+| **q1974** | Find Greatest Common Divisor of Array | `PUBLISHED` | `ORACLE_VERIFIED` | v3 | 14 | yes |
+| **q2057** | Check Whether Two Strings are Almost Equivalent | `PUBLISHED` | `ORACLE_VERIFIED` | v1 | 16 | yes |
+| **q2290** | Count Number of Ways to Place Houses | `PUBLISHED` | `ORACLE_VERIFIED` | v1 | 14 | yes |
+| **q3309** | Find the Index of the First Occurrence in a String | `PUBLISHED` | `ORACLE_VERIFIED` | v3 | 12 | yes |
 
-These two are the entire verified population: they walked the full lifecycle —
+These six are the entire verified population: each walked the full lifecycle —
 reference approval, suite expansion, quality gate, oracle, approval, promotion,
-publication — and exist to prove the path works end to end.
+publication — and they exist to prove the path works end to end.
+
+q3309 and q1436 were the first two (P2.7). The pilot four (q1940, q1974, q2057,
+q2290) followed in P2.19. q3309 and q1436 then had their **entire hidden suites
+rotated** in P2.20 after the originals were found in public git history — 25
+cases replaced, zero exposed inputs surviving.
+
+> **This is 6 of 2,926.** Separately, `_servable_questions()` filters on
+> deliverability rather than trust, so **1,788 questions are reachable by a
+> learner today**. Verdicts from the untrusted 1,782 are contained — they are
+> frozen `adaptive_eligible = False` and can never teach the learner model — but
+> they are still shown to learners. Closing that gap is content work, not code.
 
 ### Reseed status — IN PROGRESS, not started in production
 
@@ -249,12 +264,28 @@ publication — and exist to prove the path works end to end.
 | Five pilot specifications | **operator-verified**, digests frozen |
 | Offline artifacts | generated and gated |
 | Early example verifier | ready |
-| **Production reseed** | **NOT STARTED** |
-| Production `Question` rows changed | **0** |
-| `ReseedLedger` rows | **0** |
+| Contract census | **complete** |
+| **Bulk reseed (controlled slice)** | **BLOCKED — never run** |
+| **Full-bank reseed** | **NOT STARTED** |
+| Questions taken end-to-end through the lifecycle | **6** |
+| Draft specifications awaiting operator review | **24** (16 drafted, 5 blank, 3 structurally blocked) |
 
-Still required before a production reseed: a **contract census** (how many
-candidates declare a single-container parameter and therefore need v3), and
+**Why the bulk slice is blocked.** A deterministic 24-question slice was
+selected and every one was skipped for the same reason: **no operator-supplied
+specification exists.** Only five specifications exist in the whole repository,
+four of which are the already-published pilot. A specification invented from a
+title generates a hidden suite, a reference and an oracle run that all
+faithfully implement the wrong thing and pass every gate — which is how the
+~1,100 unusable questions got here. See `docs/P2_21_BULK_SLICE_BLOCKED_NO_SPECIFICATIONS.md`
+and `docs/P2_22_SPEC_DRAFT_REVIEW_PACK.md`.
+
+**Also found while drafting:** some questions cannot run under the current
+execution contract at all — DESIGN problems needing a stateful class with
+several public methods, and problems taking a linked-list head the JSON argument
+envelope cannot carry. 3 of 24 sampled, which projects to roughly 90–145 of the
+1,136 candidates as an order of magnitude, not a measurement.
+
+Still required before a bulk reseed: **operator-authored specifications**, and
 **human review of reference implementations** — the ones used offline are
 LLM-written and can reject an example but never bless one.
 
@@ -271,11 +302,15 @@ Stated plainly, because it is easy to over-read the roadmap:
 | **Hybrid Traffic Cop router** | **CURRENT — live** | Runs-test streakiness + RandomForest over logged outcomes. |
 | **SHAP / GCN explainability** | **CURRENT — feature-flagged** | Torch-free heuristic fallback with an identical schema. |
 | **Glicko-2 two-sided rating** | **IN PROGRESS — shadow, UNARMED** | `groups/shadow.py` runs beside production on the same evidence so the two can be compared. It reaches no learner: the selector, the displayed rating and mastery are untouched. Consumes only `adaptive_eligible` submissions. |
-| **Transformer / Graph / Memory-and-Forgetting Knowledge Tracing** | **RESEARCH — NOT IMPLEMENTED** | No model exists. `kt_readiness` / `kt_data_readiness` answer one question — *how many interactions are actually eligible for training?* — and gate on `NOT_READY` / `RESEARCH_READY` / `TRAINING_READY`. With 2 verified questions and 0 adaptive-eligible submissions, the honest answer today is **not ready**, and that is a successful outcome for that phase rather than a failure. |
+| **Knowledge Tracing (BKT / DKT / Transformer / TA-GTKT)** | **RESEARCH — trained, NOT production-integrated** | Four models are trained in `kt_research/`, on the **public ASSISTments 2009–10 benchmark** — never on SparkLM data. No model runs in the request path, and nothing a learner sees is produced by one. `kt_readiness` / `kt_data_readiness` answer one question — *how many interactions are actually eligible for training?* — and gate on `NOT_READY` / `RESEARCH_READY` / `TRAINING_READY`. With **6 verified questions and 0 adaptive-eligible submissions**, the honest answer today is **not ready**, and that is a successful outcome for that phase rather than a failure. See `docs/P2_12_KT_BASELINES.md` and `docs/P2_13_TA_GTKT.md`. |
+| **Graph / Memory-and-Forgetting Knowledge Tracing** | **RESEARCH — NOT IMPLEMENTED** | No model exists. SAKT and AKT are declared `NOT IMPLEMENTED` in `kt_research/models.py`. |
 
-> **Do not read the KT modules as a trained system.** They are a data-readiness
-> contract written *before* any model, precisely so that nobody trains a
-> Transformer on verdicts produced by answer keys nobody has checked.
+> **Do not read the KT modules as a production system.** The models in
+> `kt_research/` are trained on a public benchmark and are structurally unable to
+> import the application — a test walks every parsed import and fails on
+> `groups`, `django`, `kt_dataset` or `LearnLM`. The modules in `groups/` are a
+> data-readiness contract written *before* any model, precisely so that nobody
+> trains a Transformer on verdicts produced by answer keys nobody has checked.
 
 ## Tech stack — what, and why
 
@@ -295,7 +330,7 @@ Every choice below was made against a real alternative, not by default. The shor
 | **NetworkX** | Curriculum prerequisite DAG | Real cycle-detection and graph traversal instead of hand-rolled adjacency-list code that would eventually reinvent NetworkX badly |
 | **PyTorch + PyTorch-Geometric** *(optional, `requirements-ml.txt`)* | The GCN knowledge-graph engine, SHAP explanations | Deliberately isolated from the web tier — production runs `requirements.txt` alone (torch-free), ~2 GB lighter and no PyTorch cold-start tax on a free-tier instance. The heuristic explainer covers the same response schema when this isn't installed |
 | **ONNX Runtime** | Serving the trained GCN without PyTorch | Export once, then infer without the ~2 GB PyTorch dependency in the request path |
-| **Judge0 (RapidAPI)** | Sandboxed code execution | Untrusted student code must never run in-process — Judge0 isolates it completely, in 4 languages |
+| **Judge0 (RapidAPI)** | Sandboxed code execution | Untrusted student code must never run in-process — Judge0 isolates it completely, in 5 languages (Python, Java, C++, C, JavaScript) |
 | **Groq (Llama 3.3 70B)** | Quiz and question-content generation | Fast, cheap, strong structured-JSON output — the right tool for "generate 4 test cases as JSON," not the right tool for open-ended reasoning |
 | **Google Gemini** | Vision (image explanation), text embeddings | Groq doesn't do multimodal; Gemini's `gemini-2.5-flash` and `text-embedding-004` cover the vision and embedding gaps |
 | **Google Identity Services + google-auth** | OAuth sign-in | Token verified server-side against Google's public keys — the frontend's claim of identity is never trusted on its own |
@@ -761,7 +796,7 @@ All execution happens in Judge0's isolated sandbox, never in-process; grading us
 ```
 student code + stdin ──▶ base64 encode ──▶ Judge0 sandbox (isolated container)
                                                     │
-                                     4 languages: Python / Java / C++ / JS
+                            5 languages: Python / Java / C++ / C / JS
                                                     │
                           stdout, stderr, compile_output, time, memory
                                                     │
@@ -1278,7 +1313,7 @@ A full Software Requirements Specification lives in [`docs/SparkLM_SRS_v2.docx`]
 | Area | Status | Notes |
 |---|---|---|
 | Adaptive routing, Elo, half-life memory, XAI | **COMPLETE** | Live and serving |
-| Grading pipeline (Judge0, 4 languages) | **COMPLETE** | Python on 3.11.2 |
+| Grading pipeline (Judge0, 5 languages) | **COMPLETE** | Python on 3.11.2 |
 | Question / trust / reference lifecycles | **COMPLETE** | Single writer per column |
 | Hidden-test quality gate (mutation-tested) | **COMPLETE** | Tier-1 = 1.0, Tier-2 ≥ 0.80 |
 | Oracle + provenance | **COMPLETE** | Two agreeing runs; q3309 and q1436 verified |
@@ -1291,7 +1326,8 @@ A full Software Requirements Specification lives in [`docs/SparkLM_SRS_v2.docx`]
 | Glicko-2 shadow rating | **IN PROGRESS** | Unarmed; reaches no learner |
 | **Production reseed of 1,141 candidates** | **BLOCKED** | Needs a contract census (v3 for single-container signatures) and human-reviewed reference implementations |
 | Bulk specification authoring | **BLOCKED** | No authoritative source exists; each specification needs an operator |
-| Transformer / Graph / Memory-and-Forgetting KT | **PLANNED (research)** | No model exists; readiness gate says *not ready* at 2 verified questions |
+| BKT / DKT / Transformer / TA-GTKT | **RESEARCH (trained, not integrated)** | Trained on public ASSISTments 2009–10, never on SparkLM data; readiness gate says *not ready* at 6 verified questions and 0 eligible submissions |
+| SAKT / AKT / Graph / Memory-and-Forgetting KT | **PLANNED (research)** | Declared `NOT IMPLEMENTED` in `kt_research/models.py` |
 | Elo-matched 1v1 duels; post-solve LLM code review | **PLANNED** | |
 | Router prediction-accuracy dashboard | **PLANNED** | On the existing recommendation/outcome logs |
 | Async grading queue (Celery) with per-test-case progress | **PLANNED** | |

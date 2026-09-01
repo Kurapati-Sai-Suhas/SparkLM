@@ -87,3 +87,15 @@ pilot_*/reference_*.py
 # kt_research/results/ — those are the findings.
 backend/LearnLM/kt_research/data/
 backend/LearnLM/kt_research/checkpoints/
+
+# Interview preparation — personal study material, deliberately not published.
+# These live on disk and are regenerable; they are kept out of the public
+# repository because they are notes for one person, and because the prep
+# documents cite the specific commits carrying the historical credential
+# exposure, which is a signpost this repository should not carry.
+docs/SPARKLM_INTERVIEW_PREP.md
+docs/SPARKLM_INTERVIEW_CHEATSHEET.md
+docs/SPARKLM_MOCK_INTERVIEW.md
+docs/SparkLM_Interview_Complete.docx
+docs/SparkLM_Interview_Complete.pdf
+docs/10_INTERVIEW_HANDBOOK_PART_*.md

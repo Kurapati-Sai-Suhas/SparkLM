@@ -994,3 +994,142 @@ def test_the_event_is_serializable_and_carries_no_grading_truth(
     for forbidden in ("expected_output", "hidden_test_cases", "stdin",
                       "boilerplate", "reasoning"):
         assert forbidden not in body
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Trust state in the recommendation response (M2 P2.25)
+#
+# Serving filters on deliverability, not trust. These tests pin that the
+# API says so, so a frontend cannot read "we will show you this" as "we
+# have verified this".
+# ═════════════════════════════════════════════════════════════════════
+
+TRUST_KEYS = {"status", "trust_state", "adaptive_eligible", "servable"}
+
+
+def test_the_served_question_carries_trust_metadata(client, topic):
+    make(topic, "Trust Metadata Q")
+
+    body = next_problem(client).json()
+
+    assert "trust" in body, "the response must state the question's trust state"
+    assert set(body["trust"]) == TRUST_KEYS
+
+
+def test_an_unverified_servable_question_is_not_marked_trusted(client, topic):
+    """
+    The negative case, and the reason this milestone exists. A question the
+    recommender will happily serve must NOT read as verified.
+    """
+    question = make(topic, "Unverified But Servable Q")
+    assert question.status == Question.STATUS_DRAFT
+    assert question.trust_state == Question.TRUST_UNVERIFIED
+
+    trust = next_problem(client).json()["trust"]
+
+    assert trust["servable"] is True, "the recommender did serve it"
+    assert trust["adaptive_eligible"] is False
+    assert trust["trust_state"] == Question.TRUST_UNVERIFIED
+    assert trust["status"] == Question.STATUS_DRAFT
+
+
+def test_trust_metadata_matches_the_canonical_model_state(client, topic):
+    """The response must not compute its own answer."""
+    question = make(topic, "Canonical Trust Q")
+
+    body = next_problem(client).json()
+    served = Question.objects.get(pk=int(body["id"]))
+
+    assert body["trust"] == served.trust_summary()
+    assert body["trust"]["adaptive_eligible"] == served.is_adaptive_eligible
+
+
+def test_a_verified_question_reads_as_adaptive_eligible(client, topic):
+    question = make(topic, "Verified Q")
+    Question.objects.filter(pk=question.pk).update(
+        status=Question.STATUS_PUBLISHED,
+        trust_state=Question.TRUST_ORACLE_VERIFIED)
+
+    trust = next_problem(client).json()["trust"]
+
+    assert trust["status"] == Question.STATUS_PUBLISHED
+    assert trust["trust_state"] == Question.TRUST_ORACLE_VERIFIED
+    assert trust["adaptive_eligible"] is True
+    assert trust["servable"] is True
+
+
+def test_trust_metadata_changes_nothing_about_which_question_is_served(
+        client, topic, caplog):
+    """
+    Requirement E. Selection and the Traffic Cop route must be untouched by
+    a reporting field.
+    """
+    for index in range(4):
+        make(topic, f"Selection Stability Q{index}", difficulty=1200.0 + index)
+
+    with caplog.at_level(_logging.INFO):
+        first = next_problem(client).json()
+    route_first = _routing_events(caplog)[0]["route"]
+
+    caplog.clear()
+    with caplog.at_level(_logging.INFO):
+        second = next_problem(client).json()
+    route_second = _routing_events(caplog)[0]["route"]
+
+    assert first["id"] == second["id"], "selection became unstable"
+    assert route_first == route_second == "hierarchical"
+
+
+def test_building_trust_metadata_mutates_nothing(client, topic):
+    question = make(topic, "Inert Trust Q")
+    before = (
+        Question.objects.get(pk=question.pk).status,
+        Question.objects.get(pk=question.pk).trust_state,
+        CodeSubmission.objects.count(),
+        Question.objects.filter(
+            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+    )
+
+    question.trust_summary()
+    question.trust_summary()
+
+    after = (
+        Question.objects.get(pk=question.pk).status,
+        Question.objects.get(pk=question.pk).trust_state,
+        CodeSubmission.objects.count(),
+        Question.objects.filter(
+            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+    )
+    assert before == after
+
+
+def test_trust_metadata_leaks_no_grading_information(client, topic):
+    """Requirement H: trust state is a classification, never evidence."""
+    make(topic, "No Leak Q")
+
+    trust = next_problem(client).json()["trust"]
+    body = _json.dumps(trust)
+
+    for forbidden in ("expected_output", "hidden_test_cases", "stdin",
+                      "reference", "approved_by", "oracle", "source_hash"):
+        assert forbidden not in body
+
+
+def test_a_non_servable_question_reports_servable_false(topic):
+    """
+    Direct model check: a placeholder question is excluded by
+    `_servable_questions()`, and the summary must agree with it rather than
+    reimplementing the predicate.
+    """
+    question = Question.objects.create(
+        title="Placeholder Q",
+        content=f"{Question.PLACEHOLDER_MARKER} something",
+        topic=topic, base_difficulty=1200.0,
+        hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
+        boilerplate_code={"python": "class Solution: pass"},
+        hidden_wrapper_code={})
+
+    summary = question.trust_summary()
+
+    assert summary["servable"] is False
+    assert summary["adaptive_eligible"] is False

@@ -802,7 +802,12 @@ class NextProblemView(APIView):
             # must never ship: for single-case questions it IS the answer
             # key. Grading data never leaves the server.
             "sample_case": self._sample_case(question),
-            "advanced_xai": advanced_data
+            "advanced_xai": advanced_data,
+            # M2 P2.25. Serving filters on deliverability, not trust, so a
+            # served question may be unverified. Reported rather than hidden:
+            # `servable: true` beside `adaptive_eligible: false` is the whole
+            # point. Read from the question; changes nothing about selection.
+            "trust": question.trust_summary(),
         })
     
 

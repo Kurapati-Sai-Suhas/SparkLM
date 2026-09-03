@@ -430,6 +430,48 @@ class Question(models.Model):
             and self.trust_state == self.TRUST_ORACLE_VERIFIED
         )
 
+    def trust_summary(self):
+        """
+        The question's trust position, for any caller that serves it (M2 P2.25).
+
+        ── Why this exists ────────────────────────────────────────────────
+
+        `_servable_questions()` filters on DELIVERABILITY — a real statement
+        and a non-empty hidden suite — and deliberately not on trust, because
+        filtering on trust would collapse the servable bank from ~1,788 to the
+        6 that are verified. That is a considered product decision, but it
+        left the API unable to express it: a served question looked identical
+        whether or not anybody had ever checked its answer key.
+
+        So this reports the distinction rather than resolving it. `servable`
+        and `adaptive_eligible` sitting side by side is the point: a frontend
+        reading `servable: true, adaptive_eligible: false` cannot mistake
+        "we will show you this" for "we have verified this".
+
+        ── One definition, not a second taxonomy ──────────────────────────
+
+        Every value is READ from the canonical source. `status` and
+        `trust_state` are the model's own fields; `adaptive_eligible` is the
+        existing property, not a re-derivation of it; and `servable` is
+        answered by `_servable_questions()` itself rather than by
+        reimplementing its predicate here. Reimplementing it is exactly how
+        the recommender and the direct-id endpoints once disagreed.
+
+        Read-only. Carries no hidden tests, no expected outputs, no reference
+        and no approval evidence — only what a learner may already infer from
+        being shown the question at all.
+        """
+        # Local import: `coding_views` imports this module, so a module-level
+        # import here would be circular.
+        from groups.coding_views import _servable_questions
+
+        return {
+            "status": self.status,
+            "trust_state": self.trust_state,
+            "adaptive_eligible": self.is_adaptive_eligible,
+            "servable": _servable_questions().filter(pk=self.pk).exists(),
+        }
+
     # Which execution harness grades this question (M2 P2.6). Defaults to "v1"
     # — the harness exactly as it shipped — so this migration changes no
     # learner's grading. v2 is the canonical contract (one line per parameter,

@@ -1235,3 +1235,82 @@ def test_the_routing_signal_ignores_submissions_the_trust_gate_excludes(
     assert signal["n"] == 0
     assert signal["cold_start"] is True
     assert signal["route"] == "hierarchical"
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Trust state on the agent path (M2 P2.25)
+#
+# The agent's candidate pool is already trust-filtered, so its questions
+# are always verified. The value here is CONSISTENCY: one question must
+# classify identically whichever path describes it.
+# ═════════════════════════════════════════════════════════════════════
+
+TRUST_KEYS = {"status", "trust_state", "adaptive_eligible", "servable"}
+
+
+def test_a_validated_recommendation_carries_trust_metadata(
+        learner, trusted_question):
+    session = toolkit.Session(user=learner)
+    toolkit.get_candidate_problems(session)
+
+    validated = toolkit.validate_recommendation(session, trusted_question.pk)
+
+    assert set(validated["trust"]) == TRUST_KEYS
+    assert validated["trust"]["adaptive_eligible"] is True
+    assert validated["trust"]["trust_state"] == Question.TRUST_ORACLE_VERIFIED
+    assert validated["trust"]["servable"] is True
+
+
+def test_both_paths_classify_the_same_question_identically(
+        learner, trusted_question):
+    """
+    Requirement C. The agent path and the model's own canonical summary must
+    not be able to disagree — they are the same method.
+    """
+    session = toolkit.Session(user=learner)
+    toolkit.get_candidate_problems(session)
+
+    from_agent = toolkit.validate_recommendation(
+        session, trusted_question.pk)["trust"]
+    from_model = Question.objects.get(pk=trusted_question.pk).trust_summary()
+
+    assert from_agent == from_model
+
+
+def test_the_agent_trust_metadata_agrees_with_the_legacy_field(
+        learner, trusted_question):
+    """`trust_state` was already returned; the new object must not contradict
+    it, or a caller reading the old field gets a different answer."""
+    session = toolkit.Session(user=learner)
+    toolkit.get_candidate_problems(session)
+
+    validated = toolkit.validate_recommendation(session, trusted_question.pk)
+
+    assert validated["trust_state"] == validated["trust"]["trust_state"]
+
+
+def test_agent_trust_metadata_leaks_no_grading_information(
+        learner, trusted_question):
+    session = toolkit.Session(user=learner)
+    toolkit.get_candidate_problems(session)
+
+    body = json.dumps(
+        toolkit.validate_recommendation(session, trusted_question.pk)["trust"])
+
+    for forbidden in ("expected_output", "hidden_test_cases", "stdin",
+                      "reference", "approved_by", "source_hash"):
+        assert forbidden not in body
+
+
+def test_the_agent_endpoint_surfaces_trust_on_its_recommendation(
+        client, trusted_question, settings):
+    """Through the real endpoint, deterministic layer, flag off."""
+    settings.AGENT_ORCHESTRATOR_ENABLED = False
+
+    response = client.post("/api/ai/agent/", {"request": "what next?"},
+                           format="json")
+
+    assert response.status_code == 200
+    recommendation = response.data["recommendation"]
+    assert set(recommendation["trust"]) == TRUST_KEYS
+    assert recommendation["trust"]["adaptive_eligible"] is True

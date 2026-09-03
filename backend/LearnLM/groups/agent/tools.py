@@ -142,6 +142,10 @@ def validate_recommendation(session, question_id):
         "difficulty": question.base_difficulty,
         "validated_by": "backend",
         "trust_state": question.trust_state,
+        # M2 P2.25: the same canonical summary the legacy path returns, from
+        # the same method, so the two paths cannot classify one question two
+        # ways. `trust_state` above is kept for callers that already read it.
+        "trust": question.trust_summary(),
     }
 
 

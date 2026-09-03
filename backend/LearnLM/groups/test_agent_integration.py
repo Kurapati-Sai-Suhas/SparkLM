@@ -1011,3 +1011,227 @@ def test_the_dag_signal_needs_a_topic(learner):
     session = toolkit.Session(user=learner)
     with pytest.raises(toolkit.ToolError):
         toolkit.get_prerequisites(session, "")
+
+
+# ═════════════════════════════════════════════════════════════════════
+# get_routing_signal — the agent reads the production routing decision
+#
+# The point of this tool is CONSISTENCY: before it existed the agent and
+# Traffic Cop reasoned about the same learner independently. These tests
+# pin that the tool reports Traffic Cop's answer rather than its own.
+# ═════════════════════════════════════════════════════════════════════
+
+def test_the_routing_signal_matches_traffic_cop_exactly(learner):
+    """
+    The tool must not be a second implementation of routing. Compare against
+    the production entry point called directly.
+    """
+    from groups.hybrid_router import RoutingClassifier, compute_routing_telemetry
+    from groups.models import UserCodingProfile
+
+    session = toolkit.Session(user=learner)
+    signal = toolkit.get_routing_signal(session)
+
+    avg_acc, runs_z, n = compute_routing_telemetry(learner)
+    profile = UserCodingProfile.objects.filter(user=learner).first()
+    elo = (profile.elo_rating if profile
+           else UserCodingProfile._meta.get_field("elo_rating").default)
+    expected = RoutingClassifier().predict_route(avg_acc, runs_z, elo / 2000.0)
+
+    assert signal["route"] == expected
+    assert signal["avg_acc"] == round(float(avg_acc), 4)
+    assert signal["runs_z"] == round(float(runs_z), 4)
+    assert signal["n"] == n
+
+
+def test_a_cold_start_learner_gets_the_production_cold_start_route(learner):
+    """
+    A learner with no eligible history takes `compute_routing_telemetry`'s
+    documented cold-start path — pattern-neutral, routed to the DAG rather
+    than treated as struggling.
+    """
+    session = toolkit.Session(user=learner)
+
+    signal = toolkit.get_routing_signal(session)
+
+    assert signal["n"] == 0
+    assert signal["cold_start"] is True
+    assert signal["avg_acc"] == 0.7
+    assert signal["runs_z"] == 0.0
+    assert signal["route"] == "hierarchical"
+
+
+def test_the_routing_signal_writes_nothing(learner, django_assert_num_queries):
+    """
+    Read-only in the strict sense: no row created, none updated. Production
+    reaches Elo through get_or_create, which WRITES — this tool must not.
+    """
+    from groups.models import (CodeSubmission, RecommendationLog,
+                               UserCodingProfile, UserTopicMastery)
+    from groups.models import LearnerTopicSkill, QuestionSkill
+
+    before = (
+        UserCodingProfile.objects.count(), UserTopicMastery.objects.count(),
+        CodeSubmission.objects.count(), RecommendationLog.objects.count(),
+        LearnerTopicSkill.objects.count(), QuestionSkill.objects.count(),
+    )
+
+    toolkit.get_routing_signal(toolkit.Session(user=learner))
+
+    after = (
+        UserCodingProfile.objects.count(), UserTopicMastery.objects.count(),
+        CodeSubmission.objects.count(), RecommendationLog.objects.count(),
+        LearnerTopicSkill.objects.count(), QuestionSkill.objects.count(),
+    )
+    assert before == after, "get_routing_signal mutated state"
+
+
+def test_the_routing_signal_does_not_create_a_profile_row(learner):
+    """
+    The specific write this tool must avoid: NextProblemView calls
+    get_or_create on UserCodingProfile. A learner with no profile must still
+    get a routing signal, and must still have no profile afterwards.
+    """
+    from groups.models import UserCodingProfile
+
+    UserCodingProfile.objects.filter(user=learner).delete()
+    assert not UserCodingProfile.objects.filter(user=learner).exists()
+
+    signal = toolkit.get_routing_signal(toolkit.Session(user=learner))
+
+    assert not UserCodingProfile.objects.filter(user=learner).exists()
+    assert signal["elo_is_default"] is True
+    assert signal["route"] in {"flat", "hierarchical"}
+
+
+def test_the_routing_signal_is_self_scoped_by_construction(learner, db):
+    """
+    Authorization: the tool takes NO user argument. It reads session.user,
+    which the view sets from request.user. The model cannot name a learner,
+    so there is no argument through which to reach another one.
+    """
+    import inspect
+
+    signature = inspect.signature(toolkit.get_routing_signal)
+    assert list(signature.parameters) == ["session"]
+
+    tool = toolkit.REGISTRY["get_routing_signal"]
+    assert tool.required == ()
+    assert tool.optional == ()
+
+    other = User.objects.create_user(username="other-learner", password="pw",
+                                     email="other@example.com")
+    mine = toolkit.get_routing_signal(toolkit.Session(user=learner))
+    theirs = toolkit.get_routing_signal(toolkit.Session(user=other))
+    # Each session answers for its own user; there is no cross-user path.
+    assert mine["route"] and theirs["route"]
+
+
+def test_unknown_arguments_to_the_routing_signal_are_refused(learner):
+    """Schema: the tool takes nothing, so anything supplied is a mistake."""
+    tool = toolkit.REGISTRY["get_routing_signal"]
+
+    with pytest.raises(toolkit.ToolError):
+        tool.validate({"user_id": 4242})
+
+
+def test_the_routing_signal_output_is_deterministic_and_serializable(learner):
+    from groups.agent.orchestrator import _loggable  # noqa: F401
+
+    session = toolkit.Session(user=learner)
+    first = toolkit.get_routing_signal(session)
+    second = toolkit.get_routing_signal(session)
+
+    assert first == second
+    json.dumps(first)  # must round-trip for the response and the log
+    assert set(first) == {
+        "route", "avg_acc", "runs_z", "n", "elo_rating", "elo_is_default",
+        "decided_by", "cold_start", "authority", "source"}
+
+
+def test_the_routing_signal_names_the_branch_that_decided(learner):
+    """
+    No trained artifact exists, so the heuristic decides. The tool must say
+    so rather than leaving a reader to assume a model was involved.
+    """
+    signal = toolkit.get_routing_signal(toolkit.Session(user=learner))
+
+    assert signal["decided_by"] == "heuristic"
+    assert "Traffic Cop" in signal["authority"]
+
+
+def test_the_routing_signal_is_registered_as_read_only(learner):
+    tool = toolkit.REGISTRY["get_routing_signal"]
+    assert tool.reads_only is True
+    assert "get_routing_signal" in toolkit.NARRATION
+
+
+def test_the_agent_can_read_the_routing_signal_through_the_loop(learner):
+    """End to end: the orchestrator can call it like any other tool."""
+    session = toolkit.Session(user=learner)
+    planner = scripted_planner(
+        {"tool": "get_routing_signal", "arguments": {}},
+        {"final": "You should keep advancing.", "recommend": None})
+
+    result = Orchestrator(session, planner).run("what should I do next?")
+
+    assert result.stopped_because == "final"
+    assert [c["tool"] for c in result.calls] == ["get_routing_signal"]
+    assert result.calls[0]["reads_only"] is True
+
+
+def test_the_routing_signal_follows_real_history_into_flat_practice(
+        learner, trusted_question):
+    """
+    Requirement B, and the test that proves the tool is not hardcoded.
+
+    A learner with enough ADAPTIVE-ELIGIBLE failures must be routed to flat
+    practice by `avg_acc < 0.60`, and the tool must report that — not the
+    cold-start default. Submissions are created directly rather than through
+    the grading path so nothing else moves.
+    """
+    from groups.hybrid_router import compute_routing_telemetry
+    from groups.models import CodeSubmission
+
+    for index in range(10):
+        CodeSubmission.objects.create(
+            user=learner, question=trusted_question,
+            language="python", code="pass",
+            status="wrong_answer" if index < 8 else "accepted",
+            adaptive_eligible=True)
+
+    avg_acc, runs_z, n = compute_routing_telemetry(learner)
+    assert n == 10, "the eligible window must be populated for this test"
+    assert avg_acc < 0.60
+
+    signal = toolkit.get_routing_signal(toolkit.Session(user=learner))
+
+    assert signal["cold_start"] is False
+    assert signal["n"] == 10
+    assert signal["avg_acc"] == round(float(avg_acc), 4)
+    assert signal["runs_z"] == round(float(runs_z), 4)
+    assert signal["route"] == "flat", (
+        "a struggling learner must route to flat practice, and the tool must "
+        "report Traffic Cop's answer rather than the cold-start default")
+
+
+def test_the_routing_signal_ignores_submissions_the_trust_gate_excludes(
+        learner, trusted_question):
+    """
+    The tool inherits the content-trust boundary because it reuses
+    `compute_routing_telemetry`, which filters on `adaptive_eligible`. A wall
+    of INELIGIBLE failures must not drag the learner into flat practice.
+    """
+    from groups.models import CodeSubmission
+
+    for _ in range(10):
+        CodeSubmission.objects.create(
+            user=learner, question=trusted_question,
+            language="python", code="pass", status="wrong_answer",
+            adaptive_eligible=False)
+
+    signal = toolkit.get_routing_signal(toolkit.Session(user=learner))
+
+    assert signal["n"] == 0
+    assert signal["cold_start"] is True
+    assert signal["route"] == "hierarchical"

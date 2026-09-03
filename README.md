@@ -53,7 +53,7 @@ flowchart TD
 
     ADM --> ROUTE{"Routing layer"}
     ROUTE -->|"default"| TC["Traffic Cop<br/>runs test + RandomForest"]
-    ROUTE -->|"flag on"| AG["Agent orchestrator<br/>6 tools · max 8 calls · 30 s"]
+    ROUTE -->|"flag on"| AG["Agent orchestrator<br/>7 tools · max 8 calls · 30 s"]
 
     TC --> SERV["_servable_questions()<br/>placeholder + hidden-tests filter<br/>NOT trust-filtered · 1,788 reachable"]
     AG --> TRUST["get_candidate_problems<br/>PUBLISHED + ORACLE_VERIFIED only<br/>6 reachable"]
@@ -413,13 +413,14 @@ that has to be tested regardless.
 | Bounds | `MAX_TOOL_CALLS = 8` · `TIMEOUT_SECONDS = 30.0` · `MAX_CONSECUTIVE_ERRORS = 3` |
 | Candidate cap | `max_candidates = 20` |
 
-### The six tools
+### The seven tools
 
 | Tool | Reads only | What it reaches |
 |---|---|---|
 | `get_learner_state` | yes | Rating, solved count, topic mastery — **plus** a Glicko-2 shadow reading labelled `UNARMED — not the learner-visible rating`, and a KT prediction read from an offline file export |
 | `get_candidate_problems` | yes | **`PUBLISHED` + `ORACLE_VERIFIED` only.** The trust filter the legacy serving path lacks |
 | `get_prerequisites` | yes | The production curriculum DAG |
+| `get_routing_signal` | yes | **The production Traffic Cop's decision for this learner** — route, `avg_acc`, `runs_z`, `n` — plus which branch decided it. Advisory: it tells the agent what the backend would do |
 | `get_problem_context` | yes | Learner-visible detail for one offered question |
 | `get_tutor_context` | yes | Grounding for an explanation, including the learner's own attempts |
 | `grade_submission` | **no** | Judge0. Persists **only** when the orchestrator commits — and `commit` is stripped from every model-supplied payload |
@@ -534,7 +535,7 @@ feature deep dives.
 | LLM | Groq in `ai_services.py` | Quizzes, study tools | ⚠️ **BROKEN** — hard-codes the withdrawn `llama-3.3-70b-versatile`, 404s |
 | LLM | NVIDIA NIM | Fallback on Groq **quota** errors only | ✅ LIVE |
 | LLM | Google Gemini | Vision, `text-embedding-004`, reseed provider | ✅ LIVE (20 req/day free tier) |
-| Agent | Custom orchestrator (`groups/agent/`) | 6 tools, bounded loop | 🟡 **FLAGGED OFF** by default |
+| Agent | Custom orchestrator (`groups/agent/`) | 7 tools, bounded loop | 🟡 **FLAGGED OFF** by default |
 | Learner modelling | Elo | **The live rating** — UI and selector | ✅ LIVE |
 | Learner modelling | Half-life regression (SM-2 update) | Memory, review queue | ✅ LIVE |
 | Learner modelling | Traffic Cop — Wald–Wolfowitz runs test | Route selection | ✅ LIVE |

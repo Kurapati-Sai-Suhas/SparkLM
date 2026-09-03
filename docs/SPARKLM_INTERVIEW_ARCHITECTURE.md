@@ -35,7 +35,7 @@ The concrete reasons:
    these come free from a framework, and testing them through an abstraction
    is harder than testing a `while`.
 2. **`planner(observation) -> dict` is a plain callable.** Tests pass a
-   scripted planner, so **77 agent tests run with no provider, no key and no
+   scripted planner, so **92 agent tests run with no provider, no key and no
    network**. That is the single biggest reason this component is testable.
 3. **Nothing here needs durable execution.** If I needed checkpoint-and-resume
    across process restarts, or multi-agent coordination, I would take
@@ -51,6 +51,7 @@ learner request
         get_learner_state          Elo (live) + Glicko-2 (advisory)
                                    + TA-GTKT (research, file-read)
         get_prerequisites          production curriculum DAG
+        get_routing_signal         Traffic Cop's decision (advisory)
         get_candidate_problems     PUBLISHED + ORACLE_VERIFIED only
         get_problem_context        only for an offered id
   → model returns {"final": ..., "recommend": <id>}
@@ -119,6 +120,32 @@ When no export is configured, the tool returns an explicit
 available reading also carries `applicability: NOT_TRAINED_ON_SPARKLM` — the
 model was trained on ASSISTments 2009 and has never seen a SparkLM learner.
 
+## 6b. How Traffic Cop is used — advisory, read-only
+
+`get_routing_signal` calls `compute_routing_telemetry()` and
+`RoutingClassifier.predict_route()` — the same two functions
+`NextProblemView` calls at `coding_views.py:644`. It does not reimplement
+routing; a second definition of "recent performance" is a second answer.
+
+**Why it exists.** Before it, the agent reasoned about a learner while
+Traffic Cop reasoned about the same learner independently, and nothing
+reconciled them — the two could recommend opposite things with no record of
+the disagreement.
+
+**Why `predict_route` and not `decide_route`.** `decide_route` is the
+heuristic branch; `predict_route` is the entry point production actually
+calls, and it delegates to the heuristic whenever no model artifact is
+loaded — which is the case today. Calling the entry point means the tool
+reports the real decision now and keeps reporting it if a trained artifact
+ever ships, instead of silently diverging the moment one does.
+
+**Two things it deliberately does not do.** It creates no
+`UserCodingProfile` row — production reaches Elo through `get_or_create`,
+which writes, so this reads with `.filter().first()` and falls back to the
+model's own field default, reporting `elo_is_default` rather than hiding it.
+And it does not decide: `authority` names Traffic Cop, and the agent
+consumes the route as a signal.
+
 ## 7. How the DAG is used
 
 `get_prerequisites` reads `hybrid_router.get_curriculum_graphs()` — the
@@ -130,7 +157,7 @@ would be a second answer. Returns `topic`, `subject`, `prerequisites`,
 
 | CAN | CANNOT |
 |---|---|
-| Choose which of 6 tools to call, and in what order | Widen its own candidate set |
+| Choose which of 7 tools to call, and in what order | Widen its own candidate set |
 | Phrase the final answer | Recommend a question the backend will not re-validate |
 | Recommend a question **from the offered set** | Commit a submission — `commit` is stripped from every payload |
 | Read learner state, Glicko, KT, DAG, problem context | Write `expected_output`, `hidden_test_cases`, `status` or `trust_state` |

@@ -283,6 +283,72 @@ def get_prerequisites(session, topic):
             "unlocks": [], "source": "topic not present in any curriculum DAG"}
 
 
+def get_routing_signal(session):
+    """
+    The production Traffic Cop's decision for THIS learner, read-only.
+
+    Before this existed the agent reasoned about a learner while the
+    production router reasoned about the same learner independently, and
+    nothing reconciled them: the two could recommend opposite things with no
+    record of the disagreement. This closes that by handing the agent the
+    decision production would make, as a signal it may reason over — not a
+    decision it may take. Traffic Cop remains the routing authority.
+
+    ── Why `predict_route` and not `decide_route` ──────────────────────────
+
+    `decide_route` is the heuristic branch. `RoutingClassifier.predict_route`
+    is the entry point production actually calls (`coding_views.py:644`), and
+    it delegates to `decide_route` whenever no model artifact is loaded —
+    which is the case today. Calling the entry point rather than the branch
+    means this tool reports the REAL decision now and keeps reporting it if a
+    trained artifact ever ships, instead of silently diverging from
+    production the moment one does.
+
+    ── Why this does not create a profile row ─────────────────────────────
+
+    Production reaches Elo through `get_or_create`, which WRITES. A read-only
+    tool must not, so the profile is fetched and the model's own field
+    default is used when absent. That default only matters if a model is
+    loaded — the heuristic ignores Elo entirely — and `elo_is_default` says
+    which happened rather than leaving the caller to guess.
+    """
+    from groups.hybrid_router import RoutingClassifier, compute_routing_telemetry
+
+    user = session.user
+
+    # The identical call production makes. Not reimplemented: a second
+    # definition of "recent performance" is a second answer.
+    avg_acc, runs_z, sample_size = compute_routing_telemetry(user)
+
+    profile = UserCodingProfile.objects.filter(user=user).first()
+    elo_is_default = profile is None
+    if profile is not None:
+        elo_rating = profile.elo_rating
+    else:
+        elo_rating = UserCodingProfile._meta.get_field("elo_rating").default
+
+    router = RoutingClassifier()
+    route = router.predict_route(avg_acc, runs_z, elo_rating / 2000.0)
+
+    return {
+        "route": route,
+        "avg_acc": round(float(avg_acc), 4),
+        "runs_z": round(float(runs_z), 4),
+        "n": int(sample_size),
+        "elo_rating": round(float(elo_rating), 2),
+        "elo_is_default": elo_is_default,
+        # Which branch produced `route`. The model branch requires a loaded
+        # artifact that also matches the four-feature contract; absent that,
+        # the deterministic heuristic decides. Reported so a reader never has
+        # to infer whether a model was involved.
+        "decided_by": ("model" if router.clf is not None else "heuristic"),
+        "cold_start": sample_size == 0,
+        "authority": "Traffic Cop (production). Advisory to the agent; the "
+                     "agent does not route.",
+        "source": "groups.hybrid_router (read-only)",
+    }
+
+
 def get_problem_context(session, question_id):
     """
     What a learner is allowed to see about one offered question.
@@ -433,6 +499,10 @@ REGISTRY = {t.name: t for t in (
     Tool("get_prerequisites", get_prerequisites, True,
          "Prerequisites and unlocks for a topic, from the production DAG.",
          required=("topic",)),
+    Tool("get_routing_signal", get_routing_signal, True,
+         "The production Traffic Cop's routing decision for this learner "
+         "(flat practice vs advancing the curriculum) and the telemetry "
+         "behind it. Advisory: it tells you what the backend would do."),
     Tool("get_problem_context", get_problem_context, True,
          "Learner-visible detail for one offered question.",
          required=("question_id",)),
@@ -451,6 +521,7 @@ NARRATION = {
     "get_learner_state": "Checking learner state",
     "get_candidate_problems": "Looking for suitable problems",
     "get_prerequisites": "Looking at prerequisites",
+    "get_routing_signal": "Checking the routing decision",
     "get_problem_context": "Reading the problem",
     "get_tutor_context": "Gathering context for an explanation",
     "grade_submission": "Running the code",

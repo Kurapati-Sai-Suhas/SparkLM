@@ -88,7 +88,7 @@ source code. Frontend coverage is far thinner and is a known gap.
 
 ## Verified test state (2026-09-01)
 
-- **Backend: 3,400 passing** on the full tree (`pytest --ignore=scripts`).
+- **Backend: 3,454 passing** on the full tree (`pytest --ignore=scripts`).
 - **3,188 passing** on the narrower scope CI runs (`pytest groups common`).
   Both numbers are correct; always quote the scope with the number.
 - `--ignore=scripts` is required — `scripts/test_judge*.py` are ad-hoc probes
@@ -117,7 +117,7 @@ smoke test and no automated rollback.
 
 | | |
 |---|---|
-| `ai_services.py` hard-codes `llama-3.3-70b-versatile` | Withdrawn model; three call sites 404. The reseed path is unaffected — it reads `RESEED_GROQ_MODEL`. |
+| ~~`ai_services.py` hard-codes a withdrawn Groq model~~ | **FIXED (M2 P2.26).** Five call sites, not three. All now read `PROVIDER_MODELS["groq"]` via `RESEED_GROQ_MODEL`. |
 | Gemini API key in public git history | Present in 9 commits (`a50b513` → `371bd3f`). **Rotation at Google is unverified.** Removing the prep docs that pointed at it did not fix this. |
 | Stale root `package.json` still tracked | If the Vercel Root Directory setting is ever lost, `vite build` exits 127 again. |
 | Stored stdin cannot express an empty string | `execution_adapter` line 343 filters blank lines. Affects any question with an empty-input branch; the workaround is a single-line JSON envelope. |
@@ -138,7 +138,7 @@ smoke test and no automated rollback.
 
 | Branch | State |
 |---|---|
-| `main` | production; **at `d87dc2a`**, pushed. 22 of 26 local branches are merged into it. |
+| `main` | production; **at `fef328d`**, pushed. 22 of 26 local branches are merged into it. |
 | `backup/interview-docs-2026-08-31` | local only, never pushed — holds the interview package removed from the public repo. |
 | `backup/pre-push-p2.7-2026-08-24` | retained checkpoint. |
 | `preserve/settings-email-2xx-test` | parked work, awaiting a keep-or-drop decision. |

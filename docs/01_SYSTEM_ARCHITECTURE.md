@@ -113,7 +113,7 @@ graph TB
 
     subgraph ext["EXTERNAL SERVICES"]
         Judge0["Judge0<br/>via RapidAPI<br/>sandboxed execution"]
-        Groq["Groq<br/>llama-3.3-70b-versatile"]
+        Groq["Groq<br/>model from RESEED_GROQ_MODEL"]
         NIM["NVIDIA NIM<br/>llama-3.1-70b-instruct<br/>(quota fallback)"]
         Gemini["Google Gemini<br/>text-embedding-004"]
         GAuth["Google Identity<br/>OAuth / ID tokens"]
@@ -507,7 +507,7 @@ missing hasher surfaces as ordinary "wrong password" for every user.
 
 | Provider | Model | Role |
 |---|---|---|
-| **Groq** | `llama-3.3-70b-versatile` | primary generation — questions, test cases, stubs, tutoring, quizzes |
+| **Groq** | `PROVIDER_MODELS["groq"]` via `RESEED_GROQ_MODEL` | primary generation — questions, test cases, stubs, tutoring, quizzes |
 | **NVIDIA NIM** | `meta/llama-3.1-70b-instruct` | fallback, **daily-quota errors only** |
 | **Google Gemini** | `models/text-embedding-004` | embeddings for document search |
 
@@ -515,7 +515,7 @@ missing hasher surfaces as ordinary "wrong password" for every user.
 
 ```mermaid
 graph TD
-    A["_generate_json_with_fallback(prompt)"] --> B["Groq: llama-3.3-70b-versatile"]
+    A["_generate_json_with_fallback(prompt)"] --> B["Groq: configured model"]
     B --> C{"succeeded?"}
     C -->|yes| D["validate JSON schema"]
     C -->|"error"| E{"_is_daily_quota_error?"}
@@ -1118,7 +1118,7 @@ implemented (§16).
 | Service | Endpoint / model | Auth | Failure mode |
 |---|---|---|---|
 | **Judge0** | RapidAPI | `JUDGE0_API_KEY`, `JUDGE0_API_HOST` | grading unavailable → `GradingUnavailable` |
-| **Groq** | `llama-3.3-70b-versatile` | `GROQ_API_KEY` | quota → NIM fallback; other → raise |
+| **Groq** | `PROVIDER_MODELS["groq"]` | `GROQ_API_KEY` | quota → NIM fallback; other → raise |
 | **NVIDIA NIM** | `integrate.api.nvidia.com/v1/chat/completions` | `NIM_API_KEY` | 150 s timeout |
 | **Google Gemini** | `models/text-embedding-004` | `GEMINI_API_KEY` | embedding unavailable → degraded search |
 | **Google Identity** | ID-token verification | `GOOGLE_CLIENT_ID` | 503 when unconfigured (fails loudly, by test) |

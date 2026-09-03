@@ -479,7 +479,7 @@ Every choice below was made against a real alternative, not by default. The shor
 | **NetworkX** | Curriculum prerequisite DAG | Real cycle-detection and graph traversal instead of hand-rolled adjacency-list code that would eventually reinvent NetworkX badly |
 | **PyTorch + transformers** *(optional, `requirements-ml.txt`)* | CLIP embeddings for visual search — **and nothing else** | Deliberately isolated from the web tier: production installs `requirements.txt` alone (torch-free), ~2 GB lighter with no PyTorch cold-start tax on a 512 MB instance. Imported lazily inside `try/except ImportError`, so a slim install degrades rather than failing to boot. `torch-geometric`, `onnxruntime` and `shap` were **removed in M1/P1.1** once the GCN engine, SHAP explainer, ONNX export, MIRT engine and synthetic data generator were deleted and a repo-wide scan found zero importers |
 | **Judge0 (RapidAPI)** | Sandboxed code execution | Untrusted student code must never run in-process — Judge0 isolates it completely, in 5 languages (Python, Java, C++, C, JavaScript) |
-| **Groq** | Question-content generation (reseed), quizzes | Fast, cheap, strong structured-JSON output. The reseed path reads its model id from `RESEED_GROQ_MODEL` (default `openai/gpt-oss-120b`) precisely so a withdrawn model is a config change. **`ai_services.py` has not been migrated** and still hard-codes `llama-3.3-70b-versatile` at three call sites; that model was withdrawn, so those paths currently 404 |
+| **Groq** | Question-content generation (reseed), quizzes, hints, RAG | Fast, cheap, strong structured-JSON output. **Every** Groq path now reads its model id from `RESEED_GROQ_MODEL` (default `openai/gpt-oss-120b`), so a withdrawn model is a config change rather than a patch. `ai_services.py` previously hard-coded `llama-3.3-70b-versatile` at five call sites; that model was withdrawn and those paths 404'd until M2 P2.26 |
 | **NVIDIA NIM** | LLM fallback when the daily Groq quota is exhausted | A second provider behind one interface. Note it fires on *quota* errors only, so it does not cover the 404 above |
 | **Google Gemini** | Vision (image explanation), text embeddings | Groq doesn't do multimodal; Gemini's `gemini-2.5-flash` and `text-embedding-004` cover the vision and embedding gaps |
 | **Google Identity Services + google-auth** | OAuth sign-in | Token verified server-side against Google's public keys — the frontend's claim of identity is never trusted on its own |
@@ -532,7 +532,7 @@ feature deep dives.
 | Cache | Redis 7 (Upstash) | Cache · throttles · channel layer | ✅ LIVE |
 | Code execution | Judge0 (RapidAPI) | Sandbox, 5 languages | ✅ LIVE |
 | LLM | Groq | Reseed generation via `RESEED_GROQ_MODEL` | ✅ LIVE |
-| LLM | Groq in `ai_services.py` | Quizzes, study tools | ⚠️ **BROKEN** — hard-codes the withdrawn `llama-3.3-70b-versatile`, 404s |
+| LLM | Groq in `ai_services.py` | Quizzes, hints, RAG | ✅ LIVE — reads the canonical `PROVIDER_MODELS["groq"]` since M2 P2.26 |
 | LLM | NVIDIA NIM | Fallback on Groq **quota** errors only | ✅ LIVE |
 | LLM | Google Gemini | Vision, `text-embedding-004`, reseed provider | ✅ LIVE (20 req/day free tier) |
 | Agent | Custom orchestrator (`groups/agent/`) | 7 tools, bounded loop | 🟡 **FLAGGED OFF** by default |
@@ -1197,7 +1197,7 @@ Every prompt across every AI feature explicitly wraps user/document content in a
 
 | Technology | Why here specifically |
 |---|---|
-| Groq (`llama-3.3-70b-versatile`) | Speed + strong structured-JSON output — a real practical constraint for a feature that needs to return within a user-facing request, not a batch job |
+| Groq (model id from `RESEED_GROQ_MODEL`) | Speed + strong structured-JSON output — a real practical constraint for a feature that needs to return within a user-facing request, not a batch job |
 | Google Gemini | Groq's models are text-only; Gemini covers the vision (image explanation) path |
 | `langchain-text-splitters` | Off-the-shelf chunking rather than hand-rolled text splitting logic |
 
@@ -1577,7 +1577,7 @@ it exists outside the application. **⏳ FUTURE** means it does not exist.
 
 | Area | Status | Notes |
 |---|---|---|
-| `ai_services.py` LLM model id | ⚠️ **OPEN DEFECT** | Hard-codes the withdrawn `llama-3.3-70b-versatile` at three call sites, so those paths 404. The reseed path reads `RESEED_GROQ_MODEL` and is unaffected |
+| `ai_services.py` LLM model id | ✅ FIXED (M2 P2.26) | Was five hard-coded call sites on the withdrawn `llama-3.3-70b-versatile`. All now read `PROVIDER_MODELS["groq"]`; live probe confirms the configured model is offered and the withdrawn one is not |
 | Stale root `package.json` still tracked | ⚠️ OPEN | If the Vercel Root Directory setting is lost, `vite build` exits 127 again |
 | Empty-string arguments in stored stdin | ⚠️ STRUCTURAL | `execution_adapter` filters blank lines; the workaround is a single-line JSON envelope |
 | Migration off the deprecated `google-generativeai` SDK | ⏳ FUTURE | |

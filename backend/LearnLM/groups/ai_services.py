@@ -36,6 +36,30 @@ NIM_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # scale and answered in ~1s in the same test.
 NIM_MODEL = "meta/llama-3.1-70b-instruct"
 
+
+def _groq_model():
+    """
+    The configured Groq model id (M2 P2.26).
+
+    Five call sites in this module hard-coded `llama-3.3-70b-versatile`.
+    Groq withdrew that model, so every one of them returned
+    `404 The model ... does not exist` on this project's key — and because
+    `_generate_json_with_fallback` only diverts to NIM on a DAILY quota
+    error, a 404 was not a supply problem it recognised, so the backup
+    never fired for it either. Quizzes, hints and RAG answers all failed.
+
+    A model id is configuration, not code: when a provider retires one this
+    should be an environment change. `reseed_generation.PROVIDER_MODELS` is
+    already that source — it is what the agent provider reads, and it is
+    overridable via `RESEED_GROQ_MODEL` — so this reuses it rather than
+    introducing a second place a model id can be wrong.
+
+    Imported lazily to keep module import order free of a new dependency
+    edge, matching how `groups.agent.provider` reads the same constant.
+    """
+    from groups.reseed_generation import PROVIDER_MODELS
+    return PROVIDER_MODELS["groq"]
+
 class AIService:
 
     @staticmethod
@@ -69,7 +93,7 @@ class AIService:
             if not groq_client:
                 raise Exception("Groq API key missing")
             response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=_groq_model(),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"}
             )
@@ -133,7 +157,7 @@ class AIService:
             if not groq_client:
                 raise Exception("Groq API key missing")
             response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=_groq_model(),
                 messages=[{"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content
@@ -280,7 +304,7 @@ STUDENT QUESTION: {question}"""
             if not groq_client:
                 raise Exception("Groq API key missing")
             response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=_groq_model(),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"}
             )
@@ -382,7 +406,7 @@ def _generate_json_with_fallback(prompt, context_label):
         if not groq_client:
             raise Exception("Groq API key missing")
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=_groq_model(),
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
@@ -572,7 +596,7 @@ def generate_test_cases(title, description):
         if not groq_client:
             raise Exception("Groq API key missing")
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=_groq_model(),
             messages=[{"role": "user", "content": prompt}]
         )
 

@@ -73,7 +73,7 @@ model change, bulk reseed. See §7 for why.
 | X1 | **Operator writes specifications, batch by batch** | Unblocks literally everything else | Human time only |
 | X2 | Run the reseed pipeline on each approved batch | Trusted count rises | X1 |
 | X3 | `rotate_suite` — write inputs and answers in one transaction | Closes the real (if tiny) rotation window | — |
-| X4 | Structured Traffic Cop observability, matching the agent's | Today it is one unstructured `logger.info`; you cannot measure what you cannot see | — |
+| ~~X4~~ | ~~Structured Traffic Cop observability~~ | **DONE** (M2 P2.24). One JSON event per decision, with latency. Answers routing questions **from now on** — there is no historical structured data to answer them retrospectively | — |
 | X5 | Retire the stale root `package.json` | Vercel build fragility | — |
 | X6 | `question_approve` cp1252 fix | Blocks trust transitions on Windows | — |
 | X7 | Frontend test coverage (ratio 0.15 vs backend 1.16) | Weakest test surface | — |
@@ -117,7 +117,7 @@ review · router prediction-accuracy dashboard.
 | **Curriculum DAG** | ✅ PRODUCTION | 22 topics, 19 edges; `CURRICULUM_GATE_ENFORCE` off |
 | **Trusted candidates** | ✅ / 🔴 split | Agent path filters on trust (6). Legacy path does not (1,788) |
 | **Deployment** | ✅ PRODUCTION | Vercel + Render + Neon + Upstash; no deploy gate, no staging |
-| **Testing** | ✅ | 3,411 passing |
+| **Testing** | ✅ | 3,432 passing |
 | **Documentation** | ✅ as of this file | README, PROJECT_STATUS, ARCHITECTURE, this roadmap |
 
 ---

@@ -29,8 +29,8 @@ executing the real functions against the production database.
 | 12 | Evaluation results | **NONE.** `docs/evals/` contains only `.gitkeep` |
 | 13 | Production path | `coding_views.py:640-644`; also `hybrid_router.py:399`, `common/review_views.py:52` |
 | 14 | Fallback | `decide_route()` whenever `clf` is absent or fails the `n_features_in_ == 4` guard |
-| 15 | Latency | **NOT VERIFIED** — never measured. No timing instrumentation on the routing path |
-| 16 | Observability | One unstructured `logger.info("[Traffic Cop] user=%s route=%s ...")`. No metrics, no latency, no structured record |
+| 15 | Latency | **Now instrumented** (M2 P2.24) — `latency_ms` on every routing decision. No historical figure exists: instrumentation post-dates every recommendation served so far |
+| 16 | Observability | **Structured since M2 P2.24** — `routing decision {json}` carrying route, telemetry, `decided_by`, `cold_start`, `policy_version`, `elo`, `latency_ms`. Was one unstructured sentence |
 | 17 | Known weaknesses | See §Stage 1 findings below |
 | 18 | Data limitations | 0 adaptive-eligible submissions ⇒ telemetry is constant for every learner |
 | 19 | Leakage risks | `avg_elo` uses **current** Elo, not point-in-time — rating history is not persisted. Documented in `retrain_ai.py` |
@@ -245,10 +245,13 @@ deterministic path is the one that cannot fail to load.
 
 ## What this implies, in priority order
 
-1. **`get_routing_signal` tool** — expose Traffic Cop's decision to the agent.
-   Small, closes the disagreement gap, needs no data.
-2. **Structured Traffic Cop logging** — mirror the agent's decision line. You
-   cannot evaluate routing without it, and S1 says the field mostly does not.
+1. ~~**`get_routing_signal` tool**~~ — **DONE** (`3fb78a9`). The agent now reads
+   Traffic Cop's decision instead of reasoning past it.
+2. ~~**Structured Traffic Cop logging**~~ — **DONE** (M2 P2.24). One JSON event
+   per decision. Note what this does and does not buy: every question in the
+   observability list below is answerable **from now on**, and answerable for
+   **nothing that happened before**, because no historical structured data
+   exists.
 3. **One trust filter for both paths** — the agent filters on trust, the legacy
-   path does not.
+   path does not. Now the highest-value remaining routing item.
 4. **Do not train the RF.** Revisit when the gate opens on real evidence.

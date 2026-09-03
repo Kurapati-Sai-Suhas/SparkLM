@@ -782,3 +782,215 @@ def test_the_selection_query_actually_orders_by_question_id_last(
         "without a unique terminal key the ordering is only PARTIAL and every "
         f"guarantee above it is void. Clauses seen: {ordered_by}"
     )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Structured routing-decision log (M2 P2.24)
+#
+# The predecessor was a formatted sentence: readable, and useless for
+# answering "how often does the router choose flat?" without regex over
+# prose. These tests pin the schema and — more importantly — pin that the
+# LOGGED route is the route actually served, not a second computation.
+# ═════════════════════════════════════════════════════════════════════
+
+import json as _json
+import logging as _logging
+
+
+def _routing_events(caplog):
+    """Every structured routing decision captured, parsed."""
+    events = []
+    for record in caplog.records:
+        message = record.getMessage()
+        # Require the JSON body, so a same-prefixed non-event could never be
+        # parsed as one. The failure notice is named so it cannot collide,
+        # but a parser should not depend on that.
+        prefix = "routing decision {"
+        if message.startswith(prefix):
+            events.append(_json.loads(message.split("routing decision ", 1)[1]))
+    return events
+
+
+def test_a_routing_decision_emits_one_structured_event(client, topic, caplog):
+    make(topic, "Structured Log Q")
+
+    with caplog.at_level(_logging.INFO):
+        response = next_problem(client)
+
+    assert response.status_code == 200
+    events = _routing_events(caplog)
+    assert len(events) == 1, "exactly one routing decision per recommendation"
+
+    event = events[0]
+    assert set(event) == {
+        "event", "learner_id", "route", "avg_acc", "runs_z", "n",
+        "cold_start", "decided_by", "model_artifact", "policy_version",
+        "elo", "latency_ms"}
+    assert event["event"] == "routing_decision"
+    assert event["policy_version"] == ROUTING_POLICY_VERSION
+
+
+def test_the_logged_route_is_the_route_actually_served(
+        client, learner, topic, caplog):
+    """
+    The load-bearing test. The log must report the decision that was USED,
+    not a recomputation that could disagree with it.
+    """
+    from groups.hybrid_router import RoutingClassifier, compute_routing_telemetry
+
+    make(topic, "Route Agreement Q")
+
+    with caplog.at_level(_logging.INFO):
+        response = next_problem(client)
+
+    assert response.status_code == 200
+    event = _routing_events(caplog)[0]
+
+    avg_acc, runs_z, _ = compute_routing_telemetry(learner)
+    profile = UserCodingProfile.objects.get(user=learner)
+    expected = RoutingClassifier().predict_route(
+        avg_acc, runs_z, profile.elo_rating / 2000.0)
+
+    assert event["route"] == expected
+    assert event["route"] in {"flat", "hierarchical"}
+
+
+def test_logged_telemetry_matches_the_telemetry_used_for_the_decision(
+        client, learner, topic, caplog):
+    from groups.hybrid_router import compute_routing_telemetry
+
+    make(topic, "Telemetry Agreement Q")
+
+    with caplog.at_level(_logging.INFO):
+        next_problem(client)
+
+    event = _routing_events(caplog)[0]
+    avg_acc, runs_z, n = compute_routing_telemetry(learner)
+
+    assert event["avg_acc"] == round(float(avg_acc), 4)
+    assert event["runs_z"] == round(float(runs_z), 4)
+    assert event["n"] == n
+
+
+def test_cold_start_is_logged_as_cold_start(client, learner, topic, caplog):
+    """
+    No adaptive-eligible history, so telemetry takes the documented
+    cold-start path. The event must say so rather than leaving a reader to
+    infer it from n.
+    """
+    make(topic, "Cold Start Q")
+    assert not CodeSubmission.objects.filter(
+        user=learner, adaptive_eligible=True).exists()
+
+    with caplog.at_level(_logging.INFO):
+        next_problem(client)
+
+    event = _routing_events(caplog)[0]
+    assert event["n"] == 0
+    assert event["cold_start"] is True
+    assert event["avg_acc"] == 0.7
+    assert event["runs_z"] == 0.0
+
+
+def test_the_event_names_the_branch_and_carries_no_artifact(
+        client, topic, caplog):
+    """No trained artifact exists, so the heuristic decides and the event
+    must say which — a reader must never infer whether a model was used."""
+    make(topic, "Branch Q")
+
+    with caplog.at_level(_logging.INFO):
+        next_problem(client)
+
+    event = _routing_events(caplog)[0]
+    assert event["decided_by"] == "heuristic"
+    assert event["model_artifact"] is None
+
+
+def test_the_event_carries_latency(client, topic, caplog):
+    make(topic, "Latency Q")
+
+    with caplog.at_level(_logging.INFO):
+        next_problem(client)
+
+    event = _routing_events(caplog)[0]
+    assert event["latency_ms"] is not None
+    assert event["latency_ms"] >= 0.0
+
+
+def test_logging_mutates_no_state(client, learner, topic, caplog):
+    """Observability must be inert. Snapshot everything routing could touch."""
+    from groups.models import UserTopicMastery
+
+    make(topic, "Inert Q")
+    # NextProblemView reaches Elo through get_or_create, so the FIRST request
+    # legitimately creates a profile row. Warm it before snapshotting, or this
+    # test measures that write rather than logging's effect.
+    next_problem(client)
+
+    before = (
+        CodeSubmission.objects.count(),
+        UserTopicMastery.objects.count(),
+        Question.objects.count(),
+        Question.objects.filter(
+            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+        UserCodingProfile.objects.get(user=learner).elo_rating,
+    )
+
+    with caplog.at_level(_logging.INFO):
+        next_problem(client)
+
+    after = (
+        CodeSubmission.objects.count(),
+        UserTopicMastery.objects.count(),
+        Question.objects.count(),
+        Question.objects.filter(
+            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+        UserCodingProfile.objects.get(user=learner).elo_rating,
+    )
+    assert before == after, "routing logging changed state"
+
+
+def test_a_broken_logger_cannot_change_the_route_or_break_serving(
+        client, topic, monkeypatch, caplog):
+    """
+    Requirement F. The recommendation must survive a logging failure
+    unchanged — the decision is already made by the time the log is written.
+    """
+    from groups import hybrid_router
+
+    served_before = served_id(client)
+
+    def exploding_info(*args, **kwargs):
+        raise RuntimeError("log backend down")
+
+    # NOT json.dumps: `json` is a shared module, so patching it there breaks
+    # DRF's renderer too and the failure would come from response rendering
+    # rather than from logging. Patching this logger is what "the logging
+    # backend is down" actually means.
+    monkeypatch.setattr(hybrid_router.logger, "info", exploding_info)
+    # The warm-up call above emitted a real event; scope the assertion to
+    # what happens AFTER the logger is broken.
+    caplog.clear()
+
+    with caplog.at_level(_logging.INFO):
+        response = next_problem(client)
+
+    assert response.status_code == 200, "a logging failure broke serving"
+    assert response.json().get("id") == served_before, (
+        "a logging failure changed which question was served")
+    assert _routing_events(caplog) == [], "no event should have been emitted"
+    assert "routing_decision_log_failed" in caplog.text
+
+
+def test_the_event_is_serializable_and_carries_no_grading_truth(
+        client, topic, caplog):
+    make(topic, "Serializable Q")
+
+    with caplog.at_level(_logging.INFO):
+        next_problem(client)
+
+    event = _routing_events(caplog)[0]
+    body = _json.dumps(event)          # must round-trip for a log pipeline
+    for forbidden in ("expected_output", "hidden_test_cases", "stdin",
+                      "boilerplate", "reasoning"):
+        assert forbidden not in body

@@ -19,6 +19,8 @@ Fixes applied:
 """
 
 import hashlib
+import json
+import logging
 import math
 import networkx as nx
 import joblib
@@ -26,6 +28,8 @@ import joblib
 from django.core.cache import cache
 from django.utils import timezone
 import os
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────
 # SHARED PEDAGOGICAL DEFINITIONS
@@ -171,6 +175,68 @@ class RoutingClassifier:
             return "hierarchical" if hier_p >= flat_p else "flat"
 
         return decide_route(avg_acc, runs_z)
+
+
+def log_routing_decision(user, route, avg_acc, runs_z, sample_size,
+                         *, router=None, elo=None, latency_ms=None):
+    """
+    One structured line per routing decision (M2 P2.24).
+
+    The predecessor was a formatted sentence. It was readable and useless:
+    answering "how often does the router choose flat?" or "how many learners
+    are stuck at cold start?" meant regex over prose, and it recorded neither
+    which branch decided nor how long it took. This emits key/value fields so
+    those become a query rather than an archaeology exercise.
+
+    ── Reuses, never recomputes ────────────────────────────────────────────
+
+    Every value is passed in by the caller, already computed for the decision
+    itself. Recomputing telemetry for a log would be a second read of the
+    submission window and — worse — a second answer, since the two reads
+    could straddle a write.
+
+    ── Cannot affect serving ───────────────────────────────────────────────
+
+    Wrapped whole. An observability path must never change or break a
+    learner's recommendation, so every failure here is swallowed after being
+    noted. The routing decision has already been made by the time this is
+    called; nothing it does can alter it.
+
+    Carries no source code, no hidden tests, no expected outputs and no
+    grading truth. `learner_id` follows the existing convention — the
+    primary key, which is what the previous line logged too. The timestamp
+    comes from the logging configuration rather than the payload, matching
+    the agent's decision line.
+    """
+    try:
+        clf = getattr(router, "clf", None) if router is not None else None
+        payload = {
+            "event": "routing_decision",
+            "learner_id": getattr(user, "pk", None),
+            "route": route,
+            "avg_acc": round(float(avg_acc), 4),
+            "runs_z": round(float(runs_z), 4),
+            "n": int(sample_size),
+            "cold_start": int(sample_size) == 0,
+            # Which branch produced `route`. Reported rather than inferred:
+            # a reader must never have to guess whether a model was involved.
+            "decided_by": "model" if clf is not None else "heuristic",
+            "model_artifact": (RoutingClassifier.ARTIFACT_NAME
+                               if clf is not None else None),
+            # The same identifier recorded on RecommendationLog.policy_version,
+            # so a log line and a stored recommendation can be joined.
+            "policy_version": ROUTING_POLICY_VERSION,
+            "elo": round(float(elo), 2) if elo is not None else None,
+            "latency_ms": (round(float(latency_ms), 2)
+                           if latency_ms is not None else None),
+        }
+        logger.info("routing decision %s", json.dumps(payload, default=str))
+    except Exception:                                         # noqa: BLE001
+        # Never re-raise: the learner's recommendation is already decided.
+        # Deliberately NOT prefixed "routing decision": a consumer greps that
+        # prefix and parses the remainder as JSON, so sharing it would feed
+        # the failure notice into the parser as a malformed event.
+        logger.warning("routing_decision_log_failed", exc_info=False)
 
 
 # ─────────────────────────────────────────────────────────────

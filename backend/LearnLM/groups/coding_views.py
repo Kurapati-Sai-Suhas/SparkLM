@@ -2,6 +2,7 @@ import os
 import base64
 import requests
 import logging
+import time
 from datetime import timedelta
 
 from django.core.cache import cache
@@ -32,6 +33,7 @@ from .hybrid_router import (
     ROUTING_POLICY_VERSION,
     HierarchicalEngine,
     compute_routing_telemetry, get_mastered_topic_names,
+    log_routing_decision,
 )
 from .services import (
     ExecutionContractError, GradingService, GradingUnavailable,
@@ -641,10 +643,15 @@ class NextProblemView(APIView):
         # FR-RTR-01 v2: mean + runs-test streakiness over the last 20
         # submissions (frozen architecture §6.2).
         avg_acc, runs_z, sample_size = compute_routing_telemetry(request.user)
+        # Timed so the structured line can carry routing latency. The clock
+        # brackets the decision ONLY — telemetry is already computed above and
+        # is not re-read for the log.
+        _route_started = time.monotonic()
         route_decision = router.predict_route(avg_acc, runs_z, target_elo / 2000.0)
-        logger.info(
-            "[Traffic Cop] user=%s route=%s (avg_acc=%.2f runs_z=%.2f n=%d elo=%.0f)",
-            request.user.id, route_decision, avg_acc, runs_z, sample_size, target_elo,
+        log_routing_decision(
+            request.user, route_decision, avg_acc, runs_z, sample_size,
+            router=router, elo=target_elo,
+            latency_ms=(time.monotonic() - _route_started) * 1000.0,
         )
 
         # ROUTE 1: HIERARCHICAL (DAG PREREQUISITE TRAVERSAL)

@@ -20,6 +20,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import TrustBadge, { TrustNote } from '@/components/TrustBadge';
 import 'katex/dist/katex.min.css';
 import XaiComponentCharts from '../components/XaiComponentCharts';
 import LearningPathVisualizer from '../components/LearningPathVisualizer';
@@ -507,7 +508,15 @@ export default function AdaptiveCodingPortal() {
               >
                 {problem.difficulty}
               </span>
+              {/*
+                Serving filters on deliverability, not trust, so a served
+                question may never have had its answer key checked. Read
+                straight from the backend's `trust` object — the frontend
+                classifies nothing itself.
+              */}
+              <TrustBadge trust={problem.trust} />
             </div>
+            <TrustNote trust={problem.trust} />
 
             <div className="relative rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-2xl p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
               <ProblemDescription

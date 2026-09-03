@@ -637,3 +637,74 @@ describe("P2.8a — topic provenance and exhaustion", () => {
     expect(empty.textContent).toContain("solved all available problems");
   });
 });
+
+/**
+ * Trust state rendered through the real page (M2 P2.27).
+ *
+ * The component tests pin the classification; these pin the WIRING — that a
+ * `trust` object arriving on the /code/next/ response actually reaches the
+ * learner, and that a response without one still renders a usable page.
+ */
+describe("trust state on the served question", () => {
+  it("shows Practice mode for a servable but unverified question", async () => {
+    await renderPortal({
+      ...PROBLEM,
+      trust: {
+        status: "DRAFT",
+        trust_state: "UNVERIFIED",
+        adaptive_eligible: false,
+        servable: true,
+      },
+    });
+
+    expect(screen.getByTestId("trust-badge-practice")).toBeTruthy();
+    expect(screen.queryByTestId("trust-badge-verified")).toBeNull();
+    expect(screen.getByTestId("trust-note-practice").textContent)
+      .toMatch(/won't change your rating/i);
+  });
+
+  it("shows Verified, and no warning, for an adaptive-eligible question", async () => {
+    await renderPortal({
+      ...PROBLEM,
+      trust: {
+        status: "PUBLISHED",
+        trust_state: "ORACLE_VERIFIED",
+        adaptive_eligible: true,
+        servable: true,
+      },
+    });
+
+    expect(screen.getByTestId("trust-badge-verified")).toBeTruthy();
+    expect(screen.queryByTestId("trust-badge-practice")).toBeNull();
+    expect(screen.queryByTestId("trust-note-practice")).toBeNull();
+  });
+
+  it("renders the page normally when the response carries no trust object", async () => {
+    // API compatibility: an older backend, or a cached response, must not
+    // break the page — and must not be treated as verified.
+    await renderPortal(PROBLEM);
+
+    expect(screen.getByTestId("coding-portal")).toBeTruthy();
+    expect(screen.getByTestId("problem-description-block")).toBeTruthy();
+    expect(screen.queryByTestId("trust-badge-verified")).toBeNull();
+    expect(screen.queryByTestId("trust-badge-practice")).toBeNull();
+  });
+
+  it("does not block solving a practice-mode question", async () => {
+    await renderPortal({
+      ...PROBLEM,
+      trust: {
+        status: "DRAFT",
+        trust_state: "UNVERIFIED",
+        adaptive_eligible: false,
+        servable: true,
+      },
+    });
+
+    // The indicator is informational only: Run and Submit stay available.
+    expect(screen.getByTestId("submit-code-btn").hasAttribute("disabled"))
+      .toBe(false);
+    expect(screen.getByTestId("run-code-btn").hasAttribute("disabled"))
+      .toBe(false);
+  });
+});

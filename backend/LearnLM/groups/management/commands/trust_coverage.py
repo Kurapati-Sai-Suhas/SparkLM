@@ -104,15 +104,28 @@ class Command(BaseCommand):
                     write(f"     {line}")
             for candidate in entry.candidates:
                 reach = "reachable" if candidate["reachable"] else "OUT OF BAND"
-                write(f"       q{candidate['id']:<6} "
+                mark = "  " if candidate["executable"] else "! "
+                write(f"     {mark}q{candidate['id']:<6} "
                       f"{candidate['difficulty']:>6.0f}  {reach:<11} "
                       f"{candidate['title']}")
+                if candidate["harness_blocker"]:
+                    for line in _wrap(
+                            f"NOT EXECUTABLE: {candidate['harness_blocker']}"):
+                        write(f"           {line}")
             write("")
 
-        write("Candidates are a MECHANICAL shortlist — servability, whether")
-        write("the difficulty is reachable under the P2.31 exposure policy,")
-        write("how many peers share it, then id. Nothing here knows whether a")
-        write("question is well-posed or worth your time. The operator picks.")
+        write("Candidates are a MECHANICAL shortlist — whether the signature")
+        write("is executable, whether the difficulty is reachable under the")
+        write("P2.31 exposure policy, how many peers share it, then id.")
+        write("")
+        write("A candidate WITHOUT a '!' is not verified to work. It means no")
+        write("blocker is provable from its signature. An unannotated")
+        write("parameter, or a tree declared as `list`, still receives a raw")
+        write("string — the signature cannot show that, so check the stdin")
+        write("format before authoring against it.")
+        write("")
+        write("Nothing here knows whether a question is well-posed or worth")
+        write("your time. The operator picks.")
         write("")
         write("This command advances nothing and wrote nothing. Authoring a")
         write("reference solution is authoring grading truth, and no report")

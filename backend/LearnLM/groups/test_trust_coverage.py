@@ -163,12 +163,25 @@ def test_running_the_report_mutates_nothing(learner, root_topic):
     assert snapshot() == before
 
 
-def test_the_report_contains_no_write_verb():
+def test_the_report_contains_no_orm_write():
+    """
+    ORM writes specifically, not any method that happens to be spelled
+    `update`. A bare `.update(` substring also matches `set.update()` and
+    `dict.update()`, which are ordinary Python and say nothing about the
+    database — an earlier version of this test failed on exactly that and
+    would have pushed the code toward a worse shape to satisfy it.
+    """
     from groups.management.commands import trust_coverage as cmd
 
     source = inspect.getsource(tc) + inspect.getsource(cmd)
-    for verb in (".save(", ".create(", ".update(", ".delete(",
-                 ".get_or_create(", ".bulk_create(", "atomic("):
+
+    for verb in (".save(", ".delete(", ".get_or_create(", ".bulk_create(",
+                 ".update_or_create(", "transaction.atomic"):
+        assert verb not in source, verb
+
+    # `create`/`update` only count as writes when reached through a manager.
+    for verb in ("objects.create(", "objects.update(", "objects.bulk_create(",
+                 "objects.delete("):
         assert verb not in source, verb
 
 
@@ -310,6 +323,156 @@ def test_the_shortlist_is_deterministic(root_topic, learner):
             for _ in range(3)}
 
     assert len(runs) == 1
+
+
+# ═════════════════════════════════════════════════════════════
+# Harness viability — the check that q98 taught this report to make
+# ═════════════════════════════════════════════════════════════
+
+def test_a_structural_type_is_reported_as_not_executable():
+    """
+    q98's exact signature. No contract deserializes a TreeNode, so the harness
+    hands the solution the string '[2,1,3]' instead.
+    """
+    blocker = tc.harness_blocker(
+        "class Solution:\n"
+        "    def isValidBST(self, root: Optional[TreeNode]) -> bool:\n"
+        "        pass\n")
+
+    assert blocker is not None
+    assert "TreeNode" in blocker
+
+
+def test_an_undefined_typing_name_is_reported_as_not_executable():
+    """The harness emits no imports, so `List` raises before any user logic."""
+    blocker = tc.harness_blocker(
+        "class Solution:\n"
+        "    def f(self, nums: List[int]) -> int:\n"
+        "        pass\n")
+
+    assert blocker is not None
+    assert "List" in blocker and "NameError" in blocker
+
+
+def test_a_quoted_forward_reference_is_still_caught():
+    """
+    q742 Closest Leaf in a Binary Tree declares `root: 'TreeNode'`. Quoting
+    does not define the name — it only defers the failure — and the first
+    version of this check, which looked only at `ast.Name`, missed it.
+    """
+    blocker = tc.harness_blocker(
+        "class Solution:\n"
+        "    def findDistance(self, root: 'TreeNode', p: int) -> int:\n"
+        "        pass\n")
+
+    assert blocker is not None
+    assert "TreeNode" in blocker
+
+
+def test_a_quoted_typing_name_is_caught_too():
+    blocker = tc.harness_blocker(
+        "class Solution:\n"
+        "    def f(self, nums: 'List[int]') -> int:\n"
+        "        pass\n")
+
+    assert blocker is not None and "List" in blocker
+
+
+def test_an_unparseable_forward_reference_is_ignored_not_crashed():
+    """A report should not guess at a string it cannot read."""
+    assert tc.harness_blocker(
+        "class Solution:\n"
+        "    def f(self, x: 'not valid [[') -> int:\n"
+        "        pass\n") is None
+
+
+def test_a_clean_builtin_signature_has_no_blocker():
+    """q7 Reverse Integer's shape — verified to work through the real harness."""
+    assert tc.harness_blocker(
+        "class Solution:\n"
+        "    def reverse(self, x: int) -> int:\n"
+        "        pass\n") is None
+
+
+def test_a_self_imported_name_is_accepted():
+    """An import in the boilerplate defines the name; that is not a blocker."""
+    assert tc.harness_blocker(
+        "from typing import List\n"
+        "class Solution:\n"
+        "    def f(self, nums: List[int]) -> int:\n"
+        "        pass\n") is None
+
+
+def test_a_locally_defined_class_is_accepted():
+    assert tc.harness_blocker(
+        "class Helper:\n    pass\n"
+        "class Solution:\n"
+        "    def f(self, h: Helper) -> int:\n"
+        "        pass\n") is None
+
+
+def test_unparseable_boilerplate_is_reported_not_raised():
+    blocker = tc.harness_blocker("class Solution:\n  def f(self ->\n")
+
+    assert blocker is not None and "does not parse" in blocker
+
+
+def test_missing_boilerplate_is_reported():
+    assert tc.harness_blocker("") is not None
+    assert tc.harness_blocker(None) is not None
+
+
+@pytest.mark.django_db
+def test_an_executable_candidate_outranks_a_broken_one(root_topic, learner):
+    """
+    The ranking fix. Before this, the report put q98 at the top of Tree and an
+    operator would have spent a session discovering it cannot run.
+    """
+    broken = make_question(root_topic, 9200, difficulty=1300.0)
+    Question.objects.filter(pk=broken.pk).update(
+        boilerplate_code={"python": "class Solution:\n"
+                                    "    def f(self, root: TreeNode) -> bool:\n"
+                                    "        pass\n"})
+    make_question(root_topic, 9201, difficulty=1300.0)   # plain, executable
+
+    candidates = coverage_for(root_topic.name).candidates
+
+    assert candidates[0]["id"] == 9201
+    assert candidates[0]["executable"] is True
+    assert candidates[1]["id"] == 9200
+    assert candidates[1]["executable"] is False
+    assert "TreeNode" in candidates[1]["harness_blocker"]
+
+
+@pytest.mark.django_db
+def test_executability_outranks_even_reachability(root_topic, learner):
+    """
+    A question that cannot run is useless at any difficulty, so the blocker
+    check sorts ahead of the exposure band.
+    """
+    unreachable_ok = make_question(root_topic, 9210, difficulty=1600.0)
+    reachable_broken = make_question(root_topic, 9211, difficulty=1300.0)
+    Question.objects.filter(pk=reachable_broken.pk).update(
+        boilerplate_code={"python": "class Solution:\n"
+                                    "    def f(self, n: ListNode) -> int:\n"
+                                    "        pass\n"})
+
+    candidates = coverage_for(root_topic.name).candidates
+
+    assert candidates[0]["id"] == unreachable_ok.pk
+    assert candidates[0]["reachable"] is False       # worse band, still first
+    assert candidates[1]["id"] == reachable_broken.pk
+
+
+def test_the_report_does_not_execute_boilerplate_to_decide():
+    """
+    A read-only report must not run repository content to choose what to
+    print. The check is AST-only.
+    """
+    source = inspect.getsource(tc)
+    for verb in ("exec(", "eval(", "compile("):
+        assert verb not in source, verb
+    assert "ast.parse" in source
 
 
 @pytest.mark.django_db

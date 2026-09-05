@@ -118,17 +118,19 @@ class Command(BaseCommand):
         # change (the artifact digest does not read `executor`), and no
         # existing row is touched — a database trigger makes every column but
         # `is_authoritative` immutable after insert.
-        executor = {
+        # Language-independent half. The interpreter identity is added per
+        # question below, because it depends on which reference is canonical
+        # for THAT question and nothing here can know it in advance.
+        executor_base = {
             "limits": limits,
             "operator": operator.username if operator else None,
-            "judge0_language_id": languages.judge0_id("python"),
-            "runtime": self._runtime_description(),
         }
 
         reports = []
         for question in questions:
             report = oracle_pipeline.run_question(
-                question, runner, record=record, executor=executor,
+                question, runner, record=record,
+                executor=self._executor_for(question, executor_base),
                 using=alias)
             reports.append(report)
             if not options["json"]:
@@ -171,34 +173,87 @@ class Command(BaseCommand):
             raise CommandError(f"no such question(s): {sorted(missing)}")
         return questions
 
-    def _runtime_description(self):
+    #: Judge0 runtime names already looked up this run, keyed by language id.
+    _runtime_cache = None
+
+    def _executor_for(self, question, base):
         """
-        What Judge0 calls the language it is about to run, or None.
+        Provenance for ONE question, stamped with the language actually run.
+
+        Previously `judge0_language_id` was `judge0_id("python")` for every
+        row, so a Java or C++ reference would have executed correctly — the
+        runner dispatches on `reference.language` — and then recorded evidence
+        claiming a Python interpreter produced it. Nothing downstream could
+        have detected the lie, because the artifact digest does not read
+        `executor`.
+
+        The reference is resolved here as well as inside `run_question`. That
+        is a second read of the same rows, deliberately accepted: the
+        alternative was threading a callable through the pipeline signature to
+        save one query, and provenance that is obviously correct is worth more
+        than that. When no single canonical reference exists the language keys
+        are omitted entirely — `run_question` reports the blocker and records
+        nothing, so an absent key can never be mistaken for a claim.
+        """
+        from groups.oracle import canonical_reference
+
+        executor = dict(base)
+        reference = canonical_reference(question)
+        if reference is None:
+            return executor
+
+        language_id = languages.judge0_id(reference.language)
+        executor["reference_language"] = reference.language
+        executor["judge0_language_id"] = language_id
+        runtime = self._runtime_description(language_id)
+        if runtime:
+            executor["runtime"] = runtime
+        return executor
+
+    def _runtime_description(self, language_id):
+        """
+        What Judge0 calls the language with `language_id`, or None.
 
         Asked rather than assumed: a hardcoded "Python 3.11.2" beside a
         configurable id would be a claim that drifts the moment the id
         changes. A failed lookup records nothing instead of a guess — an
         unknown runtime is a fact, an invented one is not.
+
+        Memoised per id: a batch of questions sharing a reference language
+        must not re-ask Judge0 once per question, which matters more now that
+        the id varies — and matters most when Judge0 is rate-limiting.
         """
         import os
 
         import requests
 
+        if self._runtime_cache is None:
+            self._runtime_cache = {}
+        if language_id in self._runtime_cache:
+            return self._runtime_cache[language_id]
+
         host = os.environ.get("JUDGE0_API_HOST")
         key = os.environ.get("JUDGE0_API_KEY")
         base = os.environ.get("JUDGE0_URL", f"https://{host}" if host else "")
-        language_id = languages.judge0_id("python")
         if not (host and key and base and language_id):
             return None
+
+        name = None
         try:
             response = requests.get(
                 f"{base}/languages/{language_id}",
                 headers={"X-RapidAPI-Key": key, "X-RapidAPI-Host": host},
                 timeout=10)
             response.raise_for_status()
-            return response.json().get("name")
+            name = response.json().get("name")
         except Exception:  # noqa: BLE001 — provenance must not block evidence
-            return None
+            name = None
+
+        # A failed lookup is cached too. Judge0 is the service most likely to
+        # be rate-limiting when this runs, and re-asking once per question
+        # after it has already refused makes that worse, not better.
+        self._runtime_cache[language_id] = name
+        return name
 
     def _build_runner(self):
         # Resolved per call rather than bound once, so the established

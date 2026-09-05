@@ -207,17 +207,27 @@ def test_oracle_execution_records_the_runtime(monkeypatch):
     """
     `language` says "python" and nothing more, so 3.8 evidence was
     indistinguishable from 3.11 evidence in the audit trail.
+
+    P2.7h-12 asserted this by pinning the literal source line
+    `"judge0_language_id": languages.judge0_id("python")`. Phase 1 M2 removed
+    that expression precisely because it was wrong for any non-Python
+    reference, so the assertion is rewritten to check the PROPERTY the test
+    existed for — provenance identifies the interpreter — rather than the one
+    implementation that happened to satisfy it.
     """
     from groups.management.commands import oracle_execute
 
     command = oracle_execute.Command()
-    monkeypatch.setattr(command, "_runtime_description",
-                        lambda: "Python (3.11.2)")
+    monkeypatch.setattr(type(command), "_runtime_description",
+                        lambda self, language_id: "Python (3.11.2)")
+    monkeypatch.setattr("groups.oracle.canonical_reference",
+                        lambda question: type("R", (), {"language": "python"})())
 
-    import inspect
-    source = inspect.getsource(oracle_execute.Command.handle)
-    assert '"judge0_language_id": languages.judge0_id("python")' in source
-    assert '"runtime": self._runtime_description()' in source
+    executor = command._executor_for(object(), {})
+
+    assert executor["judge0_language_id"] == languages.judge0_id("python")
+    assert executor["runtime"] == "Python (3.11.2)"
+    assert executor["reference_language"] == "python"
 
 
 def test_an_unreachable_judge0_records_no_runtime_rather_than_a_guess(
@@ -227,7 +237,10 @@ def test_an_unreachable_judge0_records_no_runtime_rather_than_a_guess(
 
     monkeypatch.delenv("JUDGE0_API_HOST", raising=False)
     monkeypatch.delenv("JUDGE0_API_KEY", raising=False)
-    assert oracle_execute.Command()._runtime_description() is None
+    # Takes the language id since M2 — the lookup describes whichever
+    # interpreter the reference actually names, not always Python's.
+    assert oracle_execute.Command()._runtime_description(
+        languages.judge0_id("python")) is None
 
 
 def test_the_artifact_digest_does_not_read_the_executor():

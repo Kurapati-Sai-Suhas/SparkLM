@@ -22,6 +22,14 @@ COLD_START_RUNS_Z = 0.0
 
 OUTCOME_WINDOW = 20
 
+#: Minimum outcome labels before the classifier may be fitted at all.
+#:
+#: Named rather than inlined so `groups.routing_readiness` can report against
+#: the SAME number this command enforces. The value is unchanged; previously
+#: it was a literal here and nothing else could see it, so a readiness report
+#: had no way to agree with the command by construction.
+MIN_TRAINING_LABELS = 100
+
 
 def build_outcome_dataset(logs):
     """
@@ -154,8 +162,8 @@ class Command(BaseCommand):
         logs = RecommendationLog.objects.filter(actual_result_correct__isnull=False)
         log_count = logs.count()
 
-        if log_count < 100:
-            self.stdout.write(self.style.WARNING(f"[WARN] Only {log_count} logs found. We need at least 100 to start fine-tuning. Skipping."))
+        if log_count < MIN_TRAINING_LABELS:
+            self.stdout.write(self.style.WARNING(f"[WARN] Only {log_count} logs found. We need at least {MIN_TRAINING_LABELS} to start fine-tuning. Skipping."))
             return
 
         self.stdout.write(f"[INFO] Found {log_count} real interactions. Re-training models...")

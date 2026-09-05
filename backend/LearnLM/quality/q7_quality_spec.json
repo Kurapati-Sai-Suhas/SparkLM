@@ -1,0 +1,133 @@
+{
+  "question": 7,
+  "input_contract": {
+    "accepts_empty_input": false,
+    "allows_duplicates": false,
+    "allows_negative": true,
+    "allows_zero": true,
+    "description": "A single signed 32-bit integer x. The statement says the value may be negative or positive, and requires 0 to be returned when the REVERSED value leaves the signed 32-bit range - so the problem is overflow-sensitive on its output, not its input. Not a sequence, so duplicate and ordering categories do not apply.",
+    "has_size_bounds": true,
+    "is_sequence": false,
+    "numeric": true,
+    "order_sensitive": false,
+    "overflow_sensitive": true
+  },
+  "mutants": [
+    {
+      "identifier": "t1-drops-the-sign",
+      "tier": 1,
+      "description": "reverses the magnitude correctly but never reapplies the sign, so every negative input returns a positive result",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        result = int(str(abs(x))[::-1])\n        if result < -(2 ** 31) or result > 2 ** 31 - 1:\n            return 0\n        return result\n"
+    },
+    {
+      "identifier": "t1-no-overflow-guard",
+      "tier": 1,
+      "description": "reverses and returns without any range check, ignoring the statement's third rule entirely",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        sign = -1 if x < 0 else 1\n        return sign * int(str(abs(x))[::-1])\n"
+    },
+    {
+      "identifier": "t1-clamps-to-int-max",
+      "tier": 1,
+      "description": "saturates at the 32-bit boundary instead of returning 0, the standard saturating-arithmetic reflex",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        sign = -1 if x < 0 else 1\n        result = sign * int(str(abs(x))[::-1])\n        if result > 2 ** 31 - 1:\n            return 2 ** 31 - 1\n        if result < -(2 ** 31):\n            return -(2 ** 31)\n        return result\n"
+    },
+    {
+      "identifier": "t1-guards-the-input-not-the-result",
+      "tier": 1,
+      "description": "range-checks x rather than the reversed value, so the guard can never fire on a valid input",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        if x < -(2 ** 31) or x > 2 ** 31 - 1:\n            return 0\n        sign = -1 if x < 0 else 1\n        return sign * int(str(abs(x))[::-1])\n"
+    },
+    {
+      "identifier": "t1-loop-assumes-positive-input",
+      "tier": 1,
+      "description": "digit-extraction loop conditioned on n > 0, so it never executes for a negative input and returns 0",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        result = 0\n        n = x\n        while n > 0:\n            result = result * 10 + n % 10\n            n = n // 10\n        if result < -(2 ** 31) or result > 2 ** 31 - 1:\n            return 0\n        return result\n"
+    },
+    {
+      "identifier": "t2-returns-none-on-overflow",
+      "tier": 2,
+      "description": "mechanical: the overflow branch returns None instead of 0, which the harness renders as an empty line",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        sign = -1 if x < 0 else 1\n        result = sign * int(str(abs(x))[::-1])\n        if result < -(2 ** 31) or result > 2 ** 31 - 1:\n            return None\n        return result\n"
+    },
+    {
+      "identifier": "t2-sign-comparison-inverted",
+      "tier": 2,
+      "description": "mechanical: the sign ternary is inverted, negating every result",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        sign = 1 if x < 0 else -1\n        result = sign * int(str(abs(x))[::-1])\n        if result < -(2 ** 31) or result > 2 ** 31 - 1:\n            return 0\n        return result\n"
+    },
+    {
+      "identifier": "t2-returns-the-reversed-string",
+      "tier": 2,
+      "description": "mechanical: the int() normalisation is dropped, so a trailing zero survives as a leading zero in the rendered output",
+      "language": "python",
+      "source": "class Solution:\n    def reverse(self, x: int) -> int:\n        sign = \"-\" if x < 0 else \"\"\n        result = sign + str(abs(x))[::-1]\n        if int(result) < -(2 ** 31) or int(result) > 2 ** 31 - 1:\n            return 0\n        return result\n"
+    }
+  ],
+  "provenance": {
+    "assessment_kind": "NEW QUALITY-GATE SPECIFICATION (first for this question)",
+    "authored_by": "assistant-drafted in M2 P2.33, PENDING OPERATOR REVIEW",
+    "method": "Mutants were written against the published statement and the declared signature, then executed locally against the stored suite to predict outcomes. Each is distinguished by an input drawn from the statement's own worked examples or from 2147483647, a publicly known constant - no stored hidden input appears in this file.",
+    "bias_disclosure": "UNLIKE the q2290 catalogue, this one CANNOT claim the stored suite was unconsulted. The four stored inputs were read during the P2.33 contract verification that established q7 is executable, before these mutants were written. The catalogue may therefore be biased toward mutants this suite already kills, and a passing gate is correspondingly weaker evidence than one written blind. The operator should weigh that when reviewing, and may prefer to discard mutants that look tailored to the suite.",
+    "reference_id": null,
+    "reference_source_hash": null,
+    "pending_fields": "reference_id and reference_source_hash cannot be filled until an operator registers a reference through reference_create; they are recorded as null rather than omitted so their absence is visible.",
+    "specification_digest": null
+  },
+  "rationale": {
+    "t1-drops-the-sign": {
+      "distinguishing_input": "-123",
+      "mutant_result": "321",
+      "reference_result": "-321",
+      "why_wrong": "The statement's second worked example is exactly this case. Taking abs() to make the string reversal work and then forgetting to restore the sign is the single most common way this problem is got wrong, because the magnitude logic looks finished and tests on positive inputs all pass."
+    },
+    "t1-no-overflow-guard": {
+      "distinguishing_input": "2147483647",
+      "mutant_result": "7463847412",
+      "reference_result": "0",
+      "why_wrong": "Implements the two obligations a reader notices - reverse the digits, keep the sign - and skips the third, which is stated in one short sentence at the end. In Python nothing forces the issue: integers do not overflow, so the omission is invisible until an input whose reversal exceeds the range."
+    },
+    "t1-clamps-to-int-max": {
+      "distinguishing_input": "2147483647",
+      "mutant_result": "2147483647",
+      "reference_result": "0",
+      "why_wrong": "Reads 'overflows' and reaches for saturating arithmetic, which is what hardware and many libraries do. The statement instead specifies a sentinel: return 0. The author has noticed the rule and applied the wrong remedy, which is a more advanced mistake than missing it."
+    },
+    "t1-guards-the-input-not-the-result": {
+      "distinguishing_input": "2147483647",
+      "mutant_result": "7463847412",
+      "reference_result": "0",
+      "why_wrong": "Places a correct-looking bounds check on the wrong value. x is a valid 32-bit integer by precondition, so this guard can never fire, and the code reads as though the rule is handled. Guarding the input rather than the output is a recognised defensive-programming reflex."
+    },
+    "t1-loop-assumes-positive-input": {
+      "distinguishing_input": "-123",
+      "mutant_result": "0",
+      "reference_result": "-321",
+      "why_wrong": "The digit-extraction loop is the standard arithmetic solution, written with `while n > 0` because digits are naturally thought of as positive. It silently returns 0 for every negative input. The `!= 0` form a C or Java author would reach for instead does not terminate in Python, where -1 // 10 is -1 - which is why this variant, not that one, is the realistic Python misconception."
+    },
+    "t2-returns-none-on-overflow": {
+      "distinguishing_input": "2147483647",
+      "mutant_result": "(empty line)",
+      "reference_result": "0",
+      "why_wrong": "Mechanical substitution in the overflow branch. Tests that the suite distinguishes the sentinel 0 from no value at all, which the harness renders as an empty line."
+    },
+    "t2-sign-comparison-inverted": {
+      "distinguishing_input": "123",
+      "mutant_result": "-321",
+      "reference_result": "321",
+      "why_wrong": "Mechanical inversion of the sign ternary. Tests that the suite pins the sign on positive inputs as well as negative ones - a suite containing only negative examples would miss it."
+    },
+    "t2-returns-the-reversed-string": {
+      "distinguishing_input": "120",
+      "mutant_result": "021",
+      "reference_result": "21",
+      "why_wrong": "Mechanical removal of the int() normalisation. The statement's third worked example exists precisely to pin trailing-zero handling, and this checks the suite actually enforces it rather than accepting a leading-zero rendering."
+    }
+  }
+}

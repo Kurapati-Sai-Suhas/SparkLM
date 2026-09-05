@@ -73,6 +73,14 @@ backend/LearnLM/remediation/*_case*_input.json
 backend/LearnLM/remediation/*_reference_*.py
 pilot_*/reference_*.py
 
+# The reference-authoring directory `reference_create --source-file` reads
+# from (M2 P2.33). Ignored as a WHOLE DIRECTORY rather than by filename
+# pattern: the rules above each name a shape someone had to remember, and a
+# reference solution saved as `q7.py` instead of `q7_reference_python.py`
+# would have been committed to a public repository. The directory's only
+# purpose is to hold answer keys, so nothing in it may ever be tracked.
+backend/LearnLM/references/
+
 # ── KT research corpora and checkpoints (M2 P2.12) ────────────────────────
 #
 # ASSISTments' terms require a written agreement, prohibit redistribution and

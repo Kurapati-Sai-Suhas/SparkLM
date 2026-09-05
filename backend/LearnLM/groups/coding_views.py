@@ -10,7 +10,7 @@ from django.db.models import (
     Case, Count, Exists, F, Func, IntegerField, Max, OuterRef, Subquery, Value,
     When,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Floor
 from django.utils import timezone
 
 from rest_framework.views import APIView
@@ -128,6 +128,35 @@ def _servable_question(problem_id):
 #: the evidence to tune it. Revisit when P2.7e and real usage telemetry exist.
 FAILED_QUESTION_COOLDOWN = timedelta(hours=24)
 
+#: Width of one difficulty tier, for trust-aware exposure (M2 P2.31).
+#:
+#: NOT a new tuning knob. It is the spacing of the bank's own difficulty
+#: ladder — `reseed_generation.DIFFICULTY_BANDS` is
+#: {1000: easy, 1300: medium, 1600: hard}, and 983/409/395 of the servable
+#: questions sit exactly on those three rungs. Two questions within 300 Elo of
+#: each other are on the same or adjacent rung and are, for exposure purposes,
+#: comparably hard.
+#:
+#: Why a band at all, rather than preferring trust on an exact-difficulty tie:
+#: it would have accomplished almost nothing. Five of the six verified
+#: questions sit at 1000 and 17 of 20 learners sit at the 1200 default, so
+#: their |difficulty - elo| is 200 while 983 unverified questions at 1300
+#: score 100. Trust would have lost key 1 every time and never been consulted.
+EXPOSURE_ELO_BAND = 300.0
+
+
+def _difficulty_band(elo_diff_expression):
+    """
+    `elo_diff` bucketed into tiers of `EXPOSURE_ELO_BAND`.
+
+    Integer division, so the result is monotonic non-decreasing in elo_diff.
+    That monotonicity is the whole safety argument for the ordering below:
+    `test_untrusted_ordering_is_unchanged_by_the_new_policy` pins it, and
+    `test_the_exact_difficulty_key_still_separates_questions_in_one_band`
+    catches the mutant where the band is left to stand alone.
+    """
+    return Floor(elo_diff_expression / Value(EXPOSURE_ELO_BAND))
+
 
 def _candidate_questions(user, topic_name=None, now=None):
     """
@@ -219,20 +248,61 @@ def _select_question(user, topic_name, target_elo, now=None):
     """
     The single next question for `user` in `topic_name`, or None (M2 P2.8a).
 
-    The whole P2.8a ordering in one place so both routing branches and every
-    test go through the same code rather than two hand-synchronised copies.
+    The whole ordering in one place so both routing branches and every test go
+    through the same code rather than two hand-synchronised copies.
+
+    ── Trust-aware exposure (M2 P2.31) ─────────────────────────────────────
+
+    The recommender was trust-blind: `_servable_questions()` filters on
+    deliverability, and none of the five ordering keys mentioned trust. Six
+    verified questions against 1,788 servable ones is 0.336% of the pool, so
+    across the 218 recommendations ever logged the expected number landing on
+    verified content was 0.73. Observed: zero. No adaptive-eligible submission
+    has ever existed, so Traffic Cop has never received a trustworthy outcome
+    and cannot be evaluated. That is the loop this key exists to start.
+
+    Trust enters as an ORDERING TERM, never a filter — the same shape as
+    `in_cooldown`, and for the same reason. A trust FILTER would cut the
+    candidate set from 1,788 to 6 and collapse the product; an ordering term
+    cannot empty it, so the fallback to unverified content is structural
+    rather than a guard someone has to remember.
+
+    ── Why it cannot distort difficulty ────────────────────────────────────
+
+    Key 1 is the difficulty BAND and key 3 is the exact difference, so for any
+    two questions of EQUAL trust the pair (band, diff) orders exactly as diff
+    alone did — `floor(d / 300)` is monotonic in d. The unverified-only
+    ordering is therefore unchanged, provably and by test. The single
+    behavioural difference is that a verified question overtakes an unverified
+    one when both are already in the same difficulty band.
+
+    Trust is read from `is_adaptive_eligible`, the existing definition. This
+    function does not re-derive, widen, or cache it, and writes nothing.
     """
     return (
         _candidate_questions(user, topic_name=topic_name, now=now)
         .annotate(
             elo_diff=Func(F("base_difficulty") - target_elo, function="ABS"),
         )
+        .annotate(
+            elo_band=_difficulty_band(F("elo_diff")),
+            # 0 sorts before 1, so ascending order puts trusted first. Named
+            # for the value that sorts LAST to keep the direction obvious at
+            # the call site.
+            untrusted=Case(
+                When(Question.adaptive_eligible_q(), then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            ),
+        )
         .order_by(
-            "elo_diff",                              # 1. nearest difficulty
-            "in_cooldown",                           # 2. not recently failed
-            "attempt_count",                         # 3. least seen
-            F("last_attempt_at").asc(nulls_first=True),  # 4. longest ago / never
-            "id",                                    # 5. TOTAL order
+            "elo_band",                              # 1. difficulty tier
+            "untrusted",                             # 2. verified first (P2.31)
+            "elo_diff",                              # 3. nearest difficulty
+            "in_cooldown",                           # 4. not recently failed
+            "attempt_count",                         # 5. least seen
+            F("last_attempt_at").asc(nulls_first=True),  # 6. longest ago / never
+            "id",                                    # 7. TOTAL order
         )
         .first()
     )
@@ -741,6 +811,11 @@ class NextProblemView(APIView):
             # ROUTING_POLICY_VERSION in hybrid_router.py when routing
             # behaviour changes — this cannot be backfilled.
             policy_version=ROUTING_POLICY_VERSION,
+            # M2 P2.31: was the question we actually served trusted? Read from
+            # the same property the submission path freezes, at the moment of
+            # exposure, so the answer describes what the learner was shown
+            # rather than what the question later became.
+            served_adaptive_eligible=question.is_adaptive_eligible,
         )
 
         # The AI test-case fallback that used to live here is GONE (M2 P2.5).
@@ -803,10 +878,16 @@ class NextProblemView(APIView):
             # key. Grading data never leaves the server.
             "sample_case": self._sample_case(question),
             "advanced_xai": advanced_data,
-            # M2 P2.25. Serving filters on deliverability, not trust, so a
+            # M2 P2.25. Serving still FILTERS on deliverability only, so a
             # served question may be unverified. Reported rather than hidden:
             # `servable: true` beside `adaptive_eligible: false` is the whole
-            # point. Read from the question; changes nothing about selection.
+            # point.
+            #
+            # P2.31 update: selection now PREFERS trusted questions within a
+            # difficulty band, so this is more often true than it was — but
+            # preference is not a guarantee, and the badge must keep telling
+            # the learner what they actually got. Read from the question; this
+            # line still influences nothing.
             "trust": question.trust_summary(),
         })
     

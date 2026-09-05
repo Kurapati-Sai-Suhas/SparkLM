@@ -110,6 +110,24 @@ class Command(BaseCommand):
                 write(f"  {route:<34} {count}")
         write("")
 
+        write("Exposure (M2 P2.31)")
+        write(f"  trusted content served              {census.trusted_exposures}")
+        write(f"  unverified content served          {census.untrusted_exposures}")
+        write(f"  before instrumentation (unknown)   "
+              f"{census.exposures_before_instrumentation}")
+        write(f"  trusted exposure rate              "
+              f"{census.trusted_exposure_rate * 100:.2f}%  "
+              f"(of instrumented rows only)")
+        write(f"  learners reached by trusted        "
+              f"{census.learners_reached_by_trusted_content}")
+        write(f"  trusted questions never exposed    "
+              f"{census.trusted_questions_never_exposed}"
+              f" of {census.oracle_verified_questions}")
+        write("")
+        write("  'unknown' is not 'untrusted'. Those rows were served before")
+        write("  the field existed and are never folded into either bucket.")
+        write("")
+
         write("Policy attribution")
         for version, count in census.policy_versions.items():
             write(f"  {version:<34} {count}")

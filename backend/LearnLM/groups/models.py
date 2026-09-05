@@ -1,6 +1,7 @@
 import hashlib
 
 from django.db import DEFAULT_DB_ALIAS, models
+from django.db.models import Q
 from django.contrib.auth.models import AbstractUser
 from datetime import timedelta, timezone
 from django.conf import settings
@@ -417,6 +418,26 @@ class Question(models.Model):
         max_length=20, choices=TRUST_CHOICES, default=TRUST_UNVERIFIED
     )
 
+    @classmethod
+    def adaptive_eligible_q(cls):
+        """
+        `is_adaptive_eligible` as a queryset predicate (M2 P2.31).
+
+        The property below cannot be used in a query — it is Python, not a
+        column — so the trust-aware exposure ordering needed the same rule in
+        SQL. Restating it there would have created a SECOND definition of
+        adaptive eligibility, and a later change to one would silently leave
+        the other behind: the recommender would prefer a question the
+        submission path did not consider trusted, or the reverse.
+
+        So the rule lives here once, and the property is expressed in terms of
+        it. `test_the_orm_predicate_and_the_property_agree` checks the two
+        against every status × trust_state combination rather than trusting
+        that they look alike.
+        """
+        return Q(status=cls.STATUS_PUBLISHED,
+                 trust_state=cls.TRUST_ORACLE_VERIFIED)
+
     @property
     def is_adaptive_eligible(self):
         """
@@ -424,6 +445,10 @@ class Question(models.Model):
         model. Read at submission time and FROZEN onto the row — never
         recomputed, so verifying a question later cannot retroactively turn
         past evidence into trusted evidence.
+
+        Unchanged in meaning by P2.31: the comparison now reads its two
+        constants through `adaptive_eligible_q` so the ORM and Python answers
+        cannot drift, but the rule is the same one it has always been.
         """
         return (
             self.status == self.STATUS_PUBLISHED
@@ -1099,6 +1124,23 @@ class RecommendationLog(models.Model):
     # Nullable: the 177 rows that predate this stay valid, and a null means
     # "before policy versioning" rather than "unknown policy".
     policy_version = models.CharField(max_length=32, null=True, blank=True)
+
+    # Whether the question SERVED here was adaptive-eligible (M2 P2.31).
+    #
+    # Frozen at exposure time, for the same reason `CodeSubmission.
+    # adaptive_eligible` is frozen at submission time: trust changes, and a
+    # derived answer would silently rewrite history. Deriving this at read
+    # time from the question's CURRENT trust_state would mean that verifying
+    # a question tomorrow retroactively converts every past impression of it
+    # into a "trusted exposure" — which is exactly the reclassification the
+    # readiness report exists to prevent.
+    #
+    # Nullable, and null means "served before exposure instrumentation
+    # existed", NOT "untrusted". The 218 rows that predate this stay valid and
+    # stay uncounted; `routing_readiness` reports them as unknown rather than
+    # folding them into either bucket. Same convention as `policy_version`
+    # above, for the same reason.
+    served_adaptive_eligible = models.BooleanField(null=True, blank=True)
 
     class Meta:
         indexes = [

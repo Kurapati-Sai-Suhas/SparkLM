@@ -225,6 +225,14 @@ class RoutingCensus:
     policy_versions: dict = field(default_factory=dict)
     decisions_without_policy_version: int = 0
 
+    # Exposure (M2 P2.31)
+    trusted_exposures: int = 0
+    untrusted_exposures: int = 0
+    exposures_before_instrumentation: int = 0
+    trusted_exposure_rate: float = 0.0
+    learners_reached_by_trusted_content: int = 0
+    trusted_questions_never_exposed: int = 0
+
     # Outcome balance
     label_positive: int = 0
     label_negative: int = 0
@@ -248,8 +256,7 @@ def collect_census():
 
     census.questions_total = Question.objects.count()
     census.oracle_verified_questions = Question.objects.filter(
-        status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED).count()
+        Question.adaptive_eligible_q()).count()
     census.servable_questions = _servable_questions().count()
     census.trusted_share_of_servable = _ratio(
         census.oracle_verified_questions, census.servable_questions)
@@ -285,6 +292,35 @@ def collect_census():
     census.policy_versions = _tally(all_decisions(), "policy_version")
     census.decisions_without_policy_version = all_decisions().filter(
         policy_version__isnull=True).count()
+
+    # ── Exposure (M2 P2.31) ──────────────────────────────────────────
+    # Three buckets, not two. A null is "served before the field existed",
+    # which is a different thing from "served untrusted content" and must not
+    # be folded into either — that would reclassify 218 historical rows.
+    census.trusted_exposures = all_decisions().filter(
+        served_adaptive_eligible=True).count()
+    census.untrusted_exposures = all_decisions().filter(
+        served_adaptive_eligible=False).count()
+    census.exposures_before_instrumentation = all_decisions().filter(
+        served_adaptive_eligible__isnull=True).count()
+
+    # Rate is over INSTRUMENTED rows only. Including the unknowns in the
+    # denominator would report a falling trusted rate as an artefact of old
+    # data rather than a fact about current serving.
+    instrumented = census.trusted_exposures + census.untrusted_exposures
+    census.trusted_exposure_rate = _ratio(census.trusted_exposures,
+                                          instrumented)
+
+    census.learners_reached_by_trusted_content = (
+        all_decisions().filter(served_adaptive_eligible=True)
+        .values("user").distinct().count())
+
+    exposed = set(all_decisions().filter(served_adaptive_eligible=True)
+                  .values_list("problem_id", flat=True))
+    trusted_ids = set(Question.objects.filter(Question.adaptive_eligible_q())
+                      .values_list("id", flat=True))
+    census.trusted_questions_never_exposed = len(
+        trusted_ids - {_as_question_id(p) for p in exposed})
 
     # ── Outcome balance, over the TRUSTWORTHY set only ───────────────
     # Balance of a contaminated set is not a property worth reporting: it

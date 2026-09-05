@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from common import languages
 from common.throttling import ClientIPScopedRateThrottle
-from groups import execution_contract
+from groups import execution_contract, language_readiness
 
 # Import Models
 from .models import (
@@ -538,6 +538,19 @@ class CodeSubmitView(APIView):
                 status=409,
             )
 
+        # NO language gate here, deliberately (M2 P2.35).
+        #
+        # The first version of this milestone refused a submission whose
+        # language failed `language_readiness`. That judged the learner by the
+        # STARTER: readiness describes the code the platform HANDS OUT, and
+        # what actually runs is the code the learner wrote. A C++ learner who
+        # supplies a complete program with `main` is entitled to be graded
+        # even though the shipped starter has none, and 28 existing tests —
+        # questions that carry no boilerplate at all — said so immediately.
+        #
+        # Readiness belongs where the language is CHOSEN, not where code is
+        # submitted, so it is reported by `NextProblemView` instead.
+
         # The runner is resolved from module globals at request time, so
         # the test seam (monkeypatching coding_views._run_on_judge0) keeps
         # working across the service boundary.
@@ -889,6 +902,18 @@ class NextProblemView(APIView):
             # the learner what they actually got. Read from the question; this
             # line still influences nothing.
             "trust": question.trust_summary(),
+            # Which languages this question can actually be attempted in
+            # (M2 P2.35). Reported, never enforced here: the client uses it to
+            # offer languages that work instead of listing all five and
+            # letting a learner discover that the C++ starter has no main().
+            #
+            # `blocked` carries the reason for each refusal rather than just
+            # omitting the language, because a silently shortened list is
+            # indistinguishable from a language the platform dropped.
+            "languages": {
+                "ready": language_readiness.ready_languages(question),
+                "blocked": language_readiness.blocked_languages(question),
+            },
         })
     
 

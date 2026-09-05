@@ -76,7 +76,12 @@ def make_question(topic, question_id, *, difficulty=1300.0, verified=False,
                 else Question.STATUS_DRAFT),
         trust_state=(Question.TRUST_ORACLE_VERIFIED if verified
                      else Question.TRUST_UNVERIFIED),
-        boilerplate_code={"python": "def f(): pass\n"},
+        # A realistic starter: the harness instantiates `Solution`, so a bare
+        # function is not something any real question ships. P2.35 made the
+        # readiness rule check for it, which this fixture previously failed.
+        boilerplate_code={"python": "class Solution:\n"
+                                    "    def solve(self, n: int) -> int:\n"
+                                    "        pass\n"},
         hidden_test_cases=([{"stdin": "1", "expected_output": "1"}]
                            if servable else []),
         hidden_wrapper_code={}, execution_contract_version="v1")
@@ -469,10 +474,19 @@ def test_the_report_does_not_execute_boilerplate_to_decide():
     A read-only report must not run repository content to choose what to
     print. The check is AST-only.
     """
+    from groups import language_readiness
+
     source = inspect.getsource(tc)
     for verb in ("exec(", "eval(", "compile("):
         assert verb not in source, verb
-    assert "ast.parse" in source
+
+    # P2.35 moved the rule itself into `language_readiness` so the serving
+    # gate and this report cannot disagree. The no-execution property has to
+    # be asserted where the analysis now lives, not where it used to.
+    rule = inspect.getsource(language_readiness)
+    for verb in ("exec(", "eval("):
+        assert verb not in rule, verb
+    assert "ast.parse" in rule
 
 
 @pytest.mark.django_db

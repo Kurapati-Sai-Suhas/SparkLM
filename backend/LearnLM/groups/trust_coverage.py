@@ -45,8 +45,6 @@ whether a question is well-posed, canonical, or worth an operator's time.
 It is a shortlist to review, never a decision. The operator picks.
 """
 
-import ast
-import builtins
 from dataclasses import asdict, dataclass, field
 
 from django.db.models import Count
@@ -164,43 +162,17 @@ def _reachable(difficulty, target_elo):
     return abs(float(difficulty) - target_elo) < EXPOSURE_ELO_BAND
 
 
-#: Structural types a signature can declare that NOTHING deserializes.
-#:
-#: The v1/v2 harness reads one stdin line per parameter and parses it with
-#: `_sparklm_parse`, which splits on whitespace and coerces tokens to
-#: int/float/bool/str. There is no tree or linked-list builder anywhere in the
-#: contract layer — `grep TreeNode groups/execution_contract.py` returns
-#: nothing — so a signature declaring one receives a STRING like '[2,1,3]'.
-#:
-#: q98 Validate Binary Search Tree is the case that surfaced this: it was the
-#: top-ranked candidate in this very report until the ranking learned to check.
-STRUCTURAL_TYPES = frozenset({"TreeNode", "ListNode", "Node"})
 
-#: What the harness makes available to user code at definition time: nothing
-#: beyond builtins. It emits no imports, so an annotation naming `Optional`,
-#: `List` or `TreeNode` raises NameError before the learner's first line runs.
-_HARNESS_PROVIDES = frozenset(dir(builtins))
-
-
-def _identifiers(text):
+def harness_blocker(python_boilerplate, language="python"):
     """
-    Bare identifiers inside a forward-reference annotation string.
+    A provable reason this starter cannot execute, or None.
 
-    `'Optional[TreeNode]'` yields both names. Parsed rather than regexed so a
-    quoted annotation is read the same way an unquoted one is; anything that
-    does not parse yields nothing, because a report should not guess.
-    """
-    try:
-        parsed = ast.parse(text, mode="eval")
-    except SyntaxError:
-        return set()
-    return {node.id for node in ast.walk(parsed)
-            if isinstance(node, ast.Name)}
-
-
-def harness_blocker(python_boilerplate):
-    """
-    A PROVABLE reason this question cannot execute as declared, or None.
+    Delegates to `language_readiness.assess_source`, which is the ONE
+    definition of this predicate (M2 P2.35). This module owned the first
+    version, for Python only; the serving gate needed the same judgement per
+    language, and two copies of "can this run" would have drifted the moment
+    either grew a case. The docstring below records what that rule decides
+    and what it deliberately cannot.
 
     STATIC analysis. Determining this by running the boilerplate would mean a
     read-only report executing repository content to decide what to print,
@@ -225,57 +197,10 @@ def harness_blocker(python_boilerplate):
     calling convention, which is the drift this codebase repeatedly warns
     about. So this check proves what it can and the report says so plainly.
     """
-    source = (python_boilerplate or "").strip()
-    if not source:
-        return "no python boilerplate"
+    from groups import language_readiness
 
-    try:
-        tree = ast.parse(source)
-    except SyntaxError as exc:
-        return f"boilerplate does not parse ({exc.msg})"
-
-    defined = {node.name for node in ast.walk(tree)
-               if isinstance(node, (ast.ClassDef, ast.FunctionDef))}
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            for alias in node.names:
-                imported.add(alias.asname or alias.name.split(".")[0])
-
-    names = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef):
-            continue
-        annotations = [a.annotation for a in node.args.args if a.annotation]
-        if node.returns:
-            annotations.append(node.returns)
-        for annotation in annotations:
-            for child in ast.walk(annotation):
-                if isinstance(child, ast.Name):
-                    names.add(child.id)
-                elif isinstance(child, ast.Constant) and isinstance(
-                        child.value, str):
-                    # A FORWARD REFERENCE: `root: 'TreeNode'`. Quoting is not
-                    # a workaround — the name is still undefined, the string
-                    # just defers the NameError from definition time to
-                    # whenever something resolves it, and nothing here ever
-                    # does. q742 Closest Leaf in a Binary Tree declares
-                    # exactly this and slipped past the first version of this
-                    # check, which only looked at `ast.Name`.
-                    names.update(
-                        part for part in _identifiers(child.value))
-
-    structural = sorted(names & STRUCTURAL_TYPES)
-    if structural:
-        return (f"signature declares {', '.join(structural)}, which no "
-                f"contract deserializes — the harness would pass a string")
-
-    undefined = sorted(names - _HARNESS_PROVIDES - defined - imported)
-    if undefined:
-        return (f"annotation names {', '.join(undefined)}, which the harness "
-                f"never defines — NameError before the learner's first line")
-
-    return None
+    result = language_readiness.assess_source(python_boilerplate, language)
+    return None if result.ready else result.reason
 
 
 def rank_candidates(topic_name, target_elo, limit=3):

@@ -47,7 +47,7 @@ def question(transactional_db):
         # mastery move exactly once, which only happens on the trusted path
         # (M2 P2.7c).
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED,
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python",
     )
     cache.clear()
 

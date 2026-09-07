@@ -76,6 +76,7 @@ def make_question(topic, question_id, *, difficulty=1300.0, verified=False,
                 else Question.STATUS_DRAFT),
         trust_state=(Question.TRUST_ORACLE_VERIFIED if verified
                      else Question.TRUST_UNVERIFIED),
+        verified_language=("python" if verified else None),
         # A realistic starter: the harness instantiates `Solution`, so a bare
         # function is not something any real question ships. P2.35 made the
         # readiness rule check for it, which this fixture previously failed.
@@ -129,7 +130,7 @@ def test_trust_state_alone_does_not_count_either(root_topic):
     """
     question = make_question(root_topic, 9020)
     Question.objects.filter(pk=question.pk).update(
-        status="BLOCKED", trust_state=Question.TRUST_ORACLE_VERIFIED)
+        status="BLOCKED", trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
 
     assert coverage_for(root_topic.name).trusted == 0
 
@@ -589,7 +590,7 @@ def test_no_historical_row_is_reclassified_by_promoting_a_question(
     before = rr.collect_census()
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     after = rr.collect_census()
 
     assert before.decisions_trustworthy == after.decisions_trustworthy == 0

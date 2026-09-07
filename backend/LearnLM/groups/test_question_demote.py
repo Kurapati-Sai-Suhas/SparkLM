@@ -53,7 +53,7 @@ def make_question(topic, qid=7700, **overrides):
         hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
         hidden_wrapper_code={}, execution_contract_version="v1",
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     fields.update(overrides)
     return Question.objects.create(**fields)
 
@@ -192,14 +192,29 @@ def test_status_is_never_written(verified, operator):
     assert verified.status == Question.STATUS_PUBLISHED
 
 
-def test_the_command_writes_exactly_one_update_field():
+def test_the_command_writes_only_the_trust_fields():
+    """
+    The narrow-write property, unchanged in intent.
+
+    It was "exactly one field" until P2.36 added `verified_language`. The two
+    are ONE fact — a trust state and the language it speaks for — and the
+    database CHECK `question_oracle_verified_requires_language` means they
+    cannot legally be written apart. What the test still forbids is what it
+    always forbade: demotion carrying an unrelated in-memory edit to content
+    or hidden tests into the database alongside the trust change.
+    """
     tree = ast.parse(inspect.getsource(question_demote))
     saves = [n for n in ast.walk(tree)
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
              and n.func.attr == "save"]
     assert len(saves) == 1
+
     keywords = {k.arg: k for k in saves[0].keywords}
-    assert [e.id for e in keywords["update_fields"].value.elts] == ["TRUST_FIELD"]
+    written = [
+        element.id if isinstance(element, ast.Name) else element.value
+        for element in keywords["update_fields"].value.elts
+    ]
+    assert written == ["TRUST_FIELD", "verified_language"]
     assert question_demote.TRUST_FIELD == "trust_state"
 
 
@@ -307,8 +322,16 @@ def test_it_runs_under_the_trust_owning_role_only():
     assert ops.ALLOWED_DEMOTION_ROLES == frozenset({"learnlm_promote_rw"})
 
 
-def test_the_probe_asks_for_trust_state_only():
-    assert ops.DEMOTION_PROBE == (("groups_question", "trust_state", "UPDATE"),)
+def test_the_probe_asks_for_the_trust_columns_only():
+    """
+    Two columns since P2.36, not one: demotion clears `verified_language` in
+    the same statement, so a role holding only `trust_state` would pass the
+    gate and fail mid-write. Still nothing beyond the trust fact itself.
+    """
+    assert ops.DEMOTION_PROBE == (
+        ("groups_question", "trust_state", "UPDATE"),
+        ("groups_question", "verified_language", "UPDATE"),
+    )
 
 
 @pytest.mark.parametrize("column", [

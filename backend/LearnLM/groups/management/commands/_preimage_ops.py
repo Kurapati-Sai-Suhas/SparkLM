@@ -533,7 +533,13 @@ ACTION_RECORDING_FORBIDDEN = (
 #: something that HAPPENED to that approval. A demotion is not an event on the
 #: approval — the approval remains exactly what it was, a record that a person
 #: once approved a specific artifact. Withdrawing trust must not rewrite it.
-DEMOTION_PROBE = (("groups_question", "trust_state", "UPDATE"),)
+DEMOTION_PROBE = (
+    ("groups_question", "trust_state", "UPDATE"),
+    # Demotion clears the language marker in the same statement (P2.36). A
+    # role holding only `trust_state` would pass this gate and then fail
+    # mid-write; probing both makes the refusal happen before the lock.
+    ("groups_question", "verified_language", "UPDATE"),
+)
 
 #: The same role, and therefore the same must-not-touch set as promotion.
 #: Reused rather than restated: two lists that agree today are two lists that
@@ -543,6 +549,10 @@ ALLOWED_DEMOTION_ROLES = ALLOWED_PROMOTION_ROLES
 
 PROMOTION_PROBE = (
     ("groups_question", "trust_state", "UPDATE"),
+    # Promotion writes the language marker alongside the trust state, and a
+    # database CHECK makes ORACLE_VERIFIED without one impossible — so a role
+    # missing this column cannot promote at all (P2.36).
+    ("groups_question", "verified_language", "UPDATE"),
     ("groups_questionapproval", "promoted_at", "UPDATE"),
     ("groups_questionapproval", "promoted_by_id", "UPDATE"),
 )
@@ -638,7 +648,13 @@ PROMOTION_ROLE_GRANTS = (
     "GRANT CONNECT ON DATABASE {database} TO {role}",
     "GRANT USAGE ON SCHEMA public TO {role}",
     "GRANT SELECT ON groups_question TO {role}",
-    "GRANT UPDATE (trust_state) ON groups_question TO {role}",
+    # `verified_language` joined `trust_state` in P2.36 — promotion writes
+    # both in ONE statement, and a database CHECK makes ORACLE_VERIFIED
+    # without a language impossible, so a grant covering only `trust_state`
+    # cannot promote anything at all. Column-scoped as before: the promoter
+    # still cannot touch content, hidden tests or status.
+    "GRANT UPDATE (trust_state, verified_language) ON groups_question "
+    "TO {role}",
     "GRANT SELECT ON groups_referencesolution TO {role}",
     "GRANT SELECT ON groups_oracleexecution TO {role}",
     "GRANT SELECT ON groups_questionapproval TO {role}",

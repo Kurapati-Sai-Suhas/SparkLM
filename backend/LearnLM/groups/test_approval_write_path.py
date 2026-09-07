@@ -260,8 +260,12 @@ def test_the_probes_name_what_each_command_writes():
     # for a privilege nothing uses and would have let a promoter publish
     # (M2 P2.7h-7). The promotion stamp columns are here for the opposite
     # reason — the command writes them and the old probe never named them.
+    # `verified_language` joined in P2.36 for the same "the command writes it"
+    # reason: promotion sets it beside `trust_state`, and a CHECK constraint
+    # makes ORACLE_VERIFIED without one impossible.
     assert set(ops.PROMOTION_PROBE) == {
         ("groups_question", "trust_state", "UPDATE"),
+        ("groups_question", "verified_language", "UPDATE"),
         ("groups_questionapproval", "promoted_at", "UPDATE"),
         ("groups_questionapproval", "promoted_by_id", "UPDATE")}
 

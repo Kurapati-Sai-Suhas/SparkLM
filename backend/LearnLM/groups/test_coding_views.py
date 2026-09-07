@@ -75,7 +75,7 @@ def question(db):
         # trust boundary that path only runs for a PUBLISHED + ORACLE_VERIFIED
         # question. The default is DRAFT + UNVERIFIED, which is the point.
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED,
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python",
     )
 
 

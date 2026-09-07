@@ -233,6 +233,12 @@ class RoutingCensus:
     learners_reached_by_trusted_content: int = 0
     trusted_questions_never_exposed: int = 0
 
+    #: Trust is question-level with a single verified-language marker
+    #: (M2 P2.36), so "6 verified questions" does not mean six questions
+    #: usable from any language. Reported by language so no reader can infer
+    #: multilingual trust the oracle never demonstrated.
+    verified_by_language: dict = field(default_factory=dict)
+
     # Outcome balance
     label_positive: int = 0
     label_negative: int = 0
@@ -257,6 +263,9 @@ def collect_census():
     census.questions_total = Question.objects.count()
     census.oracle_verified_questions = Question.objects.filter(
         Question.adaptive_eligible_q()).count()
+    census.verified_by_language = _tally(
+        Question.objects.filter(Question.adaptive_eligible_q()),
+        "verified_language")
     census.servable_questions = _servable_questions().count()
     census.trusted_share_of_servable = _ratio(
         census.oracle_verified_questions, census.servable_questions)

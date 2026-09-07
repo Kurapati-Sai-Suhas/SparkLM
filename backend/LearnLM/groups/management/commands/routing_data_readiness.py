@@ -79,6 +79,12 @@ class Command(BaseCommand):
         write(f"  technically servable               {census.servable_questions}")
         write(f"  trusted share of servable pool     "
               f"{census.trusted_share_of_servable * 100:.3f}%")
+        for language, count in sorted(census.verified_by_language.items()):
+            write(f"    verified in {language:<20} {count}")
+        write("")
+        write("  Trust is question-level with ONE verified language (P2.36).")
+        write("  A question verified in Python is not adaptive-eligible for a")
+        write("  submission in any other language.")
         write("")
 
         write("Interactions")

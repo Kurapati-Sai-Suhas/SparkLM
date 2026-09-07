@@ -620,11 +620,17 @@ class ProgressionService:
                 user=user, question=question, status='accepted'
             ).exists()
 
-            # Decided HERE, from the question's trust state, and frozen onto
-            # the row (M2 P2.7c). Enforced in the service rather than the view
-            # so any future caller inherits it — the views are a second layer,
-            # not the only one.
-            adaptive_eligible = question.is_adaptive_eligible
+            # Decided HERE, from the question's trust state AND the language
+            # actually submitted, and frozen onto the row (M2 P2.7c, extended
+            # by P2.36). Enforced in the service rather than the view so any
+            # future caller inherits it — the views are a second layer, not
+            # the only one.
+            #
+            # The language term is what stops a Python-verified question from
+            # teaching the learner model through a C++ submission. The oracle
+            # ran one reference in one language; that is the only language its
+            # answer key demonstrably grades correctly.
+            adaptive_eligible = question.adaptive_eligible_for(language)
 
             submission = CodeSubmission.objects.create(
                 user=user,

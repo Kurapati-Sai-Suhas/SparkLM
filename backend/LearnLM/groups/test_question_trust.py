@@ -802,7 +802,7 @@ class ApprovalModelTests(TrustTestCase):
 
         AST-based, not a text scan. A first version searched for the string
         `trust_state=` and matched the pre-flight's own QUERY FILTER —
-        `filter(status="DRAFT", trust_state="ORACLE_VERIFIED")` — which is how
+        `filter(status="DRAFT", trust_state="ORACLE_VERIFIED", verified_language="python")` — which is how
         the check READS the rows it refuses to touch. A guard that cannot tell
         a filter from an assignment would forbid the migration from looking at
         the thing it exists to look at.
@@ -845,10 +845,18 @@ class ApprovalModelTests(TrustTestCase):
         self.question.save(update_fields=["status", "trust_state"])
 
     def test_blocked_plus_oracle_verified_remains_legal(self):
-        """A proven answer key withdrawn for an unrelated reason."""
+        """
+        A proven answer key withdrawn for an unrelated reason.
+
+        The language marker rides with the trust state (P2.36): a second CHECK
+        makes ORACLE_VERIFIED without one unrepresentable, so this pairing is
+        still legal but must now say which language the proof covers.
+        """
         self.question.status = Question.STATUS_BLOCKED
         self.question.trust_state = Question.TRUST_ORACLE_VERIFIED
-        self.question.save(update_fields=["status", "trust_state"])
+        self.question.verified_language = "python"
+        self.question.save(update_fields=["status", "trust_state",
+                                          "verified_language"])
 
 
 # ═════════════════════════════════════════════════════════════

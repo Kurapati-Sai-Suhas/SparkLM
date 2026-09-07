@@ -336,7 +336,7 @@ def test_a_published_verified_question_is_unaffected(api_client, user, topic,
     """
     question = make_question(
         topic, status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     sink = {}
     monkeypatch.setattr(coding_views, "_run_on_judge0", judge0_spy(sink))
     api_client.force_authenticate(user=user)

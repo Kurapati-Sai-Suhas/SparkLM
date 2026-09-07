@@ -64,6 +64,7 @@ def make_question(topic, question_id, *, verified):
                 else Question.STATUS_DRAFT),
         trust_state=(Question.TRUST_ORACLE_VERIFIED if verified
                      else Question.TRUST_UNVERIFIED),
+        verified_language=("python" if verified else None),
         boilerplate_code={"python": "def f(): pass\n"},
         hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
         hidden_wrapper_code={}, execution_contract_version="v1")

@@ -244,6 +244,10 @@ def test_the_promoter_cannot_read_a_password_hash(question, operator):
 def test_the_probe_names_only_what_promotion_writes():
     assert set(ops.PROMOTION_PROBE) == {
         ("groups_question", "trust_state", "UPDATE"),
+        # P2.36: promotion writes the language marker in the same statement,
+        # and a CHECK makes ORACLE_VERIFIED without one impossible, so a role
+        # lacking this column cannot promote at all.
+        ("groups_question", "verified_language", "UPDATE"),
         ("groups_questionapproval", "promoted_at", "UPDATE"),
         ("groups_questionapproval", "promoted_by_id", "UPDATE"),
     }
@@ -268,12 +272,15 @@ def test_every_question_column_is_either_written_or_forbidden():
     """No column of groups_question is left unconsidered."""
     columns = {"id", "title", "content", "base_difficulty", "topic_id",
                "hidden_test_cases", "boilerplate_code", "hidden_wrapper_code",
-               "execution_contract_version", "status", "trust_state"}
+               "execution_contract_version", "status", "trust_state",
+               "verified_language"}
     written = {column for table, column, _ in ops.PROMOTION_PROBE
                if table == "groups_question"}
     forbidden = {column for table, column, _ in ops.PROMOTION_FORBIDDEN
                  if table == "groups_question" and column}
-    assert written == {"trust_state"}
+    # Two columns, one fact (P2.36): the trust state and the language it
+    # speaks for, which a CHECK constraint makes inseparable.
+    assert written == {"trust_state", "verified_language"}
     # `id` is the primary key: it is covered by the table-level INSERT/DELETE
     # denials rather than by a column UPDATE denial.
     assert columns - written - forbidden == {"id"}
@@ -509,9 +516,16 @@ def test_promotion_writes_exactly_two_rows_and_three_columns(
     after = {field.name: getattr(question, field.name)
              for field in Question._meta.concrete_fields}
     changed = {name for name in before if before[name] != after[name]}
-    assert changed == {"trust_state"}
+    # `verified_language` joined `trust_state` in P2.36. They are ONE fact —
+    # a trust state and the language its oracle spoke for — and a database
+    # CHECK makes writing them apart impossible. The property this test
+    # guards is unchanged: promotion touches the trust columns and NOTHING
+    # else, so no content or grading-truth edit can ride along with it.
+    assert changed == {"trust_state", "verified_language"}
     assert after["trust_state"] == Question.TRUST_ORACLE_VERIFIED
     assert after["status"] == Question.STATUS_PUBLISHED
+    # Taken from the reference that was actually promoted, never a constant.
+    assert after["verified_language"] == reference.language
 
     approval.refresh_from_db()
     assert approval.promoted_at is not None
@@ -848,7 +862,7 @@ def test_a_question_moved_under_the_lock_is_not_promoted(
     """
     def interfere():
         Question.objects.filter(pk=question.pk).update(
-            trust_state=Question.TRUST_ORACLE_VERIFIED)
+            trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
 
     with pytest.raises(CommandError, match="under lock"):
         promote_with_interference(question, operator, interfere)

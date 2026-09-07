@@ -68,7 +68,7 @@ def questions(db, topic):
             hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
             hidden_wrapper_code={},
             status=Question.STATUS_PUBLISHED,
-            trust_state=Question.TRUST_ORACLE_VERIFIED,
+            trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python",
         )
         for n in range(3)
     ]

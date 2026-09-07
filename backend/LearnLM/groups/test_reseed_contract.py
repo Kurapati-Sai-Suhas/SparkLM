@@ -217,8 +217,11 @@ def test_an_unclassifiable_signature_is_refused_as_manual_review(topic,
     # DRAFT + ORACLE_VERIFIED is forbidden by a database check constraint
     # (`question_draft_cannot_be_oracle_verified`), so the only reachable
     # oracle-verified state is a published one. Both blockers are reported.
+    # `verified_language` rides with ORACLE_VERIFIED (P2.36): a second CHECK,
+    # `question_oracle_verified_requires_language`, makes the pair inseparable.
     ({"status": Question.STATUS_PUBLISHED,
-      "trust_state": Question.TRUST_ORACLE_VERIFIED}, "trust_state is"),
+      "trust_state": Question.TRUST_ORACLE_VERIFIED,
+      "verified_language": "python"}, "trust_state is"),
     ({"hidden_test_cases": [{"stdin": "1", "expected_output": "1"}]},
      "hidden test case"),
 ])

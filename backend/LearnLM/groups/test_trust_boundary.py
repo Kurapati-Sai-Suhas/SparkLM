@@ -58,12 +58,18 @@ def learner(db):
 
 
 def make(topic, status=Question.STATUS_PUBLISHED, trust=Question.TRUST_UNVERIFIED,
-         title="Q"):
+         title="Q", verified_language=None):
+    # A verified question carries the language its oracle spoke for (P2.36);
+    # the database CHECK makes ORACLE_VERIFIED without one unrepresentable.
+    # These fixtures are all Python questions and every submission below is
+    # Python, so the marker restores exactly the behaviour they assert.
+    if verified_language is None and trust == Question.TRUST_ORACLE_VERIFIED:
+        verified_language = "python"
     return Question.objects.create(
         title=title, content="c", topic=topic, base_difficulty=1200.0,
         hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
         boilerplate_code={"python": "class Solution: pass"}, hidden_wrapper_code={},
-        status=status, trust_state=trust)
+        status=status, trust_state=trust, verified_language=verified_language)
 
 
 def grade(passed=True):
@@ -180,7 +186,7 @@ def test_verifying_a_question_later_does_not_promote_past_submissions(topic, lea
     assert day1.adaptive_eligible is False
 
     Question.objects.filter(pk=q.pk).update(
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     q.refresh_from_db()
     day20, _, _ = solve(learner, q)
 

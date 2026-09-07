@@ -231,9 +231,19 @@ class Command(BaseCommand):
                     f"Nothing written.")
 
             locked.trust_state = Question.TRUST_ORACLE_VERIFIED
+            # WHICH language this verification speaks for (M2 P2.36).
+            #
+            # Taken from `reference` — the row this promotion already proved
+            # is canonical RIGHT NOW and identical to what was approved — so
+            # the marker cannot describe a different implementation than the
+            # one the oracle ran. Written in the same statement as
+            # `trust_state` because a database CHECK makes ORACLE_VERIFIED
+            # without it unrepresentable; they are one fact, not two.
+            locked.verified_language = (reference.language or "").strip().lower()
             # update_fields, so promotion cannot carry an unrelated in-memory
             # edit to content or hidden tests into the database alongside it.
-            locked.save(using=alias, update_fields=["trust_state"])
+            locked.save(using=alias,
+                        update_fields=["trust_state", "verified_language"])
 
             stamped.promoted_at = timezone.now()
             stamped.promoted_by_id = operator.pk

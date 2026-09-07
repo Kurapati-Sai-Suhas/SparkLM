@@ -56,7 +56,7 @@ def trusted_question(topic):
         hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
         hidden_wrapper_code={},
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
 
 
 @pytest.fixture
@@ -542,7 +542,7 @@ def test_only_the_orchestrator_can_persist_and_only_deliberately(learner,
         base_difficulty=1200.0, boilerplate_code={},
         hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
         hidden_wrapper_code={}, status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
 
     session = toolkit.Session(user=learner)
     toolkit.get_candidate_problems(session)
@@ -1245,7 +1245,9 @@ def test_the_routing_signal_ignores_submissions_the_trust_gate_excludes(
 # classify identically whichever path describes it.
 # ═════════════════════════════════════════════════════════════════════
 
-TRUST_KEYS = {"status", "trust_state", "adaptive_eligible", "servable"}
+TRUST_KEYS = {"status", "trust_state", "adaptive_eligible", "servable",
+              # P2.36: which language the verification speaks for.
+              "verified_language"}
 
 
 def test_a_validated_recommendation_carries_trust_metadata(

@@ -187,7 +187,7 @@ def test_pending_review_publishes_when_the_chain_is_complete(
         question, batch, reference, evidence, approval, operator):
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PENDING_REVIEW,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     question.refresh_from_db()
 
     move(question, batch, operator, Question.STATUS_PUBLISHED)
@@ -202,7 +202,7 @@ def test_a_published_question_can_be_withdrawn(question, batch, reference,
                                                evidence, approval, operator):
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     question.refresh_from_db()
 
     move(question, batch, operator, Question.STATUS_PENDING_REVIEW)
@@ -307,7 +307,7 @@ def test_publishing_an_unverified_question_is_refused(pending, batch,
 def test_publishing_without_an_approval_is_refused(pending, batch, reference,
                                                    evidence, operator):
     Question.objects.filter(pk=pending.pk).update(
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     pending.refresh_from_db()
     with pytest.raises(ops.GateFailure, match="has no approval"):
         move(pending, batch, operator, Question.STATUS_PUBLISHED)
@@ -320,7 +320,7 @@ def test_publishing_an_unpromoted_approval_is_refused(pending, batch,
     QuestionApproval.objects.filter(pk=approval.pk).update(
         promoted_at=None, promoted_by_id=None)
     Question.objects.filter(pk=pending.pk).update(
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     pending.refresh_from_db()
     with pytest.raises(ops.GateFailure, match="never been acted on"):
         move(pending, batch, operator, Question.STATUS_PUBLISHED)
@@ -333,7 +333,7 @@ def test_publishing_a_drifted_artifact_is_refused(pending, batch, reference,
     QuestionApproval.objects.filter(pk=approval.pk).update(
         artifact_digest="c" * 64)
     Question.objects.filter(pk=pending.pk).update(
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     pending.refresh_from_db()
     with pytest.raises(ops.GateFailure, match="changed since approval"):
         move(pending, batch, operator, Question.STATUS_PUBLISHED)
@@ -345,7 +345,7 @@ def test_publishing_without_oracle_evidence_is_refused(pending, batch,
                                                        approval, operator):
     OracleExecution.objects.all().delete()
     Question.objects.filter(pk=pending.pk).update(
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     pending.refresh_from_db()
     with pytest.raises(ops.GateFailure, match="no successful oracle execution"):
         move(pending, batch, operator, Question.STATUS_PUBLISHED)
@@ -631,7 +631,7 @@ def test_publication_needs_the_approval_reads(question, batch, reference,
     """The three SELECT grants the publication edge alone requires."""
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PENDING_REVIEW,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     question.refresh_from_db()
 
     without = [g for g in ops.STATUS_ROLE_GRANTS
@@ -767,7 +767,7 @@ def test_trust_moving_under_the_lock_aborts_the_transition(
     """
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PENDING_REVIEW,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     question.refresh_from_db()
 
     def interfere():
@@ -944,7 +944,7 @@ def publishable(question, reference, evidence, approval):
     """A question that has been promoted and is one edge from PUBLISHED."""
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PENDING_REVIEW,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     question.refresh_from_db()
     return question
 

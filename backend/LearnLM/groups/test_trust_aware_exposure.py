@@ -72,6 +72,7 @@ def make_question(topic, question_id, *, difficulty, verified,
                 else Question.STATUS_DRAFT),
         trust_state=(Question.TRUST_ORACLE_VERIFIED if verified
                      else Question.TRUST_UNVERIFIED),
+        verified_language=("python" if verified else None),
         boilerplate_code={"python": "def f(): pass\n"},
         hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
         hidden_wrapper_code={}, execution_contract_version="v1")
@@ -368,7 +369,12 @@ def test_the_orm_predicate_and_the_property_agree(db, topic):
             question = make_question(topic, 8200 + index * 10 + offset,
                                      difficulty=1300.0, verified=False)
             Question.objects.filter(pk=question.pk).update(
-                status=status, trust_state=trust)
+                status=status, trust_state=trust,
+                # P2.36: the CHECK requires a language whenever the row is
+                # ORACLE_VERIFIED, so the cartesian sweep must supply one.
+                verified_language=(
+                    "python" if trust == Question.TRUST_ORACLE_VERIFIED
+                    else None))
             made.append(question.pk)
 
     assert len(made) >= 3, "the state space collapsed; the test proves nothing"
@@ -411,7 +417,9 @@ def test_exposure_trust_is_frozen_at_write_time_not_derived(learner, topic):
 
     question.status = Question.STATUS_PUBLISHED
     question.trust_state = Question.TRUST_ORACLE_VERIFIED
-    question.save(update_fields=["status", "trust_state"])
+    question.verified_language = "python"
+    question.save(update_fields=["status", "trust_state",
+                                 "verified_language"])
 
     log.refresh_from_db()
     assert log.served_adaptive_eligible is False       # not True
@@ -562,7 +570,7 @@ def test_trust_summary_shape_is_unchanged(learner, topic):
     summary = question.trust_summary()
 
     assert set(summary) == {"status", "trust_state", "adaptive_eligible",
-                            "servable"}
+                            "servable", "verified_language"}
     assert summary["adaptive_eligible"] is True
     assert summary["servable"] is True
 

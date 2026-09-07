@@ -567,7 +567,7 @@ def test_a_verified_submission_still_updates_normally(topic, learner):
     question = make(topic, "Verified", 1200.0)
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     question.refresh_from_db()
     profile, _ = UserCodingProfile.objects.get_or_create(user=learner)
     before = profile.elo_rating
@@ -932,7 +932,7 @@ def test_logging_mutates_no_state(client, learner, topic, caplog):
         UserTopicMastery.objects.count(),
         Question.objects.count(),
         Question.objects.filter(
-            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+            trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python").count(),
         UserCodingProfile.objects.get(user=learner).elo_rating,
     )
 
@@ -944,7 +944,7 @@ def test_logging_mutates_no_state(client, learner, topic, caplog):
         UserTopicMastery.objects.count(),
         Question.objects.count(),
         Question.objects.filter(
-            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+            trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python").count(),
         UserCodingProfile.objects.get(user=learner).elo_rating,
     )
     assert before == after, "routing logging changed state"
@@ -1004,7 +1004,9 @@ def test_the_event_is_serializable_and_carries_no_grading_truth(
 # have verified this".
 # ═════════════════════════════════════════════════════════════════════
 
-TRUST_KEYS = {"status", "trust_state", "adaptive_eligible", "servable"}
+TRUST_KEYS = {"status", "trust_state", "adaptive_eligible", "servable",
+              # P2.36: which language the verification speaks for.
+              "verified_language"}
 
 
 def test_the_served_question_carries_trust_metadata(client, topic):
@@ -1048,7 +1050,7 @@ def test_a_verified_question_reads_as_adaptive_eligible(client, topic):
     question = make(topic, "Verified Q")
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
 
     trust = next_problem(client).json()["trust"]
 
@@ -1087,7 +1089,7 @@ def test_building_trust_metadata_mutates_nothing(client, topic):
         Question.objects.get(pk=question.pk).trust_state,
         CodeSubmission.objects.count(),
         Question.objects.filter(
-            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+            trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python").count(),
     )
 
     question.trust_summary()
@@ -1098,7 +1100,7 @@ def test_building_trust_metadata_mutates_nothing(client, topic):
         Question.objects.get(pk=question.pk).trust_state,
         CodeSubmission.objects.count(),
         Question.objects.filter(
-            trust_state=Question.TRUST_ORACLE_VERIFIED).count(),
+            trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python").count(),
     )
     assert before == after
 

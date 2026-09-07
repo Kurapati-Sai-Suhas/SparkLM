@@ -49,7 +49,12 @@ class CensusTestCase(TestCase):
                               else boilerplate),
             hidden_wrapper_code={},
             status=status or Question.STATUS_PUBLISHED,
-            trust_state=trust or Question.TRUST_UNVERIFIED)
+            trust_state=trust or Question.TRUST_UNVERIFIED,
+            # P2.36: ORACLE_VERIFIED requires the language its oracle
+            # spoke for; these fixtures are all Python questions.
+            verified_language=(
+                "python" if trust == Question.TRUST_ORACLE_VERIFIED
+                else None))
 
 
 # ═════════════════════════════════════════════════════════════

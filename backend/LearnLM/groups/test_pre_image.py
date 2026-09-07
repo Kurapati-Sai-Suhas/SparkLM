@@ -118,7 +118,7 @@ def test_the_derived_eligibility_is_recorded(batch, topic, actor):
     field to restore.
     """
     trusted = make_question(topic, 7101, status=Question.STATUS_PUBLISHED,
-                            trust_state=Question.TRUST_ORACLE_VERIFIED)
+                            trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     pre = pi.capture(batch, trusted, actor)
     assert pre.was_adaptive_eligible is True
 
@@ -741,7 +741,7 @@ def test_rollback_does_not_fabricate_a_verified_trust_state(batch, topic, actor)
     captured(batch, q, actor)
 
     remediate(q, status=Question.STATUS_PUBLISHED,
-              trust_state=Question.TRUST_ORACLE_VERIFIED)
+              trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     pi.record_action(batch, q, RemediationAction.CLASS_MANUAL_REVIEW, actor)
 
     pi.rollback(batch, actor)

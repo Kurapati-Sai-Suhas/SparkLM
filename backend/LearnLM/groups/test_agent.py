@@ -43,7 +43,8 @@ def make_question(topic, qid, *, trusted=True, title=None):
         hidden_wrapper_code={},
         status=(Question.STATUS_PUBLISHED if trusted else Question.STATUS_DRAFT),
         trust_state=(Question.TRUST_ORACLE_VERIFIED if trusted
-                     else Question.TRUST_UNVERIFIED))
+                     else Question.TRUST_UNVERIFIED),
+        verified_language=("python" if trusted else None))
 
 
 @pytest.fixture

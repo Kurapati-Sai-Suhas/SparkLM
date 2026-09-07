@@ -418,6 +418,80 @@ class Question(models.Model):
         max_length=20, choices=TRUST_CHOICES, default=TRUST_UNVERIFIED
     )
 
+    #: The language whose reference produced the current Oracle verification
+    #: (M2 P2.36 / Phase 1 M3).
+    #:
+    #: ── Why a marker and not per-language trust ─────────────────────────
+    #:
+    #: Trust stays QUESTION-level and the one-canonical-reference contract is
+    #: unchanged. This field records WHICH language that single oracle spoke,
+    #: so `trust_state == ORACLE_VERIFIED` can no longer be read as "verified
+    #: in every language the platform offers".
+    #:
+    #: The vulnerability it closes is concrete. Every production reference is
+    #: Python, `adaptive_eligible` carried no language term, and C++ is
+    #: unexecutable for all 1,788 servable questions — so a C++ submission
+    #: against a Python-verified question produced a link failure that moved
+    #: the learner's rating as a genuine attempt.
+    #:
+    #: NULL means "no current verification", not "verified in an unknown
+    #: language". A CHECK constraint makes ORACLE_VERIFIED without this field
+    #: unrepresentable, and `question_demote` clears it, so a stale value
+    #: cannot outlive the trust it described.
+    #:
+    #: FUTURE: per-language references with per-language trust state. The
+    #: schema already permits one active ReferenceSolution per language; this
+    #: field becomes redundant the day that lands, and is deliberately shaped
+    #: to be dropped rather than migrated. See docs/ARCHITECTURE_TRUST.md.
+    verified_language = models.CharField(
+        max_length=20, null=True, blank=True,
+        help_text="Language of the reference that produced the current "
+                  "ORACLE_VERIFIED state. Null unless verified.")
+
+    def adaptive_eligible_for(self, language):
+        """
+        Whether a submission in `language` may teach the learner model.
+
+        THE canonical predicate (M2 P2.36). `is_adaptive_eligible` answers the
+        question-level half and is kept for reporting and exposure, where no
+        submission language exists; this one is what gates rating:
+
+          1. PUBLISHED          — the existing status gate
+          2. ORACLE_VERIFIED    — the existing trust gate
+          3. verified_language == the submission language, canonicalised
+
+        Aliases are canonicalised through `common.languages`, so "js" and
+        "javascript" cannot disagree.
+
+        ── Why language READINESS is deliberately not a fourth term ────────
+
+        Readiness describes the starter the platform hands out. What was
+        graded is the code the learner wrote. A learner who replaces a starter
+        with a broken annotation by working Python, against a Python-verified
+        question, has produced a genuinely trustworthy outcome, and refusing
+        to let it move their rating would punish them for a content defect
+        they routed around.
+
+        It is also redundant for the case it looks like it protects: a
+        question verified in language L had a reference EXECUTE in L through
+        Judge0, so L demonstrably runs for it. The C++ vulnerability this
+        milestone closes is already closed by (3) alone — a C++ submission
+        against a Python-verified question fails the language match whatever
+        readiness says.
+
+        Readiness belongs where the language is chosen, and that is where
+        P2.35 put it: reported by `NextProblemView`, never used to grade.
+        """
+        from common import languages
+
+        if not self.is_adaptive_eligible:
+            return False
+
+        verified = languages.canonical(self.verified_language)
+        submitted = languages.canonical(language)
+        return (verified is not None and submitted is not None
+                and verified == submitted)
+
     @classmethod
     def adaptive_eligible_q(cls):
         """
@@ -495,6 +569,15 @@ class Question(models.Model):
             "trust_state": self.trust_state,
             "adaptive_eligible": self.is_adaptive_eligible,
             "servable": _servable_questions().filter(pk=self.pk).exists(),
+            # WHICH language that verification covers (M2 P2.36). Without it
+            # `adaptive_eligible: true` reads as "verified for whatever you
+            # write in", which is exactly the claim the oracle never made:
+            # one reference ran, in one language.
+            #
+            # Null when unverified. The existing keys are unchanged, so the
+            # frontend's Verified / Practice-mode split keeps working while
+            # it decides what to do with the narrower fact.
+            "verified_language": self.verified_language,
         }
 
     # Which execution harness grades this question (M2 P2.6). Defaults to "v1"
@@ -535,6 +618,24 @@ class Question(models.Model):
                     & models.Q(trust_state="ORACLE_VERIFIED")
                 ),
                 name="question_draft_cannot_be_oracle_verified",
+            ),
+            # ORACLE_VERIFIED requires a verified_language (M2 P2.36).
+            #
+            # At the database, not only in the promotion command, for the same
+            # reason the constraint above exists: `trust_state` is the field
+            # that decides whether a wrong answer key can corrupt a learner
+            # model, and "the writer sets it" is a weaker guarantee than
+            # "the row cannot exist otherwise". A verified question whose
+            # language is unknown would be read by the eligibility predicate
+            # as trusted-in-nothing, which is safe — but it would also be a
+            # silent hole in the audit trail.
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(trust_state="ORACLE_VERIFIED")
+                    | (models.Q(verified_language__isnull=False)
+                       & ~models.Q(verified_language=""))
+                ),
+                name="question_oracle_verified_requires_language",
             ),
         ]
 

@@ -68,6 +68,12 @@ def make_stub(topic, question_id=9850, **overrides):
         hidden_test_cases=[], hidden_wrapper_code={},
         execution_contract_version="v1")
     fields.update(overrides)
+    # P2.36: a verified question must name the language its oracle spoke for,
+    # enforced by a database CHECK. Supplied here rather than by every caller
+    # because these stubs are all Python questions.
+    if (fields.get("trust_state") == Question.TRUST_ORACLE_VERIFIED
+            and not fields.get("verified_language")):
+        fields["verified_language"] = "python"
     return Question.objects.create(**fields)
 
 
@@ -300,7 +306,7 @@ def test_signature_declaration_refuses_oracle_verified(tmp_path, topic,
     is the point: verified trust is never one refusal away from a write.
     """
     question = make_stub(topic, 9854, status=Question.STATUS_PENDING_REVIEW,
-                         trust_state=Question.TRUST_ORACLE_VERIFIED)
+                         trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     batch = freeze(question, operator, key="verified-batch")
 
     with pytest.raises(CommandError, match="not UNVERIFIED"):
@@ -654,7 +660,7 @@ def test_only_the_intended_gate_separates_candidates(topic):
         # DRAFT + ORACLE_VERIFIED is refused by the database itself, so the
         # nearest reachable shape necessarily trips the status gate too.
         9863: (dict(status=Question.STATUS_PENDING_REVIEW,
-                    trust_state=Question.TRUST_ORACLE_VERIFIED),
+                    trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python"),
                "not UNVERIFIED", 2),
     }
     for question_id, (overrides, fragment, expected) in defects.items():

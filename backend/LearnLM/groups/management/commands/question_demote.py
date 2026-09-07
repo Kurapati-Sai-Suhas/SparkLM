@@ -170,7 +170,17 @@ class Command(BaseCommand):
                     f"abandoned")
 
             locked.trust_state = TO_STATE
-            locked.save(using=alias, update_fields=[TRUST_FIELD])
+            # The language marker dies with the trust it described (M2 P2.36).
+            #
+            # Leaving `verified_language = "python"` on a demoted question
+            # would be a claim with nothing behind it: the eligibility
+            # predicate reads trust_state first and would refuse anyway, but
+            # the row would still read as "verified in Python" to anyone
+            # querying it, and a later re-promotion could inherit a language
+            # that no longer matches its reference.
+            locked.verified_language = None
+            locked.save(using=alias,
+                        update_fields=[TRUST_FIELD, "verified_language"])
 
             locked.refresh_from_db(using=alias)
             after_state = pre_image.question_state(locked)

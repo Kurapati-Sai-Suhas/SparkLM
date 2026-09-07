@@ -89,7 +89,7 @@ def verified(topic, title="Q", difficulty=1200.0):
         boilerplate_code={"python": "x"}, hidden_wrapper_code={})
     Question.objects.filter(pk=question.pk).update(
         status=Question.STATUS_PUBLISHED,
-        trust_state=Question.TRUST_ORACLE_VERIFIED)
+        trust_state=Question.TRUST_ORACLE_VERIFIED, verified_language="python")
     question.refresh_from_db()
     return question
 

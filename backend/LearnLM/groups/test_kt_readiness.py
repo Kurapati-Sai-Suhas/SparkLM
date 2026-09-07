@@ -63,7 +63,10 @@ class KTTestCase(TestCase):
             base_difficulty=1200.0,
             hidden_test_cases=[{"stdin": "1", "expected_output": "1"}],
             boilerplate_code={"python": "x"}, hidden_wrapper_code={},
-            status=Question.STATUS_PUBLISHED, trust_state=trust)
+            status=Question.STATUS_PUBLISHED, trust_state=trust,
+            verified_language=(
+                "python" if trust == Question.TRUST_ORACLE_VERIFIED
+                else None))
 
     def submit(self, user, question, *, status="accepted", eligible=True,
                when=None, language="python"):

@@ -26,7 +26,7 @@ refuses everything except a change to parameter annotations:
 
     no renamed class, method or parameter        no reordered parameters
     no altered body                              no added or removed import
-    no added return annotation                   no other language touched
+    no added or removed return annotation        no other language touched
 
 That is narrower than "repair the boilerplate" and deliberately so. The approved
 repair in this batch adds one annotation; a starter that needs rewriting is a
@@ -37,6 +37,35 @@ The comparison is structural rather than textual because a text diff cannot tell
 `paths: list[list[str]]` from a renamed parameter or a quietly edited body — and
 because a whitespace-only difference would be invisible to a naive equality
 check while still changing what the learner sees.
+
+── THE ONE RETURN-ANNOTATION EXCEPTION (M6.1) ──────────────────────────────
+
+Return annotations were refused outright, on the stated grounds that "the
+adapter binds inputs and never reads the return type, so this is a change to
+what the learner is handed with no effect on grading". **That premise is wrong
+for an undefined name.** A return annotation is evaluated at definition time
+like any other, so `-> List[str]` raises `NameError` before the learner's first
+line — the harness emits no imports. It is not cosmetic; it is the same defect
+as `nums: List[int]`, in the other half of the signature. 16 questions were
+left unrepairable by a guard whose reason did not apply to them.
+
+The exception is therefore as narrow as the claim that justifies it. A return
+annotation may change only when ALL of these hold:
+
+    1. one is already there — this repairs, it does not add or remove
+    2. the stored one names something UNDEFINED, by `language_readiness`'s
+       definition of what the harness provides, not a second copy of it
+    3. the proposed one names nothing undefined
+    4. the proposed one is EXACTLY `language_readiness.canonical_annotation`
+       of the stored one — the convention applied mechanically, not an
+       opportunity to declare a different return type
+    5. NO parameter annotation changes in the same proposal
+
+(5) is what keeps the exception from widening the command. A starter needing
+both halves repaired is two audited repairs, not one loosened one: the
+parameter pass runs under the original rule, the return pass under this one,
+and neither proposal can carry the other's change. Everything outside the
+annotations is still held by the same structural comparison.
 """
 
 import ast
@@ -47,18 +76,23 @@ import pathlib
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from groups import execution_adapter, pre_image
+from groups import execution_adapter, language_readiness, pre_image
 from groups.management.commands import _preimage_ops as ops
 from groups.models import Question, RemediationAction, RemediationBatch
 
 #: The single column this action class may change.
 REPAIRABLE_FIELD = "boilerplate_code"
 
+#: Slot marker for a return annotation in a change tuple, where a parameter
+#: name would otherwise sit.
+RETURN_SLOT = "->"
+
 
 class Command(BaseCommand):
     help = ("Apply an approved boilerplate annotation repair to one question. "
             "Dry-run by default. Changes one language's starter and nothing "
-            "else, and cannot change anything but parameter annotations.")
+            "else, and cannot change anything but parameter annotations — or, "
+            "on its own, a return annotation that names something undefined.")
 
     def add_arguments(self, parser):
         parser.add_argument("--batch", required=True, metavar="KEY")
@@ -227,9 +261,15 @@ class Command(BaseCommand):
         [(function, parameter, before, after)] — or a refusal.
 
         Both sources are parsed; the proposal is then stripped of every
-        parameter annotation and compared against the current source stripped
-        the same way. If anything but annotations moved, the stripped trees
-        differ and the repair is refused.
+        annotation and compared against the current source stripped the same
+        way. If anything but annotations moved, the stripped trees differ and
+        the repair is refused.
+
+        What survives that comparison is then split in two: parameter
+        annotations, which this command has always been for, and return
+        annotations, which it accepts only under the narrow M6.1 exception in
+        the module docstring. A proposal carrying both is refused — repairing
+        the two halves of a signature is two reviewed actions.
         """
         before_tree = self._parse(current, "the stored starter")
         after_tree = self._parse(proposed, "the proposed starter")
@@ -237,26 +277,33 @@ class Command(BaseCommand):
         if ast.dump(self._stripped(before_tree)) != \
                 ast.dump(self._stripped(after_tree)):
             raise ops.GateFailure(
-                "the proposal changes more than parameter annotations. This "
-                "command repairs an annotation; a renamed method, an edited "
-                "body, a new import or a reordered parameter is a different "
-                "action class and needs its own review.")
+                "the proposal changes more than annotations. This command "
+                "repairs an annotation; a renamed method, an edited body, a "
+                "new import or a reordered parameter is a different action "
+                "class and needs its own review.")
 
-        before_returns = {node.name: ast.dump(node.returns) if node.returns else None
-                          for node in ast.walk(before_tree)
-                          if isinstance(node, (ast.FunctionDef,
-                                               ast.AsyncFunctionDef))}
-        for node in ast.walk(after_tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                after_returns = ast.dump(node.returns) if node.returns else None
-                if before_returns.get(node.name) != after_returns:
-                    raise ops.GateFailure(
-                        f"the proposal changes the return annotation of "
-                        f"{node.name!r}. The adapter binds inputs and never "
-                        f"reads the return type, so this is a change to what "
-                        f"the learner is handed with no effect on grading; "
-                        f"refusing.")
+        parameter_changes = self._parameter_changes(before_tree, after_tree)
+        return_changes = self._return_changes(before_tree, after_tree,
+                                              bool(parameter_changes))
 
+        changes = parameter_changes + return_changes
+        if not changes:
+            raise ops.GateFailure(
+                "no annotation changed; the difference is whitespace or "
+                "formatting only, which this command does not record as a "
+                "repair")
+        return changes
+
+    def _parameter_changes(self, before_tree, after_tree):
+        """
+        [(function, parameter, before, after)]. Unchanged by M6.1: the return
+        exception grants no authority here and takes none away.
+
+        Zipped rather than looked up by name — the stripped comparison above
+        has already proved the two trees have the same functions in the same
+        order with the same parameters, so position is exact where a name
+        would be ambiguous across two classes.
+        """
         changes = []
         for before_fn, after_fn in zip(self._functions(before_tree),
                                        self._functions(after_tree)):
@@ -266,13 +313,85 @@ class Command(BaseCommand):
                 now = self._annotation(after_arg)
                 if was != now:
                     changes.append((before_fn.name, before_arg.arg, was, now))
-
-        if not changes:
-            raise ops.GateFailure(
-                "no annotation changed; the difference is whitespace or "
-                "formatting only, which this command does not record as a "
-                "repair")
         return changes
+
+    def _return_changes(self, before_tree, after_tree, parameters_moved):
+        """
+        [(function, RETURN_SLOT, before, after)] — or a refusal.
+
+        Each of the five conditions in the module docstring raises with the one
+        that failed, so an operator reading a refusal learns which rule stopped
+        them rather than that "something" did.
+        """
+        changes = []
+        for before_fn, after_fn in zip(self._functions(before_tree),
+                                       self._functions(after_tree)):
+            was_node, now_node = before_fn.returns, after_fn.returns
+            was = ast.unparse(was_node) if was_node is not None else None
+            now = ast.unparse(now_node) if now_node is not None else None
+            if was == now:
+                continue
+
+            if parameters_moved:
+                raise ops.GateFailure(
+                    f"the proposal changes both a parameter annotation and the "
+                    f"return annotation of {before_fn.name!r}. Each half is a "
+                    f"separate repair with its own review: apply the parameter "
+                    f"annotations first, then the return annotation on its "
+                    f"own.")
+
+            self._check_return_repair(before_fn.name, was_node, now_node,
+                                      before_tree, after_tree)
+            changes.append((before_fn.name, RETURN_SLOT, was, now))
+        return changes
+
+    def _check_return_repair(self, name, before, after, before_tree,
+                             after_tree):
+        """
+        The only circumstance in which a return annotation may move.
+
+        `language_readiness` decides what counts as undefined and what the
+        canonical repair is. This command deliberately does not restate either
+        rule: a starter the readiness report calls broken and a starter this
+        command agrees to repair must be the same set, and the way that stops
+        being true is by keeping two copies.
+        """
+        if before is None or after is None:
+            raise ops.GateFailure(
+                f"the proposal {'adds a' if before is None else 'removes the'} "
+                f"return annotation on {name!r}. This command repairs a return "
+                f"annotation that cannot execute; adding or removing one "
+                f"declares something new about the method and is a different "
+                f"action class.")
+
+        undefined = sorted(language_readiness.annotation_names(before)
+                           - language_readiness.python_provided_names(
+                               before_tree))
+        if not undefined:
+            raise ops.GateFailure(
+                f"the stored return annotation of {name!r} is "
+                f"{ast.unparse(before)!r}, which already resolves. A return "
+                f"annotation may change ONLY to repair a NameError the learner "
+                f"would hit before their first line; rewriting a working one "
+                f"is a different action class and needs its own review.")
+
+        remaining = sorted(language_readiness.annotation_names(after)
+                           - language_readiness.python_provided_names(
+                               after_tree))
+        if remaining:
+            raise ops.GateFailure(
+                f"the proposed return annotation of {name!r} still names "
+                f"{', '.join(remaining)}, which the harness never defines. The "
+                f"repair would replace one NameError with another.")
+
+        canonical = language_readiness.canonical_annotation(before)
+        if ast.unparse(after) != canonical:
+            raise ops.GateFailure(
+                f"the proposed return annotation of {name!r} is "
+                f"{ast.unparse(after)!r}, but the canonical repair of "
+                f"{ast.unparse(before)!r} is {canonical!r}. This exception "
+                f"applies the project's annotation convention mechanically; it "
+                f"is not permission to declare a different return type.")
 
     def _parse(self, source, label):
         try:
@@ -285,9 +404,9 @@ class Command(BaseCommand):
         The same tree with every annotation removed — parameters AND returns.
 
         Returns are stripped here so that a return-annotation change reaches the
-        check written for it and is refused with the reason that applies, rather
-        than by the generic comparison. A check that can only be reached after
-        another one has already raised is not a check.
+        rules written for it and is judged on its own terms, rather than being
+        swept up by the generic comparison. A check that can only be reached
+        after another one has already raised is not a check.
         """
         clone = copy.deepcopy(tree)
         for node in ast.walk(clone):
@@ -333,7 +452,9 @@ class Command(BaseCommand):
 
         write("  annotations changed:")
         for function, parameter, was, now in changes:
-            write(f"    {function}({parameter}): {was or '(none)'} -> "
+            slot = ("return type" if parameter == RETURN_SLOT
+                    else f"parameter {parameter}")
+            write(f"    {function} — {slot}: {was or '(none)'} -> "
                   f"{now or '(none)'}")
         write("")
 

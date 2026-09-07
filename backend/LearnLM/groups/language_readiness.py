@@ -44,6 +44,7 @@ limits, which is precisely what M1 forbids.
 
 import ast
 import builtins
+import copy
 import re
 from dataclasses import asdict, dataclass
 
@@ -73,6 +74,28 @@ STRUCTURAL_TYPES = frozenset({"TreeNode", "ListNode", "Node"})
 #: The reflection harness emits no imports, so an annotation naming anything
 #: outside builtins raises before the learner's first line.
 _PYTHON_PROVIDES = frozenset(dir(builtins))
+
+#: The project's canonical Python annotation convention (M2 P2.38 / M6.1):
+#: PEP 585 builtin generics, not the `typing` aliases they replaced.
+#:
+#: Not a style preference, and not this module's invention. It is what
+#: `ai_services.generate_full_question` instructs the model to emit, and it is
+#: why Judge0 language id 92 (Python 3.11) was selected over 71 — 3.8 raises
+#: `TypeError` on `list[int]`, so the convention and the runtime were chosen
+#: together.
+#:
+#: Only aliases whose replacement is a BUILTIN belong here. `Deque` and
+#: `DefaultDict` are deliberately absent: `deque[int]` names `collections`,
+#: which the harness does not import either, so lowering them would turn one
+#: NameError into another.
+CANONICAL_GENERICS = {
+    "List": "list",
+    "Dict": "dict",
+    "Set": "set",
+    "FrozenSet": "frozenset",
+    "Tuple": "tuple",
+    "Type": "type",
+}
 
 
 @dataclass(frozen=True)
@@ -205,13 +228,7 @@ def _assess_python(lang, source):
         return Readiness(lang.key, NOT_READY,
                          f"starter does not parse ({exc.msg})", UNPARSEABLE)
 
-    defined = {node.name for node in ast.walk(tree)
-               if isinstance(node, (ast.ClassDef, ast.FunctionDef))}
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            for alias in node.names:
-                imported.add(alias.asname or alias.name.split(".")[0])
+    provided = python_provided_names(tree)
 
     names = set()
     for node in ast.walk(tree):
@@ -221,12 +238,7 @@ def _assess_python(lang, source):
         if node.returns:
             annotations.append(node.returns)
         for annotation in annotations:
-            for child in ast.walk(annotation):
-                if isinstance(child, ast.Name):
-                    names.add(child.id)
-                elif isinstance(child, ast.Constant) and isinstance(
-                        child.value, str):
-                    names.update(_identifiers(child.value))
+            names |= annotation_names(annotation)
 
     structural = sorted(names & STRUCTURAL_TYPES)
     if structural:
@@ -235,7 +247,7 @@ def _assess_python(lang, source):
             f"signature declares {', '.join(structural)}, which no contract "
             f"deserializes — the harness would pass a string", STRUCTURAL_TYPE)
 
-    undefined = sorted(names - _PYTHON_PROVIDES - defined - imported)
+    undefined = sorted(names - provided)
     if undefined:
         return Readiness(
             lang.key, NOT_READY,
@@ -244,6 +256,59 @@ def _assess_python(lang, source):
             UNDEFINED_ANNOTATION)
 
     return Readiness(lang.key, READY)
+
+
+def python_provided_names(tree):
+    """
+    Every name a Python annotation in this starter may use without raising.
+
+    Builtins, plus whatever the starter itself defines or imports. Exposed
+    because `remediate_boilerplate` decides whether a return annotation is
+    broken, and "broken" must mean the same thing there as it does in the
+    readiness verdict — a second copy of this set is how the generator and the
+    validator disagreed for 293 questions in the first place.
+    """
+    defined = {node.name for node in ast.walk(tree)
+               if isinstance(node, (ast.ClassDef, ast.FunctionDef,
+                                    ast.AsyncFunctionDef))}
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                imported.add(alias.asname or alias.name.split(".")[0])
+    return _PYTHON_PROVIDES | defined | imported
+
+
+def annotation_names(annotation):
+    """
+    Every name one annotation expression references, quoted forms included.
+
+    `"TreeNode"` as a string annotation is a forward reference and is resolved
+    the same way at runtime, so it counts.
+    """
+    names = set()
+    for child in ast.walk(annotation):
+        if isinstance(child, ast.Name):
+            names.add(child.id)
+        elif isinstance(child, ast.Constant) and isinstance(child.value, str):
+            names.update(_identifiers(child.value))
+    return names
+
+
+def canonical_annotation(annotation):
+    """
+    One annotation expression rewritten in the canonical convention, as text.
+
+    Pure: takes and returns syntax, touches no row and no file. The mapping is
+    total and mechanical, which is the point — a caller can compare a proposed
+    annotation against this and know the operator applied the convention
+    rather than choosing a different type.
+    """
+    clone = copy.deepcopy(annotation)
+    for node in ast.walk(clone):
+        if isinstance(node, ast.Name) and node.id in CANONICAL_GENERICS:
+            node.id = CANONICAL_GENERICS[node.id]
+    return ast.unparse(clone)
 
 
 def _identifiers(text):

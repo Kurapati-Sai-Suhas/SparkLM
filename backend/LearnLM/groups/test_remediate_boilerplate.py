@@ -9,15 +9,17 @@ Local/synthetic database only.
 """
 
 import ast
+import builtins
 import inspect
 import json
+import textwrap
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
-from groups import execution_adapter, pre_image
+from groups import execution_adapter, language_readiness, pre_image
 from groups.management.commands import _preimage_ops as ops
 from groups.management.commands import remediate_boilerplate as cmd
 from groups.models import (
@@ -36,6 +38,32 @@ APPROVED = ("class Solution:\n"
             "        # Write your code here\n"
             "        pass")
 JAVA = "class Solution { String destCity(List<List<String>> paths) { } }"
+
+# ── M6.1: the two halves of a broken signature ──────────────────────────────
+# The 16 questions this exception exists for look exactly like this: the
+# parameters and the return type are both spelled in the `typing` aliases the
+# harness cannot resolve. Repairing them is TWO passes, and the fixtures are
+# named for the pass they belong to.
+BOTH_BROKEN = ("class Solution:\n"
+               "    def findWords(self, words: List[str]) -> List[str]:\n"
+               "        # Write your code here\n"
+               "        pass")
+PASS_ONE = ("class Solution:\n"
+            "    def findWords(self, words: list[str]) -> List[str]:\n"
+            "        # Write your code here\n"
+            "        pass")
+PASS_TWO = ("class Solution:\n"
+            "    def findWords(self, words: list[str]) -> list[str]:\n"
+            "        # Write your code here\n"
+            "        pass")
+WORKING_RETURN = ("class Solution:\n"
+                  "    def findWords(self, words: list[str]) -> str:\n"
+                  "        # Write your code here\n"
+                  "        pass")
+STRUCTURAL_RETURN = ("class Solution:\n"
+                     "    def build(self, values: list[int]) -> TreeNode:\n"
+                     "        # Write your code here\n"
+                     "        pass")
 CASES = [
     {"stdin": '[["London","New York"],["New York","Paris"]]',
      "expected_output": "Paris"},
@@ -77,11 +105,37 @@ def control(db, topic):
 
 
 @pytest.fixture
-def frozen_batch(db, operator, question, control):
+def half_repaired(db, topic):
+    """Pass one already applied: parameters lowered, return still broken."""
+    return make_question(topic, 9901, starter=PASS_ONE)
+
+
+@pytest.fixture
+def unrepaired(db, topic):
+    """Neither half repaired — where the 16 production questions stand."""
+    return make_question(topic, 9902, starter=BOTH_BROKEN)
+
+
+@pytest.fixture
+def working(db, topic):
+    """A return annotation that already resolves; nothing to repair."""
+    return make_question(topic, 9903, starter=WORKING_RETURN)
+
+
+@pytest.fixture
+def structural(db, topic):
+    """An M5 case: undefined, but no canonical repair exists for it."""
+    return make_question(topic, 9904, starter=STRUCTURAL_RETURN)
+
+
+@pytest.fixture
+def frozen_batch(db, operator, question, control, half_repaired, unrepaired,
+                 working, structural):
     batch = RemediationBatch.objects.create(
         batch_key="bp-batch", purpose="test", created_by=operator)
-    pre_image.capture(batch, question, operator)
-    pre_image.capture(batch, control, operator)
+    for row in (question, control, half_repaired, unrepaired, working,
+                structural):
+        pre_image.capture(batch, row, operator)
     pre_image.freeze(batch, operator)
     return batch
 
@@ -204,16 +258,17 @@ def test_the_annotation_makes_the_cases_bind(frozen_batch, question, operator,
 # Annotation-only — what it must refuse
 # ═════════════════════════════════════════════════════════════
 
-def refused(tmp_path, operator, source, message, extra=APPLY):
+def refused(tmp_path, operator, source, message, extra=APPLY, question_id=9900):
     with pytest.raises(CommandError, match=message):
-        repair(source_file(tmp_path, source), operator, extra=extra)
+        repair(source_file(tmp_path, source), operator,
+               question_id=question_id, extra=extra)
 
 
 @pytest.mark.django_db
 def test_a_renamed_method_is_refused(frozen_batch, question, operator, tmp_path):
     refused(tmp_path, operator,
             APPROVED.replace("destCity", "destinationCity"),
-            "more than parameter annotations")
+            "more than annotations")
     question.refresh_from_db()
     assert question.boilerplate_code["python"] == CURRENT
 
@@ -226,20 +281,20 @@ def test_a_renamed_parameter_is_refused(frozen_batch, question, operator,
             "    def destCity(self, routes: list[list[str]]):\n"
             "        # Write your code here\n"
             "        pass",
-            "more than parameter annotations")
+            "more than annotations")
 
 
 @pytest.mark.django_db
 def test_an_edited_body_is_refused(frozen_batch, question, operator, tmp_path):
     refused(tmp_path, operator,
             APPROVED.replace("        pass", "        return 'D'"),
-            "more than parameter annotations")
+            "more than annotations")
 
 
 @pytest.mark.django_db
 def test_an_added_import_is_refused(frozen_batch, question, operator, tmp_path):
     refused(tmp_path, operator, "import typing\n" + APPROVED,
-            "more than parameter annotations")
+            "more than annotations")
 
 
 @pytest.mark.django_db
@@ -248,23 +303,31 @@ def test_an_added_parameter_is_refused(frozen_batch, question, operator,
     refused(tmp_path, operator,
             APPROVED.replace("paths: list[list[str]]",
                              "paths: list[list[str]], limit: int = 0"),
-            "more than parameter annotations")
+            "more than annotations")
 
 
 @pytest.mark.django_db
 def test_an_added_return_annotation_is_refused(frozen_batch, question,
                                                operator, tmp_path):
-    """Approved explicitly: the adapter never reads it, so it is not a repair."""
+    """
+    Still refused after M6.1, for the reason that actually holds: there is no
+    stored annotation raising NameError, so there is nothing to repair. Adding
+    one declares something new about the method.
+
+    Proposed on its own — with the parameters left exactly as stored — so that
+    condition 5 cannot be what refuses it and the rule under test is the one
+    that fires.
+    """
     refused(tmp_path, operator,
-            APPROVED.replace("):", ") -> str:"),
-            "return annotation")
+            CURRENT.replace("):", ") -> str:"),
+            "adds a return annotation")
 
 
 @pytest.mark.django_db
 def test_an_extra_method_is_refused(frozen_batch, question, operator, tmp_path):
     refused(tmp_path, operator,
             APPROVED + "\n\n    def helper(self):\n        pass",
-            "more than parameter annotations")
+            "more than annotations")
 
 
 @pytest.mark.django_db
@@ -463,7 +526,7 @@ def test_a_dry_run_also_refuses_a_body_change(frozen_batch, question, operator,
     """The operator approves from the dry-run, so it must refuse there too."""
     refused(tmp_path, operator,
             APPROVED.replace("        pass", "        return 'D'"),
-            "more than parameter annotations", extra=())
+            "more than annotations", extra=())
 
 
 @pytest.mark.django_db
@@ -588,3 +651,296 @@ def test_the_row_is_locked_before_it_is_written():
     assert any(isinstance(node, ast.Attribute)
                and node.attr == "select_for_update"
                for node in ast.walk(tree))
+
+
+# ═════════════════════════════════════════════════════════════
+# M6.1 — the one return-annotation exception
+#
+# The old guard refused every return-annotation change, on the grounds that
+# "the adapter binds inputs and never reads the return type, so this is a
+# change to what the learner is handed with no effect on grading". That is
+# wrong for an UNDEFINED name: `-> List[str]` is evaluated at definition time
+# and raises NameError before the learner's first line. 16 questions were held
+# by a rule whose reason did not apply to them.
+#
+# The exception is five conditions wide and no wider. Each test below is one
+# of them, plus the two-pass workflow they are shaped around.
+# ═════════════════════════════════════════════════════════════
+
+@pytest.mark.django_db
+def test_an_undefined_return_annotation_is_repaired(frozen_batch, half_repaired,
+                                                    operator, tmp_path):
+    """Condition 2 satisfied: `List` is a NameError, and this fixes it."""
+    repair(source_file(tmp_path, PASS_TWO), operator, question_id=9901,
+           extra=APPLY)
+
+    half_repaired.refresh_from_db()
+    assert half_repaired.boilerplate_code["python"] == PASS_TWO
+    assert half_repaired.boilerplate_code["java"] == JAVA
+
+
+@pytest.mark.django_db
+def test_the_repaired_starter_is_actually_ready(frozen_batch, half_repaired,
+                                                operator, tmp_path):
+    """
+    The point of the milestone, asserted through the readiness rule rather
+    than by re-reading the text we just wrote.
+    """
+    before = language_readiness.assess_source(PASS_ONE, "python")
+    assert before.cause == language_readiness.UNDEFINED_ANNOTATION
+
+    repair(source_file(tmp_path, PASS_TWO), operator, question_id=9901,
+           extra=APPLY)
+
+    half_repaired.refresh_from_db()
+    after = language_readiness.assess(half_repaired, "python")
+    assert after.verdict == language_readiness.READY
+
+
+@pytest.mark.django_db
+def test_the_two_passes_together_repair_a_fully_broken_signature(
+        frozen_batch, unrepaired, operator, tmp_path):
+    """
+    The whole workflow. Neither pass may carry the other's change, so a
+    question with both halves broken takes two audited repairs — which is the
+    shape condition 5 forces, not an inconvenience around it.
+    """
+    repair(source_file(tmp_path, PASS_ONE, "one.py"), operator,
+           question_id=9902, extra=APPLY)
+    repair(source_file(tmp_path, PASS_TWO, "two.py"), operator,
+           question_id=9902, extra=APPLY)
+
+    unrepaired.refresh_from_db()
+    assert unrepaired.boilerplate_code["python"] == PASS_TWO
+    assert language_readiness.assess(unrepaired, "python").verdict == \
+        language_readiness.READY
+
+    actions = RemediationAction.objects.filter(question=unrepaired)
+    assert actions.count() == 2
+    assert {action.action_class for action in actions} == \
+        {RemediationAction.CLASS_BOILERPLATE_REPAIR}
+
+
+@pytest.mark.django_db
+def test_a_return_repair_is_the_same_audited_action_class(
+        frozen_batch, half_repaired, operator, tmp_path):
+    """Condition 9: no new action class, no new role, no new audit path."""
+    repair(source_file(tmp_path, PASS_TWO), operator, question_id=9901,
+           extra=APPLY)
+
+    action = RemediationAction.objects.get(question=half_repaired)
+    half_repaired.refresh_from_db()
+    record = QuestionPreImage.objects.get(question=half_repaired)
+    assert action.action_class == RemediationAction.CLASS_BOILERPLATE_REPAIR
+    assert action.applied_by_id == operator.pk
+    assert action.pre_image_id == record.pk
+    assert action.post_digest == pre_image.live_digest(half_repaired)
+
+
+@pytest.mark.django_db
+def test_a_return_repair_leaves_trust_and_publication_untouched(
+        frozen_batch, half_repaired, operator, tmp_path):
+    """
+    Condition 10, asserted on the fields rather than inferred from the
+    command's role list.
+    """
+    before = {name: getattr(half_repaired, name)
+              for name in pre_image.CAPTURED_FIELDS}
+
+    repair(source_file(tmp_path, PASS_TWO), operator, question_id=9901,
+           extra=APPLY)
+
+    half_repaired.refresh_from_db()
+    for name in pre_image.CAPTURED_FIELDS:
+        if name == "boilerplate_code":
+            continue
+        assert getattr(half_repaired, name) == before[name], name
+    assert half_repaired.status == Question.STATUS_DRAFT
+    assert half_repaired.trust_state == Question.TRUST_UNVERIFIED
+    assert half_repaired.is_adaptive_eligible is False
+    assert half_repaired.verified_language in (None, "")
+
+
+@pytest.mark.django_db
+def test_a_return_repair_is_rollback_able(frozen_batch, half_repaired,
+                                          operator, tmp_path):
+    repair(source_file(tmp_path, PASS_TWO), operator, question_id=9901,
+           extra=APPLY)
+    pre_image.rollback(frozen_batch, operator, questions=[half_repaired])
+
+    half_repaired.refresh_from_db()
+    assert half_repaired.boilerplate_code["python"] == PASS_ONE
+
+
+# ── what the exception must still refuse ────────────────────────────────────
+
+@pytest.mark.django_db
+def test_a_return_annotation_that_already_resolves_cannot_be_rewritten(
+        frozen_batch, working, operator, tmp_path):
+    """
+    Condition 2. `-> str` executes; changing it to `-> list` would be a
+    redeclaration of the method's contract wearing a repair's clothes.
+    """
+    refused(tmp_path, operator,
+            WORKING_RETURN.replace("-> str:", "-> list:"),
+            "already resolves", question_id=9903)
+
+    working.refresh_from_db()
+    assert working.boilerplate_code["python"] == WORKING_RETURN
+
+
+@pytest.mark.django_db
+def test_a_return_repair_that_leaves_a_nameerror_is_refused(
+        frozen_batch, half_repaired, operator, tmp_path):
+    """
+    Condition 3. `Deque` is a typing alias too, but `deque` is not a builtin —
+    lowering it would trade one NameError for another.
+    """
+    refused(tmp_path, operator,
+            PASS_ONE.replace("-> List", "-> Deque"),
+            "still names Deque", question_id=9901)
+
+    half_repaired.refresh_from_db()
+    assert half_repaired.boilerplate_code["python"] == PASS_ONE
+
+
+@pytest.mark.django_db
+def test_a_different_return_type_is_refused(frozen_batch, half_repaired,
+                                            operator, tmp_path):
+    """
+    Condition 4. `List[str]` is undefined and `int` resolves, so conditions 2
+    and 3 both pass — only the canonical-form check stands between a repair
+    and a silent change of what the method returns.
+    """
+    refused(tmp_path, operator,
+            PASS_ONE.replace("-> List[str]", "-> int"),
+            "canonical repair", question_id=9901)
+
+
+@pytest.mark.django_db
+def test_a_parameter_change_cannot_ride_along_with_a_return_repair(
+        frozen_batch, unrepaired, operator, tmp_path):
+    """
+    Condition 5. Both halves of this signature genuinely need repairing, and
+    the command still refuses to do them at once: the exception widens what a
+    return annotation may do, never what a proposal may carry.
+    """
+    refused(tmp_path, operator, PASS_TWO,
+            "both a parameter annotation and the return annotation",
+            question_id=9902)
+
+    unrepaired.refresh_from_db()
+    assert unrepaired.boilerplate_code["python"] == BOTH_BROKEN
+
+
+@pytest.mark.django_db
+def test_a_body_change_is_refused_alongside_a_return_repair(
+        frozen_batch, half_repaired, operator, tmp_path):
+    """Condition 4 of the original rule: the structural comparison runs first."""
+    refused(tmp_path, operator,
+            PASS_TWO.replace("        pass", "        return []"),
+            "more than annotations", question_id=9901)
+
+
+@pytest.mark.django_db
+def test_a_renamed_method_is_refused_alongside_a_return_repair(
+        frozen_batch, half_repaired, operator, tmp_path):
+    refused(tmp_path, operator,
+            PASS_TWO.replace("findWords", "findAllWords"),
+            "more than annotations", question_id=9901)
+
+
+@pytest.mark.django_db
+def test_a_removed_return_annotation_is_refused(frozen_batch, half_repaired,
+                                                operator, tmp_path):
+    """Condition 1. Deleting one is not repairing one."""
+    refused(tmp_path, operator,
+            PASS_ONE.replace(" -> List[str]", ""),
+            "removes the return annotation", question_id=9901)
+
+
+@pytest.mark.django_db
+def test_a_structural_type_return_is_still_delegated_to_M5(
+        frozen_batch, structural, operator, tmp_path):
+    """
+    `TreeNode` is undefined, so conditions 1-3 do not stop it. Condition 4
+    does: the canonical form of `TreeNode` is `TreeNode`, so no proposal can
+    both differ from the stored annotation and match the convention. The M5
+    gap cannot be closed by relabelling it.
+    """
+    assert language_readiness.assess_source(
+        STRUCTURAL_RETURN, "python").cause == language_readiness.STRUCTURAL_TYPE
+
+    refused(tmp_path, operator,
+            STRUCTURAL_RETURN.replace("-> TreeNode", "-> list"),
+            "canonical repair", question_id=9904)
+
+    structural.refresh_from_db()
+    assert structural.boilerplate_code["python"] == STRUCTURAL_RETURN
+    assert language_readiness.assess(structural, "python").cause == \
+        language_readiness.STRUCTURAL_TYPE
+
+
+@pytest.mark.django_db
+def test_a_dry_run_also_refuses_a_combined_proposal(frozen_batch, unrepaired,
+                                                    operator, tmp_path):
+    """The operator approves from the dry-run, so it must refuse there too."""
+    refused(tmp_path, operator, PASS_TWO,
+            "both a parameter annotation and the return annotation",
+            extra=(), question_id=9902)
+
+
+# ── the exception delegates rather than restating ───────────────────────────
+
+def test_the_exception_reads_the_readiness_definitions():
+    """
+    "Undefined" and "canonical" must mean the same thing here as in the
+    readiness verdict. A local copy is how the generator and its validator
+    disagreed for 293 questions; the fix was to delete the copy, and this
+    keeps a new one from appearing.
+    """
+    source = inspect.getsource(cmd.Command._check_return_repair)
+
+    for call in ("language_readiness.annotation_names",
+                 "language_readiness.python_provided_names",
+                 "language_readiness.canonical_annotation"):
+        assert call in source, call
+    assert "builtins" not in source
+    assert "List" not in source
+
+
+def test_all_five_conditions_are_present():
+    """
+    A structural pin, so that deleting one condition is a visible change to
+    this test rather than a silent widening of a trust-adjacent command.
+    """
+    tree = ast.parse(textwrap.dedent(
+        inspect.getsource(cmd.Command._check_return_repair)))
+    raises = [node for node in ast.walk(tree)
+              if isinstance(node, ast.Raise)]
+
+    assert len(raises) == 4          # 1+2+3+4; condition 5 lives upstream
+    assert "parameters_moved" in inspect.getsource(cmd.Command._return_changes)
+
+
+def test_the_canonical_map_holds_only_builtins():
+    """
+    Every entry is a name this command will silently accept as a repair, so
+    each replacement must actually resolve in the harness. `Deque` maps to
+    `collections.deque`, which does not, and must stay out.
+    """
+    for alias, replacement in language_readiness.CANONICAL_GENERICS.items():
+        assert hasattr(builtins, replacement), replacement
+    assert "Deque" not in language_readiness.CANONICAL_GENERICS
+    assert "DefaultDict" not in language_readiness.CANONICAL_GENERICS
+
+
+def test_the_parameter_rule_gained_no_new_authority():
+    """
+    Condition 5 read the other way round: the return exception must not have
+    loosened what a parameter annotation may become.
+    """
+    source = inspect.getsource(cmd.Command._parameter_changes)
+
+    assert "language_readiness" not in source
+    assert "returns" not in source

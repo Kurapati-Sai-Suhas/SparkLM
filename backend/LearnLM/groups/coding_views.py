@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from common import languages
 from common.throttling import ClientIPScopedRateThrottle
-from groups import execution_contract, language_readiness
+from groups import execution_contract, judge0_diagnostics, language_readiness
 
 # Import Models
 from .models import (
@@ -378,10 +378,33 @@ def _run_on_judge0(source_code: str, language: str, stdin: str = "") -> dict:
             "time":           data.get("time"),
             "memory":         data.get("memory"),
         }
-    except requests.Timeout:
-        return {"error": "Judge0 timed out. Try again."}
-    except requests.RequestException as e:
-        return {"error": f"Judge0 request failed: {str(e)}"}
+    except requests.Timeout as exc:
+        # Classified rather than collapsed (M10). `error` keeps its exact
+        # meaning for the two existing readers — GradingService and
+        # OracleService both raise on its presence — and the diagnosis is
+        # ADDED alongside it, so an operator gets a remedy instead of a
+        # status code and four milestones do not repeat the mistake of
+        # inferring "quota" from a 403.
+        category, detail = judge0_diagnostics.classify(transport_error=exc)
+        return {
+            "error": judge0_diagnostics.describe(category, "request timed out"),
+            "judge0_category": category,
+            "judge0_detail": detail,
+            "judge0_retryable": judge0_diagnostics.is_retryable(category),
+        }
+    except requests.RequestException as exc:
+        response = getattr(exc, "response", None)
+        if response is None:
+            category, detail = judge0_diagnostics.classify(transport_error=exc)
+        else:
+            category, detail = judge0_diagnostics.classify(
+                status_code=response.status_code, body=response.text)
+        return {
+            "error": judge0_diagnostics.describe(category, detail),
+            "judge0_category": category,
+            "judge0_detail": detail,
+            "judge0_retryable": judge0_diagnostics.is_retryable(category),
+        }
 
 
 class GamificationDashboardView(APIView):

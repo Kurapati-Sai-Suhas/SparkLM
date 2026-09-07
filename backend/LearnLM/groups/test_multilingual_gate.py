@@ -362,14 +362,20 @@ def test_the_self_contained_contract_holds_without_a_compiler(topic, language):
     assert execution_contract.V2_WRAPPERS.get(language) is None
 
 
-def test_no_local_compiler_is_reported_rather_than_assumed():
+def test_the_environment_is_reported_rather_than_assumed():
     """
-    The environment fact this whole module's honesty depends on. If a
-    toolchain ever appears, this fails and the matrix must be re-derived
-    rather than silently staying stale.
+    The fact this module's honesty depends on: every state in the matrix is
+    derived from `RUNTIME`, which is probed.
+
+    M10 installed a JDK and MinGW-W64, so java/c/cpp are now available in a
+    shell that inherits the post-install PATH — and absent in one started
+    before it. Neither is asserted here: a test that fails on shell provenance
+    teaches people to ignore it. What IS asserted is that the two runtimes
+    this module's PASS cells depend on are present, and that Judge0 remains
+    unavailable, because a Judge0 claim would be a claim about production.
     """
-    assert RUNTIME["c"] is False and RUNTIME["cpp"] is False
-    assert RUNTIME["java"] is False
+    assert RUNTIME["python"] is True
+    assert RUNTIME["javascript"] is True
     assert JUDGE0_AVAILABLE is False
 
 
@@ -377,16 +383,17 @@ def test_no_local_compiler_is_reported_rather_than_assumed():
 # Java: structural only, and said so
 # ═════════════════════════════════════════════════════════════
 
-def test_java_has_a_harness_and_a_structural_contract_but_no_runtime_here():
+def test_java_has_a_harness_and_a_structural_contract_not_yet_wired_in():
     java = execution_contract.V2_WRAPPERS["java"]
 
     assert "Solution" in java and "exactly one public method" in java
     assert "class TreeNode" in execution_contract.STRUCTURAL_PRELUDE_JAVA
     assert "class ListNode" in execution_contract.STRUCTURAL_PRELUDE_JAVA
-    # Not wired in: shipping an unexecuted structural harness to learners
-    # would be worse than saying it is not ready.
+    # Still not wired in after M10 installed a JVM. A runtime makes the Java
+    # structural adapter TESTABLE, not done — wiring it is its own milestone,
+    # and shipping an unexecuted structural harness to learners would be worse
+    # than saying it is not ready.
     assert "java" not in execution_contract.STRUCTURAL_PRELUDES
-    assert RUNTIME["java"] is False
 
 
 # ═════════════════════════════════════════════════════════════

@@ -40,9 +40,10 @@ from groups.services import GradingService
 # Harness execution helpers
 # ─────────────────────────────────────────────────────────────
 
-def run_python(user_code, stdin):
+def run_python(user_code, stdin, kinds=()):
     """Execute the v2 Python harness for real. Returns (stdout, stderr, rc)."""
-    source = execution_contract.V2_PYTHON_WRAPPER.replace("{user_code}", user_code)
+    source = execution_contract.render_v2(
+        execution_contract.V2_PYTHON_WRAPPER, user_code, kinds)
     proc = subprocess.run(
         [sys.executable, "-c", source], input=stdin, capture_output=True,
         text=True, timeout=30,
@@ -50,9 +51,18 @@ def run_python(user_code, stdin):
     return proc.stdout.strip(), proc.stderr, proc.returncode
 
 
-def run_js(user_code, stdin):
-    """Execute the v2 JavaScript harness for real."""
-    source = execution_contract.V2_JS_WRAPPER.replace("{user_code}", user_code)
+def run_js(user_code, stdin, kinds=()):
+    """
+    Execute the v2 JavaScript harness for real.
+
+    Rendered through `render_v2` rather than a bare `{user_code}` replace: the
+    JavaScript harness also carries the declared kind vector (Phase 1 M8), and
+    a template with an unsubstituted placeholder is not valid JavaScript. The
+    default is an EMPTY vector, which is "undeclared" — so every test below
+    keeps exactly the parsing behaviour it was written against.
+    """
+    source = execution_contract.render_v2(
+        execution_contract.V2_JS_WRAPPER, user_code, kinds)
     proc = subprocess.run(
         ["node", "-e", source], input=stdin, capture_output=True,
         text=True, timeout=30, shell=False,

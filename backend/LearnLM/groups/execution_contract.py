@@ -62,9 +62,43 @@ METHOD  Exactly one public method on `Solution`. Zero or several is an error
 
 ERRORS  Propagate. The process exits non-zero so Judge0 classifies the run and
         `GradingService` can distinguish runtime_error from wrong_answer.
+
+── The v2 singleton-array divergence (Phase 1 M8) ──────────────────────────
+
+v2's input rule above is "a line with several tokens is a sequence; a line with
+one token is a scalar" — a rule about LENGTH. Python never actually applied it
+as written: `_sparklm_parse` reads the parameter's annotation first, and a
+parameter declared `list[int]` gets a list however many tokens the line holds.
+The length rule is Python's fallback for an UNDECLARED parameter.
+
+JavaScript had no annotations to read, so it applied that fallback as its only
+rule. Measured by executing both harnesses:
+
+    declared      line      python      javascript
+    list[int]     ""        []          []            agree
+    list[int]     "5"       [5]         5             DIVERGE
+    list[int]     "1 2 3"   [1,2,3]     [1,2,3]       agree
+    list[str]     "cat"     ["cat"]     "cat"         DIVERGE
+    int           "5"       5           5             agree
+
+So the defect is neither "the singleton case" nor JavaScript's tokeniser: it is
+that one harness knew the declared type and the other did not. A one-element
+line is merely where a length rule and a type rule first disagree — `["cat"]`
+is the same defect with no digit in it.
+
+The repair gives JavaScript the declared types Python already reads.
+`v2_parameter_kinds` derives them server-side from the question's Python
+starter — the signature that IS the declared contract, and the same source
+`prepare_stdin` already reads to build a v3 envelope — and `render_v2`
+substitutes them into the harness. The stored canonical representation is
+untouched, and no rule anywhere asks how long a line is before deciding what
+type it holds.
 """
 
+import json
 import os
+
+from groups import execution_adapter
 
 CONTRACT_V1 = "v1"
 CONTRACT_V2 = "v2"
@@ -254,8 +288,24 @@ function __sparklmToken(text) {
     return text !== '' && !Number.isNaN(asNumber) ? asNumber : text;
 }
 
-function __sparklmParse(line) {
+// The DECLARED kind of each parameter, in signature order, computed
+// server-side by `v2_parameter_kinds` from the question's Python starter —
+// the signature that is this question's contract in every language.
+//
+// JavaScript carries no annotations, so without this the harness had only the
+// token count to go on and collapsed a one-element sequence to a scalar while
+// Python, reading the annotation, did not. The vector is what makes the two
+// harnesses answer the same question rather than two different ones.
+const __sparklmKinds = {parameter_kinds};
+
+function __sparklmParse(line, kind) {
     const values = line.split(/\\s+/).filter((t) => t.length > 0).map(__sparklmToken);
+    // A declared sequence is a sequence at every length, INCLUDING one. Asked
+    // before the length rule, never as an exception to it.
+    if (kind === '{sequence_kind}') return values;
+    // Undeclared: no type to honour, so the legacy shape guess stands — which
+    // is exactly what Python does for a parameter with no annotation. Matching
+    // Python's fallback matters as much as matching its rule.
     return values.length === 1 ? values[0] : values;
 }
 
@@ -281,7 +331,7 @@ function __sparklmRender(value) {
     const lines = require('fs').readFileSync(0, 'utf8').split(String.fromCharCode(10));
     const args = [];
     for (let i = 0; i < method.length; i += 1) {
-        args.push(__sparklmParse(i < lines.length ? lines[i] : ''));
+        args.push(__sparklmParse(i < lines.length ? lines[i] : '', __sparklmKinds[i]));
     }
 
     console.log(__sparklmRender(method(...args)));
@@ -401,6 +451,72 @@ V2_WRAPPERS = {
     "java": V2_JAVA_WRAPPER,
     "javascript": V2_JS_WRAPPER,
 }
+
+
+# ─────────────────────────────────────────────────────────────
+# Declared parameter kinds — the v2 input contract, server-side
+# ─────────────────────────────────────────────────────────────
+
+#: The kind vector's two values. Deliberately coarser than
+#: `execution_adapter`'s six: v2's input rule branches on sequence-or-not and
+#: nothing else, so a vector carrying `integer` vs `float` would imply a
+#: distinction the harness does not make.
+SEQUENCE_KIND = "sequence"
+SCALAR_KIND = "scalar"
+
+#: Annotation spellings v2 treats as a sequence.
+#:
+#: EXACTLY the two the Python harness tests for — see `_sparklm_parse`'s
+#: `"list" in ... or "sequence" in ...`. `execution_adapter._SEQUENCE_HINTS` is
+#: wider (it also accepts `tuple`, `iterable`, `array`, `set[`) and using it
+#: here would be an improvement that lands in ONE language: JavaScript would
+#: read `tuple[int]` as a sequence while Python v2 still read it as a scalar,
+#: which is the divergence this repair exists to remove, reintroduced from the
+#: other side. The wider set belongs to v3, where both languages would read it
+#: from the same server-built envelope.
+V2_SEQUENCE_HINTS = ("list", "sequence")
+
+
+def declares_sequence(annotation):
+    """Whether one annotation makes v2 hand the parameter a sequence."""
+    text = (annotation or "").lower()
+    return bool(text) and any(hint in text for hint in V2_SEQUENCE_HINTS)
+
+
+def v2_parameter_kinds(source):
+    """
+    The declared kind of each parameter, in signature order, from a Python
+    starter. `[]` when the starter declares nothing readable.
+
+    Pure. The Python starter is the source because it is the only one of the
+    five that carries types, and because it is already what the contract treats
+    as authoritative — `prepare_stdin` builds every v3 envelope from it. An
+    empty vector is not a failure: it means "undeclared", and every harness
+    already has a documented fallback for that.
+    """
+    signature = execution_adapter.declared_signature(source or "")
+    if signature is None:
+        return []
+    _name, parameters = signature
+    return [SEQUENCE_KIND if declares_sequence(annotation) else SCALAR_KIND
+            for _parameter, annotation in parameters]
+
+
+def render_v2(template, user_code, parameter_kinds):
+    """
+    A v2 harness with its declared kinds and the learner's source substituted.
+
+    The kinds go in FIRST and the learner's code LAST. Source is untrusted text
+    that may contain the literal `{parameter_kinds}`; substituting it last
+    means it is never scanned for a placeholder — the same reason these
+    templates have always been `.replace`d rather than `.format`ted, since a
+    learner's `{` would otherwise raise inside the grader.
+    """
+    rendered = template.replace(
+        "{parameter_kinds}",
+        json.dumps(list(parameter_kinds), separators=(",", ":")))
+    rendered = rendered.replace("{sequence_kind}", SEQUENCE_KIND)
+    return rendered.replace("{user_code}", user_code)
 
 
 def contract_version(question):

@@ -684,13 +684,28 @@ class ScopeTests(SimpleTestCase):
     #: phase touched anything. A digest, not a substring check: a diff review
     #: can miss one character inside a 2KB string literal, and v1 is the
     #: harness ~2,900 production questions were graded under.
+    #:
+    #: FIVE of the six are still the ORIGINAL P2.7 digests, including all three
+    #: v1 templates. Only `V2_JS_WRAPPER` has moved, once, for Phase 1 M8 — and
+    #: this guard is what caught it, which is the point of pinning a digest
+    #: rather than reviewing a diff.
     TEMPLATE_DIGESTS = {
         "GENERIC_PYTHON_WRAPPER": "85766c03fbbd4d00",
         "GENERIC_JAVA_WRAPPER": "ede876af69ecbc58",
         "GENERIC_JS_WRAPPER": "18f29dad1e7afef8",
         "V2_PYTHON_WRAPPER": "efc0cac8e35e23ff",
         "V2_JAVA_WRAPPER": "9b0f0e0c50fc577d",
-        "V2_JS_WRAPPER": "7d4a1acaf126ca42",
+
+        # Phase 1 M8. The JavaScript v2 parser now reads the declared kind of
+        # each parameter instead of guessing from the token count, so a
+        # one-element declared sequence reaches the learner as `[5]` in
+        # JavaScript exactly as it already did in Python.
+        #
+        # Safe to move, for reasons that are measured rather than assumed:
+        # this is the v2 harness, and NO production question declares v2
+        # (2,923 are v1 and 3 are v3), so no stored expected output changes
+        # meaning. Had it been a v1 digest the answer would have been no.
+        "V2_JS_WRAPPER": "904df5e4697682e0",
     }
 
     def test_every_wrapper_template_is_byte_for_byte_unchanged(self):

@@ -472,14 +472,29 @@ class GradingService:
                 f"question {getattr(question, 'pk', '?')} declares v3, which is "
                 f"defined for python only; {language!r} was requested")
 
-        starter = (getattr(question, "boilerplate_code", None) or {})
-        source = starter.get("python") if isinstance(starter, dict) else None
-        invocation = execution_adapter.build_invocation(raw_stdin, source or "")
+        invocation = execution_adapter.build_invocation(
+            raw_stdin, GradingService._python_starter(question))
         if not invocation.ok:
             raise ExecutionContractError(
                 f"question {getattr(question, 'pk', '?')}: "
                 f"{invocation.outcome} — {invocation.detail}")
         return invocation.envelope()
+
+    @staticmethod
+    def _python_starter(question):
+        """
+        The question's Python starter, or "".
+
+        The declared contract of record for EVERY language: it is the only one
+        of the five starters that carries types, and both readers of it — the
+        v3 envelope and the v2 kind vector — must be looking at the same text.
+        Two call sites reaching into `boilerplate_code` themselves is how they
+        would drift apart.
+        """
+        starter = getattr(question, "boilerplate_code", None) or {}
+        if not isinstance(starter, dict):
+            return ""
+        return starter.get("python") or ""
 
     @staticmethod
     def quality_execution_plan(question):
@@ -539,7 +554,18 @@ class GradingService:
                 languages.canonical(lang_key) or lang_key
             )
             if template is not None:
-                return template.replace("{user_code}", raw_code), raw_code
+                # The declared kinds travel WITH the harness (Phase 1 M8).
+                # JavaScript carries no annotations, so without them its
+                # parser had only the token count to go on and collapsed a
+                # one-element declared sequence to a scalar while Python,
+                # reading the same signature's annotation, did not. Computed
+                # for every v2 language: the Python and Java templates carry
+                # no placeholder, so the substitution is inert there and the
+                # vector cannot be built one way for one language.
+                kinds = execution_contract.v2_parameter_kinds(
+                    GradingService._python_starter(question))
+                return (execution_contract.render_v2(template, raw_code, kinds),
+                        raw_code)
             # C and C++ are self-contained under every contract: the learner
             # writes a complete program, so there is nothing to wrap.
             return raw_code, raw_code

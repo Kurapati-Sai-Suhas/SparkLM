@@ -141,6 +141,24 @@ def chosen_function(source):
     Mirrors `dir(sol)[0]`: a class's first public method in ALPHABETICAL order,
     not source order. Reproduced rather than corrected, because the adapter has
     to bind arguments to the function that really runs.
+
+    `Solution` is preferred over the first class in the file (Phase 1 M12).
+    Every harness does `Solution()` / `new Solution()`, so `Solution` is the
+    class whose method actually runs — but this read the FIRST class, and the
+    idiomatic structural starter defines its node class first:
+
+        class TreeNode:            <- read this one
+            def __init__(...)      <- filtered out as private
+        class Solution:            <- never reached
+            def goodNodes(self, root: TreeNode) -> int:
+
+    All 68 starters in the bank that define a helper class before `Solution`
+    returned no signature at all, so `v2_parameter_kinds` was empty and the
+    Java and JavaScript structural adapters had nothing to bind from. It also
+    silently refused every v3 envelope for those questions.
+
+    The fallback to `classes[0]` is kept for a starter that names its class
+    something else, which is the only case the old behaviour was right about.
     """
     try:
         tree = ast.parse(source or "")
@@ -149,8 +167,10 @@ def chosen_function(source):
 
     classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
     if classes:
+        target = next((node for node in classes if node.name == "Solution"),
+                      classes[0])
         methods = sorted(
-            (node for node in classes[0].body
+            (node for node in target.body
              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
              and not node.name.startswith("_")),
             key=lambda node: node.name)
@@ -165,7 +185,14 @@ def chosen_function(source):
 
 
 def public_method_names(source):
-    """The public methods the wrapper could pick between, alphabetically."""
+    """
+    The public methods the wrapper could pick between, alphabetically.
+
+    Reads `Solution` for the same reason `chosen_function` does (M12): the
+    ambiguity that matters is the one the harness will hit, and the harness
+    only ever looks at `Solution`. Counting a helper class's methods reported
+    ambiguity where none exists, and missed it where it does.
+    """
     try:
         tree = ast.parse(source or "")
     except SyntaxError:
@@ -173,8 +200,10 @@ def public_method_names(source):
     classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
     if not classes:
         return []
+    target = next((node for node in classes if node.name == "Solution"),
+                  classes[0])
     return sorted(
-        node.name for node in classes[0].body
+        node.name for node in target.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and not node.name.startswith("_"))
 

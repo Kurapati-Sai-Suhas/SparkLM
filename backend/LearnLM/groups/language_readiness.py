@@ -55,6 +55,17 @@ READY = "READY"
 NOT_READY = "NOT_READY"
 UNKNOWN = "UNKNOWN"
 
+#: Machine-readable causes, so a report can group 1,788 questions without
+#: parsing prose. `reason` stays the human sentence; `cause` is the bucket.
+NO_STARTER = "no_starter"
+NO_ENTRY_POINT = "no_entry_point"
+NO_SOLUTION_CLASS = "no_solution_class"
+UNPARSEABLE = "unparseable"
+UNDEFINED_ANNOTATION = "undefined_annotation"
+STRUCTURAL_TYPE = "structural_type"
+NO_HARNESS = "no_harness"
+UNREGISTERED = "unregistered_language"
+
 #: Structural types no contract deserializes, in any language (P2.34).
 #: A signature naming one receives a raw string instead.
 STRUCTURAL_TYPES = frozenset({"TreeNode", "ListNode", "Node"})
@@ -69,6 +80,8 @@ class Readiness:
     language: str
     verdict: str
     reason: str = ""
+    #: Machine-readable bucket for the refusal; empty when ready.
+    cause: str = ""
 
     @property
     def ready(self):
@@ -101,12 +114,14 @@ def assess(question, language):
     lang = languages.get(language)
     if lang is None:
         return Readiness(str(language), NOT_READY,
-                         f"{language!r} is not a registered language")
+                         f"{language!r} is not a registered language",
+                         UNREGISTERED)
 
     source = boilerplate_for(question, lang.key)
     if source is None:
         return Readiness(lang.key, NOT_READY,
-                         "no starter code exists for this language")
+                         "no starter code exists for this language",
+                         NO_STARTER)
 
     return assess_source(source, lang.key,
                          execution_contract.contract_version(question))
@@ -124,10 +139,12 @@ def assess_source(source, language, version=execution_contract.DEFAULT_CONTRACT)
     lang = languages.get(language)
     if lang is None:
         return Readiness(str(language), NOT_READY,
-                         f"{language!r} is not a registered language")
+                         f"{language!r} is not a registered language",
+                         UNREGISTERED)
     if not (source or "").strip():
         return Readiness(lang.key, NOT_READY,
-                         "no starter code exists for this language")
+                         "no starter code exists for this language",
+                         NO_STARTER)
 
     if lang.self_contained:
         return _assess_self_contained(lang, source)
@@ -149,7 +166,7 @@ def _assess_self_contained(lang, source):
             lang.key, NOT_READY,
             f"{lang.label} is self-contained — no wrapper exists at any "
             f"contract version — but the starter defines no main(), so the "
-            f"translation unit cannot link")
+            f"translation unit cannot link", NO_ENTRY_POINT)
     return Readiness(lang.key, READY)
 
 
@@ -159,13 +176,13 @@ def _assess_reflection(lang, source, version):
         if execution_contract.V2_WRAPPERS.get(lang.key) is None:
             return Readiness(
                 lang.key, NOT_READY,
-                f"no v2 harness exists for {lang.label}")
+                f"no v2 harness exists for {lang.label}", NO_HARNESS)
 
     if not re.search(r"\bSolution\b", source):
         return Readiness(
             lang.key, NOT_READY,
             "the harness instantiates `Solution`, which the starter does not "
-            "define")
+            "define", NO_SOLUTION_CLASS)
 
     if lang.key == "python":
         return _assess_python(lang, source)
@@ -186,7 +203,7 @@ def _assess_python(lang, source):
         tree = ast.parse(source)
     except SyntaxError as exc:
         return Readiness(lang.key, NOT_READY,
-                         f"starter does not parse ({exc.msg})")
+                         f"starter does not parse ({exc.msg})", UNPARSEABLE)
 
     defined = {node.name for node in ast.walk(tree)
                if isinstance(node, (ast.ClassDef, ast.FunctionDef))}
@@ -216,14 +233,15 @@ def _assess_python(lang, source):
         return Readiness(
             lang.key, NOT_READY,
             f"signature declares {', '.join(structural)}, which no contract "
-            f"deserializes — the harness would pass a string")
+            f"deserializes — the harness would pass a string", STRUCTURAL_TYPE)
 
     undefined = sorted(names - _PYTHON_PROVIDES - defined - imported)
     if undefined:
         return Readiness(
             lang.key, NOT_READY,
             f"annotation names {', '.join(undefined)}, which the harness "
-            f"never defines — NameError before the learner's first line")
+            f"never defines — NameError before the learner's first line",
+            UNDEFINED_ANNOTATION)
 
     return Readiness(lang.key, READY)
 

@@ -1,6 +1,7 @@
 import json
 import io
 import logging
+import re
 import PyPDF2
 import numpy as np
 import requests
@@ -514,13 +515,44 @@ def generate_starter_stubs(title, python_starter, languages):
     Returns {lang: stub} containing only valid entries, or None on failure.
     Raises DailyQuotaExhausted on the provider's per-day cap.
     """
+    from common import languages as language_registry
+
     langs = ", ".join(languages)
-    c_note = (
-        "\n    Note: \"c\" has no classes. Its stub must be a single free function "
-        "with the same method name and equivalent parameter types (arrays as "
-        "pointer+length pairs, e.g. \"int* nums, int numsSize\"), not a Solution class."
-        if "c" in languages else ""
-    )
+
+    # WHICH execution model each requested language uses, read from the
+    # registry rather than restated (M2 P2.37 / Phase 1 M4).
+    #
+    # This prompt used to say "using a Solution class for the object-oriented
+    # languages (java/cpp/javascript)" and to treat C as a free function. Both
+    # are wrong, and the stored bank is the proof: all 638 C++ starters and all
+    # 20 C starters carry no `main()` and no `#include`, so not one of them can
+    # link. C and C++ are `self_contained` — the source reaches Judge0
+    # unwrapped — and a `Solution` class has no entry point.
+    #
+    # `generate_full_question` has always stated this correctly. Two generators
+    # describing the same contract differently is what produced a bank that
+    # cannot execute, so the reflection/self-contained split is now derived
+    # from `common.languages.REGISTRY` in both.
+    reflection = [key for key in languages
+                  if not language_registry.is_self_contained(key)]
+    self_contained = [key for key in languages
+                      if language_registry.is_self_contained(key)]
+
+    model_notes = []
+    if reflection:
+        model_notes.append(
+            f"    * {', '.join(reflection)} run inside a reflection harness. "
+            "Each must be a \"Solution\" class mirroring the Python method "
+            "name and parameters, with EXACTLY ONE public method and no "
+            "solution logic.")
+    if self_contained:
+        model_notes.append(
+            f"    * {', '.join(self_contained)} are SELF-CONTAINED: compiled "
+            "and run exactly as written, with no wrapper. Each must be a "
+            "COMPLETE program with the necessary includes and a main() that "
+            "reads stdin and prints the answer. A \"Solution\" class here has "
+            "no entry point, cannot link, and will be rejected.")
+
     prompt = f"""
     You are generating starter code templates for a coding-practice platform.
 
@@ -529,26 +561,35 @@ def generate_starter_stubs(title, python_starter, languages):
     {python_starter}
 
     Write matching starter code for these languages: {langs}.
-    Mirror the same method name and parameters, using a Solution class for
-    the object-oriented languages (java/cpp/javascript).{c_note}
-    No solution logic — just the empty template with a comment where the
-    code goes, returning a default value where the language requires one.
+    No solution logic — just the empty template with a comment where the code
+    goes, returning a default value where the language requires one.
+
+    There are TWO execution models and each template must match the one its
+    language uses:
+{chr(10).join(model_notes)}
 
     Respond with ONLY a raw, valid JSON object keyed by language, e.g.:
-    {{"java": "class Solution {{\\n    public int methodName(int x) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}", "cpp": "...", "javascript": "...", "c": "int methodName(int x) {{\\n    // Write your code here\\n    return 0;\\n}}"}}
+    {{"java": "class Solution {{\\n    public int methodName(int x) {{\\n        // Write your code here\\n        return 0;\\n    }}\\n}}", "cpp": "#include <bits/stdc++.h>\\nusing namespace std;\\n\\nint main() {{\\n    // Read stdin, print the answer.\\n    return 0;\\n}}", "javascript": "...", "c": "#include <stdio.h>\\n\\nint main(void) {{\\n    /* Read stdin, print the answer. */\\n    return 0;\\n}}"}}
     """
 
     data = _generate_json_with_fallback(prompt, f"starter-stub generation for {title!r}")
     if data is None:
         return None
-    # "Solution" is a required sanity marker for the class-based languages,
-    # but "c" stubs are plain functions and will never contain that word —
-    # requiring it there rejected every valid C stub.
-    stubs = {
-        lang: code for lang, code in data.items()
-        if lang in languages and isinstance(code, str) and code.strip()
-        and (lang == "c" or "Solution" in code)
-    }
+    # The marker each model actually requires (M2 P2.37).
+    #
+    # This previously demanded "Solution" for every language except C, which
+    # REJECTED a correct self-contained C++ stub — the generator asked for the
+    # wrong shape and then discarded the right one. A self-contained template
+    # is validated on its entry point instead, which is the property that
+    # decides whether it can link.
+    def _usable(lang, code):
+        if lang not in languages or not isinstance(code, str) or not code.strip():
+            return False
+        if language_registry.is_self_contained(lang):
+            return bool(re.search(r"\bmain\s*\(", code))
+        return "Solution" in code
+
+    stubs = {lang: code for lang, code in data.items() if _usable(lang, code)}
     return stubs or None
 
 

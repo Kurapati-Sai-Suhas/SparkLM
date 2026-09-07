@@ -437,7 +437,43 @@ class Command(BaseCommand):
                         "starter_code[python] has unannotated parameters; the "
                         "v2 contract types arguments from the signature"
                     )
+
+            # Whatever the readiness predicate can prove (M2 P2.38 / M6).
+            #
+            # The checks above look for a Solution class and for annotations
+            # BEING PRESENT. Neither parses the template, and neither asks
+            # whether the annotation names resolve — so this validator has
+            # always accepted `nums: List[int]` with no import, which raises
+            # NameError before the learner's first line, and a starter whose
+            # newlines were lost, which does not parse at all. 84 and 21
+            # questions in the bank respectively.
+            #
+            # Delegated rather than restated: `language_readiness` is the one
+            # definition of "can this execute", and a second partial copy here
+            # is how the two answers drift.
+            problem = self._readiness_blocker(key, template)
+            if problem:
+                return f"starter_code[{key}] {problem}"
         return None
+
+    @staticmethod
+    def _readiness_blocker(language, template):
+        """
+        The readiness refusal for this starter, or None.
+
+        `structural_type` is deliberately allowed through. A signature naming
+        TreeNode/ListNode genuinely cannot execute today, but that is the
+        M5 structural-input gap, not a generation defect — rejecting it here
+        would make every tree and linked-list question ungeneratable while
+        M5 is still undecided. It stays visible in
+        `language_readiness_report` instead of being blocked at the source.
+        """
+        from groups import language_readiness
+
+        result = language_readiness.assess_source(template, language)
+        if result.ready or result.cause == language_readiness.STRUCTURAL_TYPE:
+            return None
+        return result.reason
 
     @staticmethod
     def _python_is_annotated(template):

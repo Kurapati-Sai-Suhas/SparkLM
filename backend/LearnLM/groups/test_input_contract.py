@@ -497,9 +497,17 @@ class RemediationScopeTests(SimpleTestCase):
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 def _function_source(template, name):
-    """The source of one function defined inside a wrapper template."""
+    """
+    The source of one function defined inside a wrapper template.
+
+    Rendered through `render_v2`, not a bare `{user_code}` replace: a v2
+    template also carries a kind vector and a structural prelude placeholder
+    (Phase 1 M8 and M5), and a template with any placeholder left in it is not
+    parseable Python. An empty kind vector renders the non-structural harness,
+    which is the one these replicas are evidence about.
+    """
     try:
-        tree = ast.parse(template.replace("{user_code}", "pass"))
+        tree = ast.parse(execution_contract.render_v2(template, "pass", []))
     except SyntaxError:
         return None
     for node in tree.body:

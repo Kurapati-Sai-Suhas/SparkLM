@@ -562,9 +562,16 @@ class GradingService:
                 # for every v2 language: the Python and Java templates carry
                 # no placeholder, so the substitution is inert there and the
                 # vector cannot be built one way for one language.
-                kinds = execution_contract.v2_parameter_kinds(
-                    GradingService._python_starter(question))
-                return (execution_contract.render_v2(template, raw_code, kinds),
+                starter = GradingService._python_starter(question)
+                kinds = execution_contract.v2_parameter_kinds(starter)
+                # The RETURN kind too (Phase 1 M5): the empty structure and
+                # "no value" are the same object in every reflection language,
+                # so only the declaration can tell an empty tree that must
+                # print `[]` from a method with no result that must print
+                # nothing.
+                returns = execution_contract.v2_return_kind(starter)
+                return (execution_contract.render_v2(template, raw_code, kinds,
+                                                     returns),
                         raw_code)
             # C and C++ are self-contained under every contract: the learner
             # writes a complete program, so there is nothing to wrap.

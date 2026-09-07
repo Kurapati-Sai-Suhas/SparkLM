@@ -515,12 +515,16 @@ def test_the_generated_python_source_actually_parses():
     stayed doubled in the generated source. Python's copy produced the literal
     text "found {}" and JavaScript's would not parse at all.
     """
-    source = execution_contract.V2_PYTHON_WRAPPER.replace(
-        "{user_code}", "class Solution:\n    def solve(self, x): return x"
-    )
+    learner = "class Solution:\n    def solve(self, x): return x"
 
-    compile(source, "<generated>", "exec")
-    assert "{{" not in source and "}}" not in source
+    # Both shapes: without a structural prelude, and with one. The prelude is
+    # injected ABOVE the learner's code, so if it ever failed to parse it
+    # would take every structural question down with it.
+    for kinds, returns in (([], ""), (["tree"], "tree")):
+        source = execution_contract.render_v2(
+            execution_contract.V2_PYTHON_WRAPPER, learner, kinds, returns)
+        compile(source, "<generated>", "exec")
+        assert "{{" not in source and "}}" not in source
 
 
 def test_the_generated_javascript_source_actually_parses():

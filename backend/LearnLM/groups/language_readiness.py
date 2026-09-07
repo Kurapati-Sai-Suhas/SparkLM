@@ -49,7 +49,7 @@ import re
 from dataclasses import asdict, dataclass
 
 from common import languages
-from groups import execution_contract
+from groups import execution_contract, structural_types
 
 #: Verdicts.
 READY = "READY"
@@ -67,9 +67,30 @@ STRUCTURAL_TYPE = "structural_type"
 NO_HARNESS = "no_harness"
 UNREGISTERED = "unregistered_language"
 
+#: Phase 1 M5 splits the old single `structural_type` verdict in two, because
+#: it was answering two different questions with one word.
+#:
+#:   STRUCTURAL_TYPE       the platform CAN build this structure, but not at
+#:                         the contract version this question declares. A
+#:                         migration decision, per question, with oracle
+#:                         re-verification — not a missing parser.
+#:   STRUCTURAL_UNSUPPORTED  no adapter exists and none is planned, with the
+#:                         reason named: `Node` is seven different structures,
+#:                         `ImmutableListNode` is a different grading contract.
+#:
+#: Reporting both as "structural_type" hid that the first is a scheduling
+#: question and the second is an architecture question.
+STRUCTURAL_UNSUPPORTED = "structural_unsupported"
+
 #: Structural types no contract deserializes, in any language (P2.34).
 #: A signature naming one receives a raw string instead.
-STRUCTURAL_TYPES = frozenset({"TreeNode", "ListNode", "Node"})
+#:
+#: Kept as the union of what `structural_types` knows about: the two it can
+#: build plus the ones it names as unsupported. A literal set here would be a
+#: third list of structural names to keep in step with the other two.
+STRUCTURAL_TYPES = frozenset(
+    {structural.name for structural in structural_types.REGISTRY}
+    | set(structural_types.UNSUPPORTED))
 
 #: The reflection harness emits no imports, so an annotation naming anything
 #: outside builtins raises before the learner's first line.
@@ -208,7 +229,7 @@ def _assess_reflection(lang, source, version):
             "define", NO_SOLUTION_CLASS)
 
     if lang.key == "python":
-        return _assess_python(lang, source)
+        return _assess_python(lang, source, version)
 
     # Java and JavaScript are structurally checked only as far as the shape
     # above. Deciding more would need a compiler (Java) or would duplicate
@@ -217,7 +238,7 @@ def _assess_reflection(lang, source, version):
                      "starter shape is right; execution not statically decidable")
 
 
-def _assess_python(lang, source):
+def _assess_python(lang, source, version=execution_contract.DEFAULT_CONTRACT):
     """
     Python is decidable further because annotations are evaluated at
     definition time, so an undefined name is a hard failure the AST can see.
@@ -240,12 +261,28 @@ def _assess_python(lang, source):
         for annotation in annotations:
             names |= annotation_names(annotation)
 
-    structural = sorted(names & STRUCTURAL_TYPES)
-    if structural:
+    unsupported = sorted(names & set(structural_types.UNSUPPORTED))
+    if unsupported:
+        first = unsupported[0]
         return Readiness(
             lang.key, NOT_READY,
-            f"signature declares {', '.join(structural)}, which no contract "
-            f"deserializes — the harness would pass a string", STRUCTURAL_TYPE)
+            f"signature declares {', '.join(unsupported)}: "
+            f"{structural_types.UNSUPPORTED[first]}", STRUCTURAL_UNSUPPORTED)
+
+    buildable = sorted(names & {s.name for s in structural_types.REGISTRY})
+    if buildable:
+        if version != execution_contract.CONTRACT_V2:
+            return Readiness(
+                lang.key, NOT_READY,
+                f"signature declares {', '.join(buildable)}, which only the v2 "
+                f"harness builds; this question declares {version}, whose "
+                f"harness would pass a string", STRUCTURAL_TYPE)
+        # v2 renders the structural prelude ABOVE the learner's code, so these
+        # names are defined by the time the annotation is evaluated and the
+        # harness builds the object from the canonical array. Adding them to
+        # `provided` rather than returning READY here on the spot: every other
+        # Python check still has to pass.
+        provided = provided | set(buildable)
 
     undefined = sorted(names - provided)
     if undefined:

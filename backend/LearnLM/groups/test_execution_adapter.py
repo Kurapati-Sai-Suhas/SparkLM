@@ -685,27 +685,33 @@ class ScopeTests(SimpleTestCase):
     #: can miss one character inside a 2KB string literal, and v1 is the
     #: harness ~2,900 production questions were graded under.
     #:
-    #: FIVE of the six are still the ORIGINAL P2.7 digests, including all three
-    #: v1 templates. Only `V2_JS_WRAPPER` has moved, once, for Phase 1 M8 — and
-    #: this guard is what caught it, which is the point of pinning a digest
-    #: rather than reviewing a diff.
+    #: ALL THREE v1 templates still carry their ORIGINAL P2.7 digests, and so
+    #: does the v2 Java harness. Only the two v2 REFLECTION harnesses have
+    #: moved, and only for milestones that say so below — this guard is what
+    #: caught each one, which is the point of pinning a digest rather than
+    #: reviewing a diff.
+    #:
+    #: The shared reason a v2 digest may move and a v1 digest may not: NO
+    #: production question declares v2 (2,923 are v1 and 3 are v3), so no
+    #: stored expected output changes meaning. Measured, not assumed.
     TEMPLATE_DIGESTS = {
         "GENERIC_PYTHON_WRAPPER": "85766c03fbbd4d00",
         "GENERIC_JAVA_WRAPPER": "ede876af69ecbc58",
         "GENERIC_JS_WRAPPER": "18f29dad1e7afef8",
-        "V2_PYTHON_WRAPPER": "efc0cac8e35e23ff",
         "V2_JAVA_WRAPPER": "9b0f0e0c50fc577d",
 
-        # Phase 1 M8. The JavaScript v2 parser now reads the declared kind of
-        # each parameter instead of guessing from the token count, so a
-        # one-element declared sequence reaches the learner as `[5]` in
-        # JavaScript exactly as it already did in Python.
-        #
-        # Safe to move, for reasons that are measured rather than assumed:
-        # this is the v2 harness, and NO production question declares v2
-        # (2,923 are v1 and 3 are v3), so no stored expected output changes
-        # meaning. Had it been a v1 digest the answer would have been no.
-        "V2_JS_WRAPPER": "904df5e4697682e0",
+        # Phase 1 M5. Both reflection harnesses gained a structural prelude
+        # placeholder (a node class + builder + serializer, injected only when
+        # a declared parameter or return is a structure), a return-kind
+        # constant, and a structural branch in parse/render.
+        "V2_PYTHON_WRAPPER": "60ec0806a45b3d97",
+
+        # Phase 1 M8, then M5. M8: the JavaScript v2 parser reads the declared
+        # kind of each parameter instead of guessing from the token count, so
+        # a one-element declared sequence reaches the learner as `[5]` in
+        # JavaScript exactly as it already did in Python. M5: the same
+        # structural prelude and return kind as Python.
+        "V2_JS_WRAPPER": "d6868d0d0609a491",
     }
 
     def test_every_wrapper_template_is_byte_for_byte_unchanged(self):

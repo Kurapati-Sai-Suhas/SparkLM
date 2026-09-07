@@ -486,16 +486,24 @@ def test_the_javascript_parser_asks_the_kind_before_the_length():
     assert kind_check < length_check
 
 
-def test_the_python_harness_is_byte_identical():
+def test_the_kind_vector_is_inert_in_the_python_harness():
     """
-    The repair is to the JavaScript layer. Python's harness gains a
-    placeholder it does not contain, so `render_v2` is inert there — asserted
-    rather than assumed, because a stray placeholder would change the harness
-    every v2 Python question runs under.
+    M8's repair is to the JavaScript layer. Python's harness carries no kind
+    vector, so for a NON-structural question `render_v2` changes nothing about
+    it — asserted rather than assumed, because a stray substitution would
+    change the harness every v2 Python question runs under.
+
+    (M5 later gave the Python template a structural prelude placeholder, which
+    renders to the empty string here because no parameter is a structure. That
+    is why the comparison resolves the placeholder rather than ignoring it.)
     """
+    baseline = ec.V2_PYTHON_WRAPPER.replace("{structural_prelude_python}", "")
+
     rendered = ec.render_v2(ec.V2_PYTHON_WRAPPER, "USER", ["sequence"])
 
-    assert rendered == ec.V2_PYTHON_WRAPPER.replace("{user_code}", "USER")
+    assert rendered == baseline.replace("{user_code}", "USER").replace(
+        "{return_kind}", "")
+    assert "__sparklmKinds" not in rendered
 
 
 def test_the_java_harness_is_byte_identical():

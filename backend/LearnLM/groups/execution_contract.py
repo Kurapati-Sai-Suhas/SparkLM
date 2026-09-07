@@ -98,7 +98,7 @@ type it holds.
 import json
 import os
 
-from groups import execution_adapter
+from groups import execution_adapter, structural_types
 
 CONTRACT_V1 = "v1"
 CONTRACT_V2 = "v2"
@@ -174,7 +174,7 @@ def judge0_resource_limits():
 # propagate. `inspect.signature` types the arguments where the learner
 # annotated them; without annotations a multi-token line is a list and a
 # single-token line is a scalar.
-V2_PYTHON_WRAPPER = '''{user_code}
+V2_PYTHON_WRAPPER = '''{structural_prelude_python}{user_code}
 
 import sys as _sys
 import inspect as _inspect
@@ -203,7 +203,24 @@ def _sparklm_token(text):
     return text
 
 
+def _sparklm_structural_kind(annotation):
+    # Asked before anything else: a declared structure is BUILT, not
+    # tokenised, and its stored form is a JSON array rather than a token line.
+    text = str(annotation).lower()
+    if annotation is _inspect.Parameter.empty:
+        return None
+    if "treenode" in text:
+        return "tree"
+    if "listnode" in text:
+        return "linked_list"
+    return None
+
+
 def _sparklm_parse(line, annotation):
+    kind = _sparklm_structural_kind(annotation)
+    if kind is not None and "_sparklm_build_structure" in globals():
+        return _sparklm_build_structure(kind, line)
+
     tokens = line.split()
     values = [_sparklm_token(t) for t in tokens]
     wants_sequence = annotation is not _inspect.Parameter.empty and (
@@ -216,7 +233,26 @@ def _sparklm_parse(line, annotation):
     return values
 
 
+#: The structural kind this question's method RETURNS, or "" for none. Read
+#: server-side from the starter, because the empty structure and "no value"
+#: are the SAME object here: `-> Optional[TreeNode]` returning None is the
+#: empty tree and must print `[]`, while `-> None` returning None must print
+#: nothing.
+_SPARKLM_RETURN_KIND = "{return_kind}"
+
+
 def _sparklm_render(value):
+    # A returned structure is normalised to its canonical serialised form
+    # BEFORE anything else looks at it, so grading never compares a language's
+    # object identity. Rendered as compact JSON rather than space-joined
+    # tokens: a tree carries `null` for an absent child, and space-joining
+    # would make an absent child indistinguishable from a missing value.
+    if "_sparklm_serialize_structure" in globals():
+        structural = _sparklm_serialize_structure(value)
+        if structural is not None:
+            return _sparklm_json_module.dumps(structural, separators=(",", ":"))
+        if value is None and _SPARKLM_RETURN_KIND:
+            return "[]"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, tuple)):
@@ -255,7 +291,7 @@ def _sparklm_main():
 _sparklm_main()
 '''
 
-V2_JS_WRAPPER = '''{user_code}
+V2_JS_WRAPPER = '''{structural_prelude_javascript}{user_code}
 
 function __sparklmPublicMethods(instance) {
     // Walks the prototype CHAIN, stopping before Object.prototype. Own-
@@ -299,6 +335,14 @@ function __sparklmToken(text) {
 const __sparklmKinds = {parameter_kinds};
 
 function __sparklmParse(line, kind) {
+    // A declared structure is BUILT, not tokenised, and its stored form is a
+    // JSON array rather than a token line. Asked first, for the same reason
+    // the sequence kind is asked before the length rule: the declared type
+    // decides, never the shape of the text.
+    if (typeof __sparklmBuildStructure === 'function'
+            && (kind === '{tree_kind}' || kind === '{linked_list_kind}')) {
+        return __sparklmBuildStructure(kind, line);
+    }
     const values = line.split(/\\s+/).filter((t) => t.length > 0).map(__sparklmToken);
     // A declared sequence is a sequence at every length, INCLUDING one. Asked
     // before the length rule, never as an exception to it.
@@ -309,7 +353,24 @@ function __sparklmParse(line, kind) {
     return values.length === 1 ? values[0] : values;
 }
 
+// The structural kind this question's method RETURNS, or '' for none. Read
+// server-side from the starter, because the empty structure and "no value"
+// are the same value here: a method declared to return a tree that returns
+// null returned the EMPTY tree and must print `[]`.
+const __sparklmReturnKind = '{return_kind}';
+
 function __sparklmRender(value) {
+    // A returned structure is normalised to its canonical serialised form
+    // before anything else looks at it — compact JSON, not space-joined
+    // tokens, because a tree carries `null` for an absent child and joining
+    // would make an absent child indistinguishable from a missing value.
+    if (typeof __sparklmSerializeStructure === 'function') {
+        const structural = __sparklmSerializeStructure(value);
+        if (structural !== null) return JSON.stringify(structural);
+        if ((value === null || value === undefined) && __sparklmReturnKind) {
+            return '[]';
+        }
+    }
     if (typeof value === 'boolean') return value ? 'true' : 'false';
     if (Array.isArray(value)) return value.map(__sparklmRender).join(' ');
     if (value === null || value === undefined) return '';
@@ -457,12 +518,19 @@ V2_WRAPPERS = {
 # Declared parameter kinds — the v2 input contract, server-side
 # ─────────────────────────────────────────────────────────────
 
-#: The kind vector's two values. Deliberately coarser than
-#: `execution_adapter`'s six: v2's input rule branches on sequence-or-not and
-#: nothing else, so a vector carrying `integer` vs `float` would imply a
-#: distinction the harness does not make.
+#: The kind vector's values. Deliberately coarser than `execution_adapter`'s
+#: six: v2's input rule branches on sequence-or-not, and — since M5 — on
+#: whether the parameter is a structure the platform can build. A vector
+#: carrying `integer` vs `float` would imply a distinction no harness makes.
 SEQUENCE_KIND = "sequence"
 SCALAR_KIND = "scalar"
+
+#: The two structural kinds, taken from `structural_types` rather than spelled
+#: again here. A third name for the same concept is how the generator and its
+#: validator came to disagree for 293 questions.
+TREE_KIND = structural_types.TREE
+LINKED_LIST_KIND = structural_types.LINKED_LIST
+STRUCTURAL_KINDS = (TREE_KIND, LINKED_LIST_KIND)
 
 #: Annotation spellings v2 treats as a sequence.
 #:
@@ -493,16 +561,305 @@ def v2_parameter_kinds(source):
     as authoritative — `prepare_stdin` builds every v3 envelope from it. An
     empty vector is not a failure: it means "undeclared", and every harness
     already has a documented fallback for that.
+
+    A structural type is checked FIRST. `Optional[TreeNode]` contains no
+    sequence hint and would otherwise read as a scalar, but the difference
+    that matters is that it is a structure the harness must BUILD, not a value
+    it can tokenise.
     """
     signature = execution_adapter.declared_signature(source or "")
     if signature is None:
         return []
     _name, parameters = signature
-    return [SEQUENCE_KIND if declares_sequence(annotation) else SCALAR_KIND
-            for _parameter, annotation in parameters]
+    return [_kind_of(annotation) for _parameter, annotation in parameters]
 
 
-def render_v2(template, user_code, parameter_kinds):
+def _kind_of(annotation):
+    structural = structural_types.by_annotation(annotation)
+    if structural is not None:
+        return structural.kind
+    return SEQUENCE_KIND if declares_sequence(annotation) else SCALAR_KIND
+
+
+def v2_return_kind(source):
+    """
+    The structural kind the starter RETURNS, or "" when it returns no
+    structure.
+
+    Needed because the empty structure and "no value" are the same object in
+    every one of these languages. `-> Optional[TreeNode]` returning None is the
+    EMPTY TREE and must render as `[]`; `-> None` returning None is a method
+    with no result and must render as nothing. Without the declaration there is
+    no way to tell them apart, and an empty tree would be graded against `[]`
+    while printing "".
+
+    Read from the same starter as the parameter kinds, and injected into both
+    harnesses, so the two languages cannot answer this differently.
+    """
+    signature = execution_adapter.declared_signature(source or "")
+    if signature is None:
+        return ""
+    node, _is_method = execution_adapter.chosen_function(source or "")
+    if node is None or node.returns is None:
+        return ""
+    structural = structural_types.by_annotation(
+        execution_adapter._annotation_text(node.returns))
+    return structural.kind if structural is not None else ""
+
+
+# ─────────────────────────────────────────────────────────────
+# Structural preludes (Phase 1 M5)
+# ─────────────────────────────────────────────────────────────
+#
+# Injected ABOVE the learner's code, never below. Two reasons, both load-
+# bearing:
+#
+#   1. `Optional[TreeNode]` is evaluated when the learner's class is DEFINED.
+#      A node class defined after their code raises NameError before their
+#      first line — exactly the M6 defect, from the harness side.
+#   2. A learner who defines their own `TreeNode` must win. Theirs is defined
+#      later, so it shadows the prelude's; the platform never overwrites the
+#      code someone submitted.
+#
+# This is the layout q2's shipped per-question wrapper already uses — the only
+# structural deserializer in production — so the ordering is precedent, not
+# invention.
+#
+# Empty when no parameter needs it. A question with no structure gets a
+# byte-identical harness to the one M8 left behind.
+
+STRUCTURAL_PRELUDE_PYTHON = '''import json as _sparklm_json_module
+from collections import deque as _sparklm_deque
+
+
+class TreeNode:
+    def __init__(self, val=0, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+
+def _sparklm_build_tree(values):
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    queue = _sparklm_deque([root])
+    index = 1
+    while queue and index < len(values):
+        node = queue.popleft()
+        for attribute in ("left", "right"):
+            if index >= len(values):
+                break
+            value = values[index]
+            index += 1
+            if value is None:
+                continue
+            child = TreeNode(value)
+            setattr(node, attribute, child)
+            queue.append(child)
+    return root
+
+
+def _sparklm_build_list(values):
+    head = None
+    for value in reversed(values or []):
+        head = ListNode(value, head)
+    return head
+
+
+def _sparklm_serialize_tree(root):
+    if root is None:
+        return []
+    out = []
+    queue = _sparklm_deque([root])
+    while queue:
+        node = queue.popleft()
+        if node is None:
+            out.append(None)
+            continue
+        out.append(node.val)
+        queue.append(getattr(node, "left", None))
+        queue.append(getattr(node, "right", None))
+    while out and out[-1] is None:
+        out.pop()
+    return out
+
+
+def _sparklm_serialize_list(head):
+    out = []
+    seen = set()
+    node = head
+    while node is not None:
+        if id(node) in seen:
+            raise ValueError("linked list contains a cycle")
+        seen.add(id(node))
+        out.append(node.val)
+        node = getattr(node, "next", None)
+    return out
+
+
+def _sparklm_build_structure(kind, line):
+    values = _sparklm_json_module.loads(line.strip() or "[]")
+    if not isinstance(values, list):
+        raise ValueError(
+            "structural input must be a JSON array, got "
+            + type(values).__name__)
+    if kind == "tree":
+        return _sparklm_build_tree(values)
+    return _sparklm_build_list(values)
+
+
+def _sparklm_serialize_structure(value):
+    if isinstance(value, TreeNode):
+        return _sparklm_serialize_tree(value)
+    if isinstance(value, ListNode):
+        return _sparklm_serialize_list(value)
+    return None
+
+'''
+
+STRUCTURAL_PRELUDE_JS = '''class TreeNode {
+    constructor(val = 0, left = null, right = null) {
+        this.val = val;
+        this.left = left;
+        this.right = right;
+    }
+}
+
+class ListNode {
+    constructor(val = 0, next = null) {
+        this.val = val;
+        this.next = next;
+    }
+}
+
+function __sparklmBuildTree(values) {
+    if (!values.length || values[0] === null) return null;
+    const root = new TreeNode(values[0]);
+    const queue = [root];
+    let head = 0;
+    let index = 1;
+    while (head < queue.length && index < values.length) {
+        const node = queue[head];
+        head += 1;
+        for (const attribute of ['left', 'right']) {
+            if (index >= values.length) break;
+            const value = values[index];
+            index += 1;
+            if (value === null) continue;
+            const child = new TreeNode(value);
+            node[attribute] = child;
+            queue.push(child);
+        }
+    }
+    return root;
+}
+
+function __sparklmBuildList(values) {
+    let head = null;
+    for (let i = values.length - 1; i >= 0; i -= 1) {
+        head = new ListNode(values[i], head);
+    }
+    return head;
+}
+
+function __sparklmSerializeTree(root) {
+    if (root === null || root === undefined) return [];
+    const out = [];
+    const queue = [root];
+    let head = 0;
+    while (head < queue.length) {
+        const node = queue[head];
+        head += 1;
+        if (node === null || node === undefined) {
+            out.push(null);
+            continue;
+        }
+        out.push(node.val);
+        queue.push(node.left === undefined ? null : node.left);
+        queue.push(node.right === undefined ? null : node.right);
+    }
+    while (out.length && out[out.length - 1] === null) out.pop();
+    return out;
+}
+
+function __sparklmSerializeList(head) {
+    const out = [];
+    const seen = new Set();
+    let node = head;
+    while (node !== null && node !== undefined) {
+        if (seen.has(node)) throw new Error('linked list contains a cycle');
+        seen.add(node);
+        out.push(node.val);
+        node = node.next === undefined ? null : node.next;
+    }
+    return out;
+}
+
+function __sparklmBuildStructure(kind, line) {
+    const values = JSON.parse(line.trim() === '' ? '[]' : line.trim());
+    if (!Array.isArray(values)) {
+        throw new Error('structural input must be a JSON array');
+    }
+    return kind === 'tree'
+        ? __sparklmBuildTree(values)
+        : __sparklmBuildList(values);
+}
+
+function __sparklmSerializeStructure(value) {
+    if (value instanceof TreeNode) return __sparklmSerializeTree(value);
+    if (value instanceof ListNode) return __sparklmSerializeList(value);
+    return null;
+}
+
+'''
+
+#: Java's structural contract. DEFINED, NOT EXECUTED — there is no JVM in this
+#: environment and Judge0 is refusing requests, so nothing below has been
+#: compiled. It is the same algorithm and the same canonical form as the two
+#: above, and it is modelled on q2's shipped Java wrapper, which IS the
+#: production precedent for building a ListNode from stored input. It is kept
+#: here rather than omitted so the contract is written down; the Java v2
+#: template does not yet consume it, and M7 is where it gets compiled.
+STRUCTURAL_PRELUDE_JAVA = '''class TreeNode {
+    int val;
+    TreeNode left;
+    TreeNode right;
+    TreeNode() {}
+    TreeNode(int val) { this.val = val; }
+}
+
+class ListNode {
+    int val;
+    ListNode next;
+    ListNode() {}
+    ListNode(int val) { this.val = val; }
+    ListNode(int val, ListNode next) { this.val = val; this.next = next; }
+}
+'''
+
+#: Which prelude a v2 template needs, by canonical language key. C and C++ are
+#: absent and must stay absent: they are self-contained, the learner's program
+#: reads the canonical text off stdin itself, and injecting a node class would
+#: be the first step of turning them into reflection languages.
+STRUCTURAL_PRELUDES = {
+    "python": STRUCTURAL_PRELUDE_PYTHON,
+    "javascript": STRUCTURAL_PRELUDE_JS,
+}
+
+
+def needs_structural_prelude(parameter_kinds):
+    """Whether any declared parameter is a structure the harness must build."""
+    return any(kind in STRUCTURAL_KINDS for kind in parameter_kinds)
+
+
+def render_v2(template, user_code, parameter_kinds, return_kind=""):
     """
     A v2 harness with its declared kinds and the learner's source substituted.
 
@@ -512,10 +869,25 @@ def render_v2(template, user_code, parameter_kinds):
     templates have always been `.replace`d rather than `.format`ted, since a
     learner's `{` would otherwise raise inside the grader.
     """
+    kinds = list(parameter_kinds)
     rendered = template.replace(
-        "{parameter_kinds}",
-        json.dumps(list(parameter_kinds), separators=(",", ":")))
+        "{parameter_kinds}", json.dumps(kinds, separators=(",", ":")))
     rendered = rendered.replace("{sequence_kind}", SEQUENCE_KIND)
+    rendered = rendered.replace("{tree_kind}", TREE_KIND)
+    rendered = rendered.replace("{linked_list_kind}", LINKED_LIST_KIND)
+    rendered = rendered.replace("{return_kind}", return_kind or "")
+
+    # Empty unless a parameter actually needs it, so a non-structural question
+    # gets the harness it had before M5, byte for byte.
+    #
+    # The placeholder is language-specific rather than one shared name, so a
+    # template can only ever receive ITS OWN prelude — there is no key to get
+    # wrong and no way to inject Python source into the JavaScript harness.
+    wanted = needs_structural_prelude(kinds) or return_kind in STRUCTURAL_KINDS
+    for language, source in STRUCTURAL_PRELUDES.items():
+        rendered = rendered.replace(
+            "{structural_prelude_%s}" % language, source if wanted else "")
+
     return rendered.replace("{user_code}", user_code)
 
 

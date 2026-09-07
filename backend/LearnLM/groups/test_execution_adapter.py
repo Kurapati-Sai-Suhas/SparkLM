@@ -685,11 +685,10 @@ class ScopeTests(SimpleTestCase):
     #: can miss one character inside a 2KB string literal, and v1 is the
     #: harness ~2,900 production questions were graded under.
     #:
-    #: ALL THREE v1 templates still carry their ORIGINAL P2.7 digests, and so
-    #: does the v2 Java harness. Only the two v2 REFLECTION harnesses have
-    #: moved, and only for milestones that say so below — this guard is what
-    #: caught each one, which is the point of pinning a digest rather than
-    #: reviewing a diff.
+    #: ALL THREE v1 templates still carry their ORIGINAL P2.7 digests. Only
+    #: the v2 REFLECTION harnesses have moved, and only for milestones that
+    #: say so below — this guard is what caught each one, which is the point
+    #: of pinning a digest rather than reviewing a diff.
     #:
     #: The shared reason a v2 digest may move and a v1 digest may not: NO
     #: production question declares v2 (2,923 are v1 and 3 are v3), so no
@@ -698,7 +697,14 @@ class ScopeTests(SimpleTestCase):
         "GENERIC_PYTHON_WRAPPER": "85766c03fbbd4d00",
         "GENERIC_JAVA_WRAPPER": "ede876af69ecbc58",
         "GENERIC_JS_WRAPPER": "18f29dad1e7afef8",
-        "V2_JAVA_WRAPPER": "9b0f0e0c50fc577d",
+        # Phase 1 M11. The structural adapter Java's contract described since
+        # M5 is now wired: a prelude (node classes + builder + serializer,
+        # assembled per submission so a class the learner declared is omitted
+        # rather than duplicated — Java cannot shadow), a kind vector, a
+        # return kind, and structural branches in binding and rendering. All
+        # of it is placeholder-gated, so a non-structural Java question renders
+        # the harness it had before.
+        "V2_JAVA_WRAPPER": "0fa9971195d85898",
 
         # Phase 1 M5, then M9. M5: a structural prelude placeholder (node
         # class + builder + serializer, injected only when a declared

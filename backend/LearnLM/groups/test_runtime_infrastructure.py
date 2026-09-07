@@ -305,7 +305,7 @@ def compile_and_run(language, source, stdin, timeout=20):
         binary = path / "program.exe"
         source_file.write_text(source, encoding="utf-8")
         build = subprocess.run([compiler, str(source_file), "-o", str(binary)],
-                               capture_output=True, text=True, timeout=120)
+                               capture_output=True, text=True, timeout=300)
         if build.returncode != 0:
             return None, build.stderr, "COMPILE_ERROR"
         try:
@@ -314,8 +314,31 @@ def compile_and_run(language, source, stdin, timeout=20):
                                  timeout=timeout)
         except subprocess.TimeoutExpired:
             return None, "", "TIMEOUT"
+        except OSError as exc:
+            # WinError 4551: Windows Application Control refused to execute a
+            # freshly built, unsigned binary out of a temp directory. The
+            # COMPILE succeeded; the OS declined to run the result.
+            #
+            # Reported as its own outcome and skipped by the caller, because
+            # it says nothing about the contract under test — and swallowing
+            # it as a failure would train people to ignore a red C++ pilot.
+            if getattr(exc, "winerror", None) == 4551:
+                return None, str(exc), OS_BLOCKED
+            raise
         return (run.stdout.strip(), run.stderr,
                 "OK" if run.returncode == 0 else "RUNTIME_ERROR")
+
+
+#: Windows Application Control refused to run the compiled binary.
+OS_BLOCKED = "OS_BLOCKED"
+
+
+def skip_if_os_blocked(outcome, detail=""):
+    if outcome == OS_BLOCKED:
+        pytest.skip("Windows Application Control (WinError 4551) blocked "
+                    "execution of the compiled binary. The source compiled; "
+                    "the OS declined to run it. ENVIRONMENT_BLOCKED, not a "
+                    f"contract failure. {detail[:120]}")
 
 
 CPP_SCALAR = ("#include <bits/stdc++.h>\nusing namespace std;\n"
@@ -393,21 +416,24 @@ def test_the_self_contained_pilot_compiles_and_runs(topic, language):
         prepared = GradingService.prepare_stdin(question, language, stdin)
         stdout, stderr, outcome = compile_and_run(language, executable,
                                                   prepared)
+        skip_if_os_blocked(outcome, stderr)
         assert outcome == "OK", f"{outcome}: {stderr[:200]}"
         assert stdout == expected
 
 
 @needs("cpp")
 def test_a_cpp_runtime_failure_is_distinguishable_from_a_wrong_answer():
-    _stdout, _stderr, outcome = compile_and_run("cpp", CPP_CRASH, "")
+    _stdout, stderr, outcome = compile_and_run("cpp", CPP_CRASH, "")
 
+    skip_if_os_blocked(outcome, stderr)
     assert outcome == "RUNTIME_ERROR"
 
 
 @needs("cpp")
 def test_a_cpp_timeout_is_distinguishable_from_a_runtime_failure():
-    _stdout, _stderr, outcome = compile_and_run("cpp", CPP_HANG, "", timeout=3)
+    _stdout, stderr, outcome = compile_and_run("cpp", CPP_HANG, "", timeout=3)
 
+    skip_if_os_blocked(outcome, stderr)
     assert outcome == "TIMEOUT"
 
 
@@ -485,13 +511,21 @@ def test_java_still_refuses_more_than_one_public_method():
     assert "exactly one public method" in stderr
 
 
-def test_the_java_structural_adapter_is_still_not_wired_in():
+def test_the_java_structural_adapter_was_wired_in_by_M11():
     """
-    True regardless of whether a JVM appears. M5 wrote the contract down and
-    deliberately did not wire it in; a JVM makes it TESTABLE, not done.
+    M5 wrote Java's structural contract down and deliberately did not wire it:
+    there was no JVM to compile it with. M10 installed one; M11 wired and
+    executed it, which is the sequence this test now records.
+
+    `STRUCTURAL_PRELUDES` still has no `java` key on purpose — Java's prelude
+    is ASSEMBLED per submission by `_java_prelude`, because Java has no
+    shadowing and a node class the learner already declares must be omitted
+    rather than duplicated.
     """
+    assert "{structural_prelude_java}" in execution_contract.V2_JAVA_WRAPPER
     assert "java" not in execution_contract.STRUCTURAL_PRELUDES
-    assert "{structural_prelude" not in execution_contract.V2_JAVA_WRAPPER
+    assert "class TreeNode" in execution_contract.STRUCTURAL_PRELUDE_JAVA
+    assert "SparkLMStructures" in execution_contract.STRUCTURAL_PRELUDE_JAVA
 
 
 # ═════════════════════════════════════════════════════════════

@@ -231,11 +231,83 @@ def _assess_reflection(lang, source, version):
     if lang.key == "python":
         return _assess_python(lang, source, version)
 
+    structural = _assess_declared_structures(lang, source, version)
+    if structural is not None:
+        return structural
+
     # Java and JavaScript are structurally checked only as far as the shape
     # above. Deciding more would need a compiler (Java) or would duplicate
     # the prototype-chain walk the JS harness already does correctly.
     return Readiness(lang.key, UNKNOWN,
                      "starter shape is right; execution not statically decidable")
+
+
+def _assess_declared_structures(lang, source, version):
+    """
+    A structural blocker in a NON-Python reflection starter, or None
+    (Phase 1 M11).
+
+    Java and JavaScript starters carry no annotations, so the structural type
+    is read from the type names the source mentions — `TreeNode root`,
+    `ListNode head`. Narrower than Python's AST reading, and honest about it:
+    it can only find a name that is present.
+
+    Before M11 these questions were reported UNKNOWN, which counts as
+    SERVABLE. A v1 Java question declaring `TreeNode root` cannot execute at
+    all — the harness binds a raw String and `invoke` throws — so "we cannot
+    decide" was the wrong answer to a question that was decidable. The
+    structural gap was hidden inside UNKNOWN; this is what M11's brief means
+    by not letting missing structural support stay hidden.
+    """
+    unsupported = sorted(
+        name for name in structural_types.UNSUPPORTED
+        if re.search(r"\b" + name + r"\b", source))
+    if unsupported:
+        first = unsupported[0]
+        return Readiness(
+            lang.key, NOT_READY,
+            f"signature declares {', '.join(unsupported)}: "
+            f"{structural_types.UNSUPPORTED[first]}", STRUCTURAL_UNSUPPORTED)
+
+    buildable = sorted(
+        structural.name for structural in structural_types.REGISTRY
+        if re.search(r"\b" + structural.name + r"\b", source))
+    if not buildable:
+        return None
+
+    if version != execution_contract.CONTRACT_V2:
+        return Readiness(
+            lang.key, NOT_READY,
+            f"starter declares {', '.join(buildable)}, which only the v2 "
+            f"harness builds; this question declares {version}, whose harness "
+            f"would pass a string", STRUCTURAL_TYPE)
+
+    if lang.key not in _STRUCTURAL_ADAPTERS:
+        return Readiness(
+            lang.key, NOT_READY,
+            f"starter declares {', '.join(buildable)} but no structural "
+            f"adapter is wired for {lang.label}", NO_HARNESS)
+
+    # v2 with a wired adapter: the prelude defines the class and builds the
+    # object from the canonical array. Still UNKNOWN rather than READY —
+    # everything a checker without a compiler can establish is established,
+    # and claiming more would be claiming a compile.
+    return Readiness(
+        lang.key, UNKNOWN,
+        f"{', '.join(buildable)} is built by the v2 structural adapter; "
+        f"execution not statically decidable")
+
+
+#: Languages whose v2 harness actually carries a structural adapter.
+#:
+#: Read off the TEMPLATES rather than listed here, so wiring an adapter is
+#: what changes readiness and a stale list cannot claim one that does not
+#: exist. Java's prelude is assembled by `_java_prelude` rather than stored in
+#: `STRUCTURAL_PRELUDES`, so the placeholder — which every wired language's
+#: template must contain — is the one signal true of all three.
+_STRUCTURAL_ADAPTERS = frozenset(
+    key for key, template in execution_contract.V2_WRAPPERS.items()
+    if "{structural_prelude_" in template)
 
 
 def _assess_python(lang, source, version=execution_contract.DEFAULT_CONTRACT):

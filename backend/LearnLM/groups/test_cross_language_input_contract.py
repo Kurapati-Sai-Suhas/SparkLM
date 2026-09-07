@@ -510,10 +510,25 @@ def test_the_kind_vector_governs_only_the_structural_branch_in_python():
     assert "_SPARKLM_KINDS" not in parse.split("wants_sequence")[1]
 
 
-def test_the_java_harness_is_byte_identical():
+def test_M8s_sequence_repair_is_still_absent_from_the_java_harness():
+    """
+    M8's repair was to the JavaScript parser. Java never carried the sequence
+    kind vector and still does not — it binds a sequence from its own
+    `int[]`/`String[]` parameter types.
+
+    Java DOES carry a kind vector since M11, but only the structural kinds are
+    read from it. Asserted on what the harness does rather than on the
+    template being unchanged, because M11 legitimately changed the template
+    and a byte comparison would have said nothing about behaviour.
+    """
     rendered = ec.render_v2(ec.V2_JAVA_WRAPPER, "USER", ["sequence"])
 
-    assert rendered == ec.V2_JAVA_WRAPPER.replace("{user_code}", "USER")
+    # No structural prelude for a non-structural question...
+    assert "SparkLMStructures" not in rendered
+    assert "class TreeNode" not in rendered
+    # ...and the sequence kind changes nothing about how Java binds arrays.
+    assert "pType == int[].class" in rendered
+    assert 'kind.equals("tree")' not in rendered
 
 
 def test_no_placeholder_survives_rendering():

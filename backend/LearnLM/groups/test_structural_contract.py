@@ -736,10 +736,16 @@ def test_the_java_structural_contract_is_written_down():
         assert field in java
 
 
-def test_the_java_v2_template_does_not_yet_consume_the_prelude():
+def test_the_java_v2_template_consumes_the_prelude_since_M11():
     """
-    Honest scope: the contract is written down, not wired in. Wiring it
-    without a compiler would ship an unexecuted harness to real learners.
+    M5's scope was honest: the contract was written down and NOT wired in,
+    because wiring an unexecuted harness would have shipped it to learners
+    unvalidated. M10 installed a JVM and M11 wired it, so the assertion moves
+    from "not yet" to "and here it is".
+
+    `STRUCTURAL_PRELUDES` deliberately still has no `java` key: Java's prelude
+    is assembled per submission, since Java cannot shadow a class the learner
+    already declared.
     """
-    assert "{structural_prelude" not in ec.V2_JAVA_WRAPPER
+    assert "{structural_prelude_java}" in ec.V2_JAVA_WRAPPER
     assert "java" not in ec.STRUCTURAL_PRELUDES

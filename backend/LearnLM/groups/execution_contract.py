@@ -97,6 +97,7 @@ type it holds.
 
 import json
 import os
+import re
 
 from groups import execution_adapter, structural_types
 
@@ -412,7 +413,14 @@ import java.util.function.*;
 import java.math.*;
 import java.lang.reflect.*;
 
+{structural_prelude_java}
 public class Main {
+    // The declared kind of each parameter and of the return, computed
+    // server-side from the question's Python starter — the signature that is
+    // this question's contract in every language (Phase 1 M8/M5/M11).
+    static final String[] SPARKLM_KINDS = {parameter_kinds_java};
+    static final String SPARKLM_RETURN_KIND = "{return_kind}";
+
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
         StringBuilder sb = new StringBuilder();
@@ -441,7 +449,8 @@ public class Main {
         String[] inputs = input.split("\\\\n");
         for (int i = 0; i < paramTypes.length; i++) {
             String val = i < inputs.length ? inputs[i].trim() : "";
-            Class<?> pType = paramTypes[i];
+            String kind = i < SPARKLM_KINDS.length ? SPARKLM_KINDS[i] : "";
+{structural_bind_java}            Class<?> pType = paramTypes[i];
             if (pType == int.class || pType == Integer.class) {
                 argsToPass[i] = Integer.parseInt(val);
             } else if (pType == long.class || pType == Long.class) {
@@ -470,7 +479,10 @@ public class Main {
     }
 
     static String render(Object value) {
-        if (value == null) return "";
+{structural_render_java}        // The empty structure and "no value" are the same reference here, so
+        // only the DECLARED return kind separates them: a method declared to
+        // return a tree that returns null returned the EMPTY tree.
+        if (value == null) return SPARKLM_RETURN_KIND.isEmpty() ? "" : "[]";
         if (value instanceof boolean[]) {
             boolean[] a = (boolean[]) value;
             StringJoiner j = new StringJoiner(" ");
@@ -822,28 +834,187 @@ function __sparklmSerializeStructure(value) {
 
 '''
 
-#: Java's structural contract. DEFINED, NOT EXECUTED — there is no JVM in this
-#: environment and Judge0 is refusing requests, so nothing below has been
-#: compiled. It is the same algorithm and the same canonical form as the two
-#: above, and it is modelled on q2's shipped Java wrapper, which IS the
-#: production precedent for building a ListNode from stored input. It is kept
-#: here rather than omitted so the contract is written down; the Java v2
-#: template does not yet consume it, and M7 is where it gets compiled.
-STRUCTURAL_PRELUDE_JAVA = '''class TreeNode {
+# ── Java's structural adapter (Phase 1 M11) ─────────────────────────────────
+#
+# EXECUTED, as of M11: compiled and run with local javac/java 21, round-tripping
+# the same sixteen canonical fixtures Python and JavaScript are held to.
+#
+# Field shapes are not invented. The Java content already declares
+# `class ListNode { val, next }` (14 starters) and
+# `class TreeNode { val, left, right }` (11), which is the same shape M5's
+# registry describes, so the adapter matches the bank rather than the bank
+# having to match the adapter.
+#
+# Split into three parts because JAVA HAS NO SHADOWING. Python and JavaScript
+# put the node class above the learner's code and let a learner's own
+# definition win by being defined later; two top-level classes with one name in
+# one Java file is a compile error instead. So a class the learner already
+# declares is OMITTED, which is the same guarantee — the platform never
+# overwrites submitted code — expressed in a language that cannot shadow.
+#
+# Note what that does NOT mean: the learner's source decides whether the
+# platform DEFINES a class, never what a parameter IS. The structural kind
+# comes from the question's declared starter, exactly as it does in the other
+# two languages.
+
+_JAVA_TREE_NODE = '''class TreeNode {
     int val;
     TreeNode left;
     TreeNode right;
     TreeNode() {}
     TreeNode(int val) { this.val = val; }
+    TreeNode(int val, TreeNode left, TreeNode right) {
+        this.val = val;
+        this.left = left;
+        this.right = right;
+    }
 }
+'''
 
-class ListNode {
+_JAVA_LIST_NODE = '''class ListNode {
     int val;
     ListNode next;
     ListNode() {}
     ListNode(int val) { this.val = val; }
     ListNode(int val, ListNode next) { this.val = val; this.next = next; }
 }
+'''
+
+#: The adapter itself. Parses the canonical array by hand: the JDK ships no
+#: JSON reader, and a dependency cannot reach a sandbox.
+_JAVA_STRUCTURES = '''class SparkLMStructures {
+    static List<Integer> parseCanonical(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) return new ArrayList<>();
+        if (!(text.startsWith("[") && text.endsWith("]"))) {
+            throw new IllegalArgumentException(
+                "structural input must be a JSON array, got: " + text);
+        }
+        String body = text.substring(1, text.length() - 1).trim();
+        List<Integer> out = new ArrayList<>();
+        if (body.isEmpty()) return out;
+        for (String piece : body.split(",")) {
+            String token = piece.trim();
+            if (token.equals("null")) { out.add(null); continue; }
+            try {
+                out.add(Integer.valueOf(token));
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(
+                    "structural element is neither an integer nor null: " + token);
+            }
+        }
+        return out;
+    }
+
+    static TreeNode buildTree(List<Integer> values) {
+        if (values.isEmpty() || values.get(0) == null) return null;
+        TreeNode root = new TreeNode(values.get(0));
+        Deque<TreeNode> queue = new ArrayDeque<>();
+        queue.add(root);
+        int index = 1;
+        while (!queue.isEmpty() && index < values.size()) {
+            TreeNode node = queue.poll();
+            for (int child = 0; child < 2 && index < values.size(); child++) {
+                Integer value = values.get(index);
+                index++;
+                // A null contributes no queue entry: a missing subtree costs
+                // one token, not a whole level.
+                if (value == null) continue;
+                TreeNode made = new TreeNode(value);
+                if (child == 0) node.left = made; else node.right = made;
+                queue.add(made);
+            }
+        }
+        return root;
+    }
+
+    static ListNode buildList(List<Integer> values) {
+        ListNode head = null;
+        for (int i = values.size() - 1; i >= 0; i--) {
+            Integer value = values.get(i);
+            if (value == null) {
+                throw new IllegalArgumentException(
+                    "a linked list has no spelling for null");
+            }
+            head = new ListNode(value, head);
+        }
+        return head;
+    }
+
+    static String serializeTree(TreeNode root) {
+        List<String> out = new ArrayList<>();
+        if (root != null) {
+            List<TreeNode> slots = new ArrayList<>();
+            slots.add(root);
+            int i = 0;
+            while (i < slots.size()) {
+                TreeNode node = slots.get(i);
+                i++;
+                if (node == null) { out.add("null"); continue; }
+                out.add(String.valueOf(node.val));
+                slots.add(node.left);
+                slots.add(node.right);
+            }
+            // Trailing nulls trimmed so one tree has one spelling.
+            while (!out.isEmpty() && out.get(out.size() - 1).equals("null")) {
+                out.remove(out.size() - 1);
+            }
+        }
+        return "[" + String.join(",", out) + "]";
+    }
+
+    static String serializeList(ListNode head) {
+        List<String> out = new ArrayList<>();
+        Set<ListNode> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        ListNode node = head;
+        while (node != null) {
+            if (!seen.add(node)) {
+                throw new IllegalStateException("linked list contains a cycle");
+            }
+            out.add(String.valueOf(node.val));
+            node = node.next;
+        }
+        return "[" + String.join(",", out) + "]";
+    }
+}
+'''
+
+#: The whole prelude, for callers that want to read the contract as one text.
+STRUCTURAL_PRELUDE_JAVA = _JAVA_TREE_NODE + "\n" + _JAVA_LIST_NODE + "\n" + \
+    _JAVA_STRUCTURES
+
+#: The structural branches spliced into `Main`. Separate from the prelude, and
+#: separate from each other, because they NAME TreeNode, ListNode and
+#: SparkLMStructures: without the prelude those types do not exist, so a
+#: non-structural Java question that carried them would not COMPILE.
+#:
+#: Found by probing a scalar question after wiring the structural path — every
+#: non-structural Java submission failed to compile, because the binding
+#: branches were unconditional while the prelude was not. Java is unforgiving
+#: that way, and it is the reason both halves are placeholders rather than
+#: permanent text.
+_JAVA_STRUCTURAL_BIND = '''            // The QUESTION's declared kind decides a structure, not the
+            // submitted signature (Phase 1 M11, following M9). A learner who
+            // types the parameter differently must not be handed a different
+            // shape from the one the question declares.
+            if (kind.equals("tree")) {
+                argsToPass[i] = SparkLMStructures.buildTree(
+                    SparkLMStructures.parseCanonical(val));
+                continue;
+            }
+            if (kind.equals("linked_list")) {
+                argsToPass[i] = SparkLMStructures.buildList(
+                    SparkLMStructures.parseCanonical(val));
+                continue;
+            }
+'''
+
+_JAVA_STRUCTURAL_RENDER = '''        if (value instanceof TreeNode) {
+            return SparkLMStructures.serializeTree((TreeNode) value);
+        }
+        if (value instanceof ListNode) {
+            return SparkLMStructures.serializeList((ListNode) value);
+        }
 '''
 
 #: Which prelude a v2 template needs, by canonical language key. C and C++ are
@@ -890,7 +1061,51 @@ def render_v2(template, user_code, parameter_kinds, return_kind=""):
         rendered = rendered.replace(
             "{structural_prelude_%s}" % language, source if wanted else "")
 
+    # Java is assembled rather than substituted whole: it has no shadowing, so
+    # a node class the learner already declares must be omitted instead of
+    # duplicated. See `_java_prelude`.
+    rendered = rendered.replace("{structural_prelude_java}",
+                                _java_prelude(user_code) if wanted else "")
+    rendered = rendered.replace("{structural_bind_java}",
+                                _JAVA_STRUCTURAL_BIND if wanted else "")
+    rendered = rendered.replace("{structural_render_java}",
+                                _JAVA_STRUCTURAL_RENDER if wanted else "")
+    rendered = rendered.replace("{parameter_kinds_java}",
+                                _java_string_array(kinds))
+
     return rendered.replace("{user_code}", user_code)
+
+
+def _java_prelude(user_code):
+    """
+    The Java structural prelude, minus any node class the learner declared.
+
+    Python and JavaScript let a learner's own `TreeNode` win by defining it
+    after the platform's. Java cannot: two top-level classes with one name in
+    one file is a compile error. Omitting ours is the same guarantee — the
+    platform never overwrites submitted code — in a language without
+    shadowing.
+
+    Detection is textual, and deliberately so: the alternative is parsing Java,
+    which this repository has no parser for. A false positive omits a class the
+    learner did not really define, and the result is a COMPILE ERROR the
+    learner can read — never a silent wrong answer.
+    """
+    source = user_code or ""
+    parts = []
+    for name, definition in (("TreeNode", _JAVA_TREE_NODE),
+                             ("ListNode", _JAVA_LIST_NODE)):
+        if not re.search(r"\bclass\s+" + name + r"\b", source):
+            parts.append(definition)
+    parts.append(_JAVA_STRUCTURES)
+    return "\n".join(parts) + "\n"
+
+
+def _java_string_array(kinds):
+    """`{"tree", "scalar"}` — a Java array initializer, not JSON."""
+    if not kinds:
+        return "{}"
+    return "{" + ", ".join(json.dumps(str(kind)) for kind in kinds) + "}"
 
 
 def contract_version(question):

@@ -267,6 +267,37 @@ def test_the_learner_receives_a_real_object_not_a_string(topic):
 
 
 @pytest.mark.django_db
+def test_an_UNANNOTATED_submission_still_receives_a_real_object(topic):
+    """
+    Regression, found by the M9 gate.
+
+    The structural branch first read the SUBMITTED method's annotation. A
+    learner who deletes `: TreeNode | None` from the starter they were handed
+    — perfectly ordinary in a dynamically typed language — was then given the
+    raw text, and their correct code raised
+    `AttributeError: 'str' object has no attribute 'left'`. A wrong verdict on
+    right code, which is the worst outcome available.
+
+    The question declares the structure; the submission does not get a vote.
+    Python now reads the same server-side kind vector JavaScript already did.
+    """
+    question = make_question(topic, STARTER_TREE)
+    unannotated = textwrap.dedent("""
+        class Solution:
+            def echo(self, root):
+                if root is None:
+                    return 0
+                return 1 + max(self.echo(root.left), self.echo(root.right))
+    """)
+
+    stdout, stderr, code = execute(question, "python", unannotated,
+                                   "[1,2,3,4,null,null,5]")
+
+    assert code == 0, stderr
+    assert stdout == "3"
+
+
+@pytest.mark.django_db
 def test_javascript_receives_a_real_object_too(topic):
     question = make_question(topic, STARTER_TREE)
     source = ("class Solution {\n"

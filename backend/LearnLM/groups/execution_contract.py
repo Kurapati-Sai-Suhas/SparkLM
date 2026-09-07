@@ -203,22 +203,23 @@ def _sparklm_token(text):
     return text
 
 
-def _sparklm_structural_kind(annotation):
+#: The declared kind of each parameter, in signature order, computed
+#: server-side from the QUESTION's starter (Phase 1 M8, extended by M5).
+#:
+#: The structural branch below reads THIS rather than the submitted method's
+#: annotation, and the difference is not cosmetic: a learner who deletes the
+#: annotation from the starter they were handed would otherwise be given the
+#: raw text where an object is required, and their correct code would raise
+#: `AttributeError: 'str' object has no attribute 'left'` — a wrong verdict on
+#: right code. The question declares the structure; the submission does not
+#: get a vote. Found by the M9 gate, which submits an unannotated method.
+_SPARKLM_KINDS = {parameter_kinds}
+
+
+def _sparklm_parse(line, annotation, kind=None):
     # Asked before anything else: a declared structure is BUILT, not
     # tokenised, and its stored form is a JSON array rather than a token line.
-    text = str(annotation).lower()
-    if annotation is _inspect.Parameter.empty:
-        return None
-    if "treenode" in text:
-        return "tree"
-    if "listnode" in text:
-        return "linked_list"
-    return None
-
-
-def _sparklm_parse(line, annotation):
-    kind = _sparklm_structural_kind(annotation)
-    if kind is not None and "_sparklm_build_structure" in globals():
+    if kind in ("tree", "linked_list") and "_sparklm_build_structure" in globals():
         return _sparklm_build_structure(kind, line)
 
     tokens = line.split()
@@ -283,7 +284,8 @@ def _sparklm_main():
     args = []
     for index, parameter in enumerate(parameters):
         line = lines[index] if index < len(lines) else ""
-        args.append(_sparklm_parse(line, parameter.annotation))
+        kind = _SPARKLM_KINDS[index] if index < len(_SPARKLM_KINDS) else None
+        args.append(_sparklm_parse(line, parameter.annotation, kind))
 
     print(_sparklm_render(method(*args)))
 

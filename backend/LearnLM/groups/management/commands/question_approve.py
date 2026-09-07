@@ -24,7 +24,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from groups import pre_image
+from groups import content_quarantine, pre_image
 from groups.management.commands import _preimage_ops as ops
 from groups.management.commands import _question_trust as trust
 from groups.models import OracleExecution, QuestionApproval
@@ -104,6 +104,20 @@ class Command(BaseCommand):
         # nondeterminism on record, legacy or conflicting expected outputs, a
         # failing quality gate, an unknown execution contract.
         problems.extend(artifact.blockers)
+
+        # Content review outstanding (Phase 1 M9). A milestone that executes
+        # real content sometimes finds that the CONTENT is wrong rather than
+        # the code — q98's fourth case stores `false` for a tree that is a
+        # valid BST. The artifact cannot see that: every stored output is
+        # internally consistent, and only running the question against a
+        # reference reveals it.
+        #
+        # An ADDITIONAL blocker, never a bypass. It cannot approve anything;
+        # it can only refuse, and it is removed by resolving the finding
+        # rather than by editing this list.
+        quarantine = content_quarantine.blocker_for(question.pk)
+        if quarantine is not None:
+            problems.append(quarantine)
 
         recomputed = artifact.digest()
         supplied = (options["digest"] or "").strip().lower()

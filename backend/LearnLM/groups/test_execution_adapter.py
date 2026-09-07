@@ -700,11 +700,15 @@ class ScopeTests(SimpleTestCase):
         "GENERIC_JS_WRAPPER": "18f29dad1e7afef8",
         "V2_JAVA_WRAPPER": "9b0f0e0c50fc577d",
 
-        # Phase 1 M5. Both reflection harnesses gained a structural prelude
-        # placeholder (a node class + builder + serializer, injected only when
-        # a declared parameter or return is a structure), a return-kind
-        # constant, and a structural branch in parse/render.
-        "V2_PYTHON_WRAPPER": "60ec0806a45b3d97",
+        # Phase 1 M5, then M9. M5: a structural prelude placeholder (node
+        # class + builder + serializer, injected only when a declared
+        # parameter or return is a structure), a return-kind constant, and a
+        # structural branch in parse/render. M9: that branch now reads the
+        # server-side kind vector instead of the SUBMITTED method's
+        # annotation — a learner who deleted the annotation was handed a
+        # string where an object was required and their correct code raised
+        # AttributeError. Python's sequence rule is untouched (K1).
+        "V2_PYTHON_WRAPPER": "2ddfdd82bd7dbc5f",
 
         # Phase 1 M8, then M5. M8: the JavaScript v2 parser reads the declared
         # kind of each parameter instead of guessing from the token count, so

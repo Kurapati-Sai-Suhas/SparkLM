@@ -486,24 +486,28 @@ def test_the_javascript_parser_asks_the_kind_before_the_length():
     assert kind_check < length_check
 
 
-def test_the_kind_vector_is_inert_in_the_python_harness():
+def test_the_kind_vector_governs_only_the_structural_branch_in_python():
     """
-    M8's repair is to the JavaScript layer. Python's harness carries no kind
-    vector, so for a NON-structural question `render_v2` changes nothing about
-    it — asserted rather than assumed, because a stray substitution would
-    change the harness every v2 Python question runs under.
+    M8's sequence repair is to the JavaScript layer, and stays there.
 
-    (M5 later gave the Python template a structural prelude placeholder, which
-    renders to the empty string here because no parameter is a structure. That
-    is why the comparison resolves the placeholder rather than ignoring it.)
+    Python's harness DOES now receive the kind vector — M9 found that reading
+    the submitted method's annotation to detect a structure handed an
+    unannotated learner a string where an object was required. But the vector
+    governs the STRUCTURAL branch only: Python's sequence rule still reads
+    `str(annotation)`, which is K1 and is deliberately unchanged here.
+
+    Asserted rather than described, because "we gave Python the vector" and
+    "we changed how Python types sequences" are different changes and only the
+    first one happened.
     """
-    baseline = ec.V2_PYTHON_WRAPPER.replace("{structural_prelude_python}", "")
+    parse = ec.V2_PYTHON_WRAPPER.split("def _sparklm_parse")[1].split(
+        "\ndef ")[0]
 
-    rendered = ec.render_v2(ec.V2_PYTHON_WRAPPER, "USER", ["sequence"])
-
-    assert rendered == baseline.replace("{user_code}", "USER").replace(
-        "{return_kind}", "")
-    assert "__sparklmKinds" not in rendered
+    # The structural branch reads the injected kind...
+    assert 'kind in ("tree", "linked_list")' in parse
+    # ...and the sequence rule still reads the annotation (K1 untouched).
+    assert '"list" in str(annotation).lower()' in parse
+    assert "_SPARKLM_KINDS" not in parse.split("wants_sequence")[1]
 
 
 def test_the_java_harness_is_byte_identical():

@@ -697,14 +697,21 @@ class ScopeTests(SimpleTestCase):
         "GENERIC_PYTHON_WRAPPER": "85766c03fbbd4d00",
         "GENERIC_JAVA_WRAPPER": "ede876af69ecbc58",
         "GENERIC_JS_WRAPPER": "18f29dad1e7afef8",
-        # Phase 1 M11. The structural adapter Java's contract described since
-        # M5 is now wired: a prelude (node classes + builder + serializer,
-        # assembled per submission so a class the learner declared is omitted
-        # rather than duplicated — Java cannot shadow), a kind vector, a
-        # return kind, and structural branches in binding and rendering. All
-        # of it is placeholder-gated, so a non-structural Java question renders
-        # the harness it had before.
-        "V2_JAVA_WRAPPER": "0fa9971195d85898",
+        # Phase 1 M11, then M16. M11: the structural adapter Java's contract
+        # described since M5 is now wired — a prelude (node classes + builder
+        # + serializer, assembled per submission so a class the learner
+        # declared is omitted rather than duplicated, since Java cannot
+        # shadow), a kind vector, a return kind, and structural branches in
+        # binding and rendering, all placeholder-gated so a non-structural
+        # Java question renders the harness it had before.
+        #
+        # M16: the blob-level `sb.toString().trim()` became "remove only the
+        # separator this loop appended". `trim()` strips BOTH ends, and a
+        # LEADING empty line is how the canonical contract spells an empty
+        # first argument — deleting it shifted every argument one place left.
+        # Python and JavaScript split the raw blob and never had this. Found
+        # by M14's parity validation on q21.
+        "V2_JAVA_WRAPPER": "66c60ea344966f5e",
 
         # Phase 1 M5, then M9. M5: a structural prelude placeholder (node
         # class + builder + serializer, injected only when a declared

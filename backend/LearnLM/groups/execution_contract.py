@@ -427,7 +427,27 @@ public class Main {
         while (scanner.hasNextLine()) {
             sb.append(scanner.nextLine()).append("\\n");
         }
-        String input = sb.toString().trim();
+        // Remove ONLY the separator this loop appended after the last line
+        // (Phase 1 M16). This was `sb.toString().trim()`, which strips BOTH
+        // ends — and a leading empty line is exactly how the canonical
+        // contract spells "the first argument is an empty list". Deleting it
+        // shifted every argument one place left:
+        //
+        //     stdin "\\n[0]"   python [[],[0]]   js [[],[0]]   java [[0],[]]
+        //
+        // Python and JavaScript split the raw blob and never had this. Found
+        // by M14's read-only parity validation on q21, whose second stored
+        // case merges an empty list with [0].
+        //
+        // Whitespace AROUND a token is still handled, per argument, by the
+        // `inputs[i].trim()` below — that is the trim that was doing useful
+        // work, and it is untouched. Trailing empty arguments are unaffected
+        // too: Java's split already discards trailing empty fields, and the
+        // `i < inputs.length` guard supplies "" for them.
+        String input = sb.toString();
+        if (input.endsWith("\\n")) {
+            input = input.substring(0, input.length() - 1);
+        }
 
         Solution sol = new Solution();
         List<Method> publicMethods = new ArrayList<>();

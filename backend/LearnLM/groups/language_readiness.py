@@ -404,6 +404,69 @@ def annotation_names(annotation):
     return names
 
 
+#: The name whose canonical spelling is a PEP 604 union rather than a rename
+#: (Phase 1 M13). `Optional[X]` means `X | None` and always has; the two are
+#: the same type, so rewriting one to the other changes spelling and nothing
+#: else.
+#:
+#: Kept apart from `CANONICAL_GENERICS` because it is a different KIND of
+#: rewrite — that map renames a node, this one restructures a subscript — and
+#: folding them together would invite the next contributor to add
+#: `Union`, `Sequence`, `Mapping` and a general typing rewriter behind them.
+#: `Union[X, None]` is deliberately NOT handled: it is spelled several ways
+#: (`Union[None, X]`, `Union[X, Y, None]`), and each spelling would be a
+#: separate judgement rather than one mechanical rule.
+_OPTIONAL = "Optional"
+
+
+class _Canonicaliser(ast.NodeTransformer):
+    """
+    PEP 585 renames plus the one PEP 604 restructure. Refuses to guess.
+
+    `refused` records why nothing was produced, so a caller can tell "already
+    canonical" from "this is beyond the rule".
+    """
+
+    def __init__(self):
+        self.refused = None
+
+    def visit_Subscript(self, node):
+        # The nesting check runs BEFORE descending. `generic_visit` is
+        # depth-first, so by the time it returns the inner `Optional` has
+        # already been rewritten and there is nothing left to detect —
+        # `Optional[Optional[int]]` came out as `int | None | None`, which is
+        # neither canonical nor what anyone wrote.
+        is_optional = (isinstance(node.value, ast.Name)
+                       and node.value.id == _OPTIONAL)
+        if is_optional and _names_optional(node.slice):
+            # Exactly ONE optional layer. `Optional[Optional[X]]` is
+            # degenerate, and unwrapping it twice would be a rewriter making
+            # a judgement about intent.
+            self.refused = "nested Optional is not a mechanical rewrite"
+            return node
+
+        self.generic_visit(node)
+        if not is_optional:
+            return node
+        inner = node.slice
+        if isinstance(inner, ast.Tuple):
+            # `Optional[X, Y]` is not valid typing; refuse rather than invent.
+            self.refused = "Optional takes exactly one argument"
+            return node
+        return ast.BinOp(left=inner, op=ast.BitOr(),
+                         right=ast.Constant(value=None))
+
+    def visit_Name(self, node):
+        if node.id in CANONICAL_GENERICS:
+            node.id = CANONICAL_GENERICS[node.id]
+        return node
+
+
+def _names_optional(node):
+    return any(isinstance(child, ast.Name) and child.id == _OPTIONAL
+               for child in ast.walk(node))
+
+
 def canonical_annotation(annotation):
     """
     One annotation expression rewritten in the canonical convention, as text.
@@ -412,12 +475,30 @@ def canonical_annotation(annotation):
     total and mechanical, which is the point — a caller can compare a proposed
     annotation against this and know the operator applied the convention
     rather than choosing a different type.
+
+    Two rules, and deliberately only two: the PEP 585 renames in
+    `CANONICAL_GENERICS`, and `Optional[X]` -> `X | None`. Anything the rule
+    cannot do mechanically returns the annotation UNCHANGED, which a caller
+    comparing against it reads as "no canonical repair exists" and refuses.
+    Returning a best effort would be the general typing rewriter this is not.
     """
-    clone = copy.deepcopy(annotation)
-    for node in ast.walk(clone):
-        if isinstance(node, ast.Name) and node.id in CANONICAL_GENERICS:
-            node.id = CANONICAL_GENERICS[node.id]
-    return ast.unparse(clone)
+    original = ast.unparse(annotation)
+    canonicaliser = _Canonicaliser()
+    rewritten = canonicaliser.visit(copy.deepcopy(annotation))
+    if canonicaliser.refused is not None:
+        return original
+
+    text = ast.unparse(ast.fix_missing_locations(rewritten))
+
+    # A canonicalisation changes SPELLING. If it changed which structural type
+    # the annotation names — or introduced or removed one — it is not a
+    # canonicalisation, and the caller must not accept it as one. Defence in
+    # depth: no rule above can do this today, and this is what stops the next
+    # one from doing it quietly.
+    if structural_types.by_annotation(original) is not \
+            structural_types.by_annotation(text):
+        return original
+    return text
 
 
 def _identifiers(text):

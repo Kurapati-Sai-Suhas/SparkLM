@@ -47,6 +47,10 @@ async function loadApi() {
       // numbers were requested. Existing assertions read only url/method/
       // data/headers, so this is additive.
       params: config.params,
+      // `timeout` added for M15: a request that cannot terminate leaves the
+      // UI inert, and the only way to assert the client sets one is to see
+      // what the adapter was actually handed. Additive, like the two above.
+      timeout: config.timeout,
       headers: { ...config.headers },
     });
     const queue = responses[config.url] ?? [];
@@ -79,6 +83,34 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("transport: a request must terminate (M15)", () => {
+  it("every request carries a timeout", async () => {
+    // Without one, axios waits on the browser's own limit — minutes — and a
+    // caller that renders only on success or on error renders NOTHING for
+    // that whole window. That is what made a slow login indistinguishable
+    // from a form that had ignored the click.
+    const { userAPI } = await loadApi();
+
+    await userAPI.getProfile();
+
+    expect(seen[0].timeout).toBeGreaterThan(0);
+  });
+
+  it("the timeout outlasts a free-plan cold start", async () => {
+    // The API is on Render's FREE plan: it sleeps when idle, then runs
+    // `migrate` and `ensure_submission_partitions` before daphne accepts a
+    // connection. A cold start legitimately takes 30-60s, so a short timeout
+    // would turn "slow" into "broken" for the first user after every quiet
+    // period — while an absent one leaves the UI inert forever.
+    const { userAPI } = await loadApi();
+
+    await userAPI.getProfile();
+
+    expect(seen[0].timeout).toBeGreaterThanOrEqual(60000);
+    expect(seen[0].timeout).toBeLessThanOrEqual(120000);
+  });
 });
 
 describe("request interceptor", () => {

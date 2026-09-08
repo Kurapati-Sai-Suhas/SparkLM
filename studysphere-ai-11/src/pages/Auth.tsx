@@ -20,6 +20,41 @@ const PASSWORD_RULES: { label: string; test: (pw: string) => boolean }[] = [
   { label: "One symbol", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
 ];
 
+/**
+ * A message the user can act on, from whatever axios threw (M15).
+ *
+ * The old handler said "check your username and password" for EVERY failure,
+ * so a sleeping server, a dropped connection and a genuinely wrong password
+ * were indistinguishable — and the advice was wrong for two of the three.
+ *
+ * Nothing from the server body is rendered: DRF's `detail` is safe today, but
+ * this is the one screen an unauthenticated stranger can reach, and a fixed
+ * set of strings cannot leak a stack trace, a database error or a secret.
+ */
+export function loginErrorMessage(error: any): string {
+  const status = error?.response?.status;
+  if (status === 401 || status === 400) {
+    return "Incorrect username or password.";
+  }
+  if (status === 429) {
+    return "Too many attempts. Please wait a moment and try again.";
+  }
+  if (status && status >= 500) {
+    return "The server had a problem. Please try again in a moment.";
+  }
+  if (error?.code === "ECONNABORTED") {
+    // The API sleeps on Render's free plan; the first request after a quiet
+    // period wakes it, and that can outlive the client timeout.
+    return "The server took too long to respond. It may be waking up — please try again.";
+  }
+  if (error?.response === undefined) {
+    // No response at all: offline, DNS, TLS, or a CORS refusal. The browser
+    // does not tell script which, so the message must not guess.
+    return "Could not reach the server. Check your connection and try again.";
+  }
+  return "Sign in failed. Please try again.";
+}
+
 /** Flattens DRF's {field: [messages]} error shape into one string per field. */
 function fieldErrorsFrom(error: any): Record<string, string> {
   const data = error?.response?.data;
@@ -37,6 +72,11 @@ export default function Auth() {
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  //: True while a login request is in flight. Drives the button's label and
+  //: disabled state, and blocks a second submit — the request can take tens
+  //: of seconds when the API is waking from sleep, and with no feedback at
+  //: all that window is indistinguishable from a broken form.
+  const [loginPending, setLoginPending] = useState(false);
 
   const [signupName, setSignupName] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
@@ -54,20 +94,40 @@ export default function Auth() {
     e.preventDefault();
     setLoginError("");
 
+    // A second submit while the first is in flight would race two logins and
+    // could throttle the user out of their own account (the endpoint is rate
+    // limited per IP). The button is disabled too; this is the guard that
+    // holds when the form is submitted by pressing Enter.
+    if (loginPending) return;
+
     if (!loginUsername) {
       setLoginError("Please enter your username.");
       return;
     }
 
+    setLoginPending(true);
     try {
       const response = await authAPI.login(loginUsername, loginPassword);
-      if (response.access) {
+      if (response?.access) {
+        // Deliberately NOT re-enabled: the browser is navigating away, and
+        // an enabled button during that window invites a second login.
+        //
+        // This is why the reset below is not in a `finally` — `finally` runs
+        // even when the `try` returns, so the button flickered back to
+        // enabled on the way out. Caught by
+        // `stays disabled after success ...`.
         window.location.href = "/";
+        return;
       }
+      // 200 with no access token. Unreachable through today's backend, and
+      // handled anyway: the previous code fell off the end of the `try` here,
+      // setting no error and performing no navigation — precisely the silent
+      // dead end this milestone exists to remove.
+      setLoginError("Sign in failed. Please try again.");
     } catch (error) {
-      console.error("LOGIN FAILED. Error details:", error);
-      setLoginError("Login failed — check your username and password.");
+      setLoginError(loginErrorMessage(error));
     }
+    setLoginPending(false);
   };
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -271,16 +331,32 @@ export default function Auth() {
                   </div>
 
                   {loginError && (
-                    <p className="text-xs text-rose-400 text-center">{loginError}</p>
+                    <p
+                      role="alert"
+                      className="text-xs text-rose-400 text-center"
+                    >
+                      {loginError}
+                    </p>
                   )}
 
                   <Button
                     type="submit"
-                    className="group w-full h-11 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white font-semibold shadow-[0_0_25px_rgba(99,102,241,0.4)] hover:shadow-[0_0_40px_rgba(99,102,241,0.65)] transition-all"
+                    disabled={loginPending}
+                    aria-busy={loginPending}
+                    className="group w-full h-11 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white font-semibold shadow-[0_0_25px_rgba(99,102,241,0.4)] hover:shadow-[0_0_40px_rgba(99,102,241,0.65)] transition-all disabled:opacity-70"
                   >
-                    Sign In
-                    <ArrowRight className="h-4 w-4 ml-1.5 group-hover:translate-x-0.5 transition-transform"/>
+                    {loginPending ? "Signing in…" : "Sign In"}
+                    {!loginPending && (
+                      <ArrowRight className="h-4 w-4 ml-1.5 group-hover:translate-x-0.5 transition-transform"/>
+                    )}
                   </Button>
+
+                  {loginPending && (
+                    <p className="text-[10px] text-slate-400 text-center">
+                      Waking the server if it has been idle — this can take up
+                      to a minute.
+                    </p>
+                  )}
 
                   <p className="text-center text-[10px] text-slate-500 uppercase tracking-widest pt-2">
                     Secure &amp; encrypted authentication

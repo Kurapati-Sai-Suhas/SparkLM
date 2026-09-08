@@ -17,6 +17,18 @@ const api = axios.create({
   },
   // Required for the httpOnly refresh cookie to be sent at all.
   withCredentials: true,
+  // A request must terminate visibly (M15). Without this axios waits on the
+  // browser's own limit — minutes — and a caller that only renders on
+  // success or on error renders NOTHING for the whole window.
+  //
+  // 75s, not 10s: the API runs on Render's FREE plan, which sleeps after
+  // idle and then runs `migrate` and `ensure_submission_partitions` before
+  // daphne accepts a connection. A cold start legitimately takes 30-60s, and
+  // a timeout under that would turn "slow" into "broken" for the first user
+  // after every quiet period. Long enough to let a real cold start finish;
+  // short enough that the UI is never inert indefinitely.
+  timeout: 75000,
+  timeoutErrorMessage: "The server took too long to respond.",
 });
 
 // ── Access token: in memory, not localStorage (Auth v2) ────────────────

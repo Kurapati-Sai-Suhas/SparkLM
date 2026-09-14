@@ -94,7 +94,7 @@ def report(gap_seconds: float, loop_seconds: float,
                 f"{fraction:.0%}. A visitor arriving in that window waits out "
                 f"a cold start (measured 92.9 s). Fix: an external uptime "
                 f"monitor on a true 5-minute cadence, or a paid Render plan "
-                f"that does not sleep — see docs/DEPLOYMENT.md.")
+                f"that does not sleep - see docs/DEPLOYMENT.md.")
     return covered, line
 
 

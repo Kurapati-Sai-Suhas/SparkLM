@@ -376,11 +376,20 @@ it reported success on all 194 runs while never preventing a spin-down):
   then time `curl -w "%{time_starttransfer}" https://sparklm-api.onrender.com/healthz`.
   Under 3 s means warm.
   **Caveat this test:** it can only prove the service was *warm*, never that it
-  sleeps, because it cannot stop anyone else from touching the URL. An attempt
-  on 2026-09-14 (16 min of silence from this machine) returned in 0.70 s — the
-  instance had been kept awake by traffic outside the test's control, so the
-  run says nothing either way. Treat a fast result as inconclusive and a slow
-  one as confirmation.
+  sleeps, because it cannot stop anyone else from touching the URL. A
+  deliberate attempt on 2026-09-14 (16 min of silence from this machine)
+  returned in 0.70 s — the instance was awake for reasons outside the test's
+  control, so that run said nothing either way. Treat a fast result as
+  inconclusive and a slow one as confirmation.
+
+  **Confirmed the same day, by accident, which is the more trustworthy way.**
+  About 50 min later — no deliberate quiet period, simply no traffic —
+  `deployment_smoke.py` measured `backend health` at **92.53 s**, against
+  0.85 s on a run an hour earlier. The `/healthz` admission counter had also
+  reset from `admitted: 13` to `admitted: 0`, so this was a genuinely new
+  process, not a slow response from the old one. That is the spin-down, the
+  92.9 s figure reproduced independently, and the exact experience behind
+  "the site is not opening".
 
 ### Quota trade-offs — check these before enabling
 

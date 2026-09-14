@@ -97,7 +97,10 @@ def main() -> int:
         # The SPA rewrite: a deep link must serve index.html, not 404.
         status, body, _headers, _s = request("GET", f"{frontend}/auth")
         if status != 200:
-            return False, f"HTTP {status} — SPA rewrite is not configured"
+            # ASCII only in anything printed: this runs on a Windows console
+            # as readily as on a CI runner, and a UnicodeEncodeError from a
+            # dash would be a baffling way for a smoke test to fail.
+            return False, f"HTTP {status} - SPA rewrite is not configured"
         return True, "HTTP 200, deep link rewritten to the app"
 
     def backend_health():
@@ -191,7 +194,7 @@ def main() -> int:
     slow = [r for r in results if r.ok and r.seconds > 10]
     print(f"\n  {len(results) - len(failed)}/{len(results)} passed")
     if slow:
-        print(f"  note: {len(slow)} check(s) took over 10s — the API was "
+        print(f"  note: {len(slow)} check(s) took over 10s - the API was "
               f"probably asleep and had to cold start")
     if failed:
         print(f"\n  FAILED: {', '.join(r.name for r in failed)}")

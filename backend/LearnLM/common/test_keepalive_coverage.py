@@ -128,6 +128,17 @@ def test_a_long_gap_says_how_long_production_was_asleep(coverage):
     assert "289 min" in line
 
 
+def test_the_report_is_printable_on_a_windows_console(coverage):
+    # Printed output stays ASCII. This runs on a CI runner (UTF-8) and on a
+    # developer's cp1252 console, and a UnicodeEncodeError raised while
+    # formatting a warning would fail the check for a reason that has nothing
+    # to do with what it measures. An em-dash slipped in on the first pass.
+    for gap_minutes in (5, 304):
+        _covered, line = coverage.report(gap_minutes * 60, LOOP, IDLE)
+
+        line.encode("ascii")          # raises if a non-ASCII dash returns
+
+
 def test_the_warning_names_a_real_remedy(coverage):
     # A warning that only says "this is bad" gets ignored. Whoever reads it
     # must be able to act without re-deriving the diagnosis.

@@ -326,9 +326,31 @@ a speed one.
 **The in-repo workflow is a mitigation, not the fix.** GitHub throttles
 free-tier `schedule:` cron hard — measured gaps between runs of
 `.github/workflows/keepalive.yml` were **54–213 min (mean 104.5)**, every one
-of them longer than the 15-min idle timeout. `keepalive.yml` now loops for
-50 min per run to widen its coverage (~14% → ~60% warm), and fails loudly if
-the instance goes cold mid-loop, but it cannot fix a trigger we don't control.
+of them longer than the 15-min idle timeout. `keepalive.yml` loops for 45 min
+per run to widen its coverage, and fails loudly if the instance goes cold
+mid-loop, but it cannot fix a trigger we don't control.
+
+> **Re-measured 2026-09-14 (M15b). This step was never actually done, and it
+> shows.** Gaps between the eight most recent runs were **72–304 min**, so the
+> real warm duty cycle is about **25%**, not the ~60% this document previously
+> claimed. The API is asleep for roughly three quarters of the day, and the
+> first visitor in any of those windows pays the 92.9 s wake-up. SparkLM was
+> reported as "not opening" on exactly that symptom.
+>
+> Two things changed in response. Neither replaces the monitor below:
+>
+> - `scripts/keepalive_coverage.py` now runs at the start of every warm-keeper
+>   run and annotates it when production slept since the previous one. Until
+>   then, every run reported `success` while covering a quarter of the day,
+>   because each run only reported on itself.
+> - The frontend no longer *looks* dead during a wake-up: the auth gate says
+>   what it is waiting for, and the API client has a 75 s timeout so a cold
+>   start ends at the login page instead of an indefinite spinner.
+>
+> **If the demo must not be slow at all, the monitor is not sufficient either
+> — it only shrinks the window.** The only way to remove cold starts is a
+> Render plan that does not sleep (Starter, ~$7/month). That is a spending
+> decision, so it is stated here rather than taken.
 
 **Set up an external uptime monitor (2 minutes, free):**
 
@@ -345,9 +367,20 @@ it reported success on all 194 runs while never preventing a spin-down):
   **"first ping (cold tolerated)"** metric is the signal: with the external
   monitor working, first pings stay near ~1 s. If they creep toward 90 s, the
   monitor has stopped covering the gaps.
+- The same summary now carries a **"Warm coverage"** section. With the monitor
+  running it should say *Continuous coverage*; a `Production was asleep for
+  about N min` warning means the monitor is not covering the gaps between
+  workflow runs. This is the metric that was missing — the first-ping number
+  only describes the moment a run happens to start.
 - Or repeat the controlled test directly: leave the site untouched for 20 min,
   then time `curl -w "%{time_starttransfer}" https://sparklm-api.onrender.com/healthz`.
   Under 3 s means warm.
+  **Caveat this test:** it can only prove the service was *warm*, never that it
+  sleeps, because it cannot stop anyone else from touching the URL. An attempt
+  on 2026-09-14 (16 min of silence from this machine) returned in 0.70 s — the
+  instance had been kept awake by traffic outside the test's control, so the
+  run says nothing either way. Treat a fast result as inconclusive and a slow
+  one as confirmation.
 
 ### Quota trade-offs — check these before enabling
 

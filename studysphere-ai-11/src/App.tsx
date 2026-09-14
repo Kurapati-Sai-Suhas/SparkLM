@@ -82,9 +82,28 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     return (
       <div
         data-testid="auth-checking"
-        className="flex h-screen items-center justify-center bg-slate-950"
+        className="flex h-screen flex-col items-center justify-center gap-4 bg-slate-950 px-6 text-center"
       >
         <div className="h-10 w-10 rounded-full border-2 border-transparent border-t-indigo-400 animate-spin" />
+        {/*
+          This screen used to be the spinner alone on a near-black page, with
+          no bounded wait behind it. The API runs on Render's FREE plan, which
+          sleeps after ~15 minutes idle; the repository's own warm-keeper
+          measured a 92.9s cold start against 0.71s warm. Since this check is
+          the FIRST thing every page load does, a visitor arriving during a
+          sleep window saw an unexplained dark screen for a minute and a half
+          — which is indistinguishable from a site that is down, and is
+          exactly how it was reported.
+
+          The words are the fix for that. The bounded wait is the axios
+          timeout; when it expires this resolves to "out" and the login page
+          renders, so the worst case is now a slow arrival rather than a dead
+          one.
+        */}
+        <p className="text-sm text-slate-300">Signing you in…</p>
+        <p className="max-w-xs text-xs text-slate-500">
+          Waking the server if it has been idle — this can take up to a minute.
+        </p>
       </div>
     );
   }

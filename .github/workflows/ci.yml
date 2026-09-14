@@ -166,3 +166,55 @@ jobs:
     - name: Build frontend
       working-directory: studysphere-ai-11
       run: npm run build
+
+    # The production build guard, exercised for real (M15b). The unit tests
+    # cover the predicate; this proves it is actually WIRED INTO the build,
+    # which is the part that protects the deployment. A build that succeeds
+    # here would mean a production bundle pointing at localhost can ship —
+    # deploying green and being completely unreachable, which is invisible to
+    # every platform health signal because Vercel still serves HTTP 200.
+    - name: Production config guard rejects a localhost API URL
+      working-directory: studysphere-ai-11
+      env:
+        VERCEL_ENV: production
+        VITE_API_URL: http://localhost:8000
+      run: |
+        if npm run build > guard.log 2>&1; then
+          echo "::error::The production config guard did NOT reject a localhost VITE_API_URL."
+          tail -40 guard.log
+          exit 1
+        fi
+        grep -q "production config" guard.log
+        echo "Guard fired as expected:"
+        grep "production config" guard.log
+
+  # ── Post-deployment verification ─────────────────────────────────────────
+  #
+  # Runs only on a push to main — i.e. after the revision that Vercel and
+  # Render deploy from. Nothing else watches the JOIN between the two
+  # services: Vercel serves the SPA shell with HTTP 200 whatever state the
+  # API is in, and Render answers its own health check without any idea
+  # whether the frontend can reach it. SparkLM was reported "not opening"
+  # while both platforms reported healthy.
+  #
+  # Non-blocking (`continue-on-error`) on purpose: the API sleeps on Render's
+  # free plan, so a cold start or a platform blip must not paint a green
+  # commit red. It surfaces the state; it does not gate the merge.
+  deployment-smoke:
+    name: Deployment Smoke (production URLs)
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    # Standard library only — no pip install, nothing to break.
+    - name: Smoke test the deployed frontend and backend
+      run: python scripts/deployment_smoke.py

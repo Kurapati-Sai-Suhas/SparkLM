@@ -24,12 +24,25 @@
 #     while never preventing a spin-down. A keepalive that cannot fail is not
 #     a keepalive — it is a green checkmark.
 #
+# RE-MEASURED 2026-09-14 (M15b) — the throttling above has not improved, and
+# the reporting had the same blind spot one level up. Gaps between the eight
+# most recent runs, end-of-run to start-of-next:
+#     266  72  72  96  104  205  304    (minutes)
+# The in-run loop covers 45 of each of those, so the warm duty cycle was
+# roughly 25% — the API slept through about three quarters of the day — and
+# every one of those runs reported `success`, because each run only ever
+# reported on itself. "Was it warm while I was watching?" is not the question
+# a visitor asks. scripts/keepalive_coverage.py now answers the real one and
+# annotates the run when production slept; see
+# backend/LearnLM/common/test_keepalive_coverage.py.
+#
 # The ping logic lives in scripts/keepalive.sh so it can be tested; a review
 # found the inline version had no behavioural coverage at all. See
 # backend/LearnLM/common/test_keepalive_contract.py.
 #
-# This remains a MITIGATION. The real fix is an external uptime monitor
-# honouring a true 5-minute cadence (docs/DEPLOYMENT.md, "Keeping the free
+# This remains a MITIGATION, and the 2026-09-14 numbers show how partial a one.
+# The real fix is an external uptime monitor honouring a true 5-minute cadence,
+# or a Render plan that does not sleep (docs/DEPLOYMENT.md, "Keeping the free
 # tier warm"). Once that monitor is live, set LOOP_SECONDS to 0 below: this
 # workflow drops to a single ping and stops occupying a runner for 45 minutes
 # to do a job something else is already doing.
@@ -52,6 +65,12 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    # `actions: read` is for the coverage step below, which reads this
+    # workflow's own run history. Declared explicitly so the job keeps working
+    # whatever the repository's default token permissions are set to.
+    permissions:
+      actions: read
+      contents: read
     # Budget check (the earlier 50 min loop / 55 min timeout could be killed
     # mid-run and reported as a false failure):
     #   last ping may start at  LOOP_SECONDS - 1        = 2699 s
@@ -70,6 +89,32 @@ jobs:
       WARM_THRESHOLD_SECONDS: "10"
     steps:
       - uses: actions/checkout@v4
+
+      # Runs BEFORE the loop, not after: the gap being measured already
+      # happened, and reporting it 45 minutes later would bury it. Never fails
+      # the job — the gap is caused by GitHub's scheduler, which this repo
+      # does not control, and a step that is red on every run is a step nobody
+      # reads. Whether the API is warm RIGHT NOW is the next step's job, and
+      # that one does fail.
+      - name: Report warm coverage since the previous run
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          previous=$(gh api \
+            "repos/$REPO/actions/workflows/keepalive.yml/runs?status=completed&per_page=1" \
+            --jq '.workflow_runs[0].updated_at' || true)
+          started=$(gh api "repos/$REPO/actions/runs/$RUN_ID" \
+            --jq '.run_started_at' || true)
+          if [ -z "$previous" ] || [ "$previous" = "null" ] \
+             || [ -z "$started" ] || [ "$started" = "null" ]; then
+            echo "Run history unavailable; skipping coverage report."
+            exit 0
+          fi
+          python3 scripts/keepalive_coverage.py \
+            --previous-end "$previous" --current-start "$started"
 
       - name: Keep API warm and report cold starts
         run: bash scripts/keepalive.sh

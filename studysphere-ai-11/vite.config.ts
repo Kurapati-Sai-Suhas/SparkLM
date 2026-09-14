@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react-swc";
 import fs from "fs";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import {
+  productionConfigError,
+  type BuildEnvironment,
+} from "./src/lib/productionConfig";
 
 /**
  * Serve Monaco from our own origin instead of a CDN (M4 Phase A, CSP).
@@ -52,7 +56,18 @@ function selfHostMonaco() {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  // Refuse to BUILD a production bundle that cannot reach its backend
+  // (M15b). Vercel keeps serving the previous deployment when a build fails,
+  // so this replaces "deploy a broken site" with "deployment failed" — the
+  // difference between a demo that is down and one that is merely not newer.
+  // Scoped to VERCEL_ENV=production so CI's compile check is unaffected.
+  const configError = productionConfigError(process.env as BuildEnvironment);
+  if (configError) {
+    throw new Error(`[production config] ${configError}`);
+  }
+
+  return {
   server: {
     host: "::",
     port: 8080,
@@ -67,4 +82,5 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-}));
+  };
+});

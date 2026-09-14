@@ -3,8 +3,20 @@
 # environment could not boot the app.
 
 # ── Core web stack ───────────────────────────────────────────
-Django==5.2.16
-djangorestframework==3.17.1
+# Patch-level only, same minor line, taken immediately rather than deferred --
+# the standing rule in .github/workflows/ci.yml. Found by pip-audit on the
+# M5-M16 deployment PR (2026-09-14); all three predate that PR and would fail
+# on main equally.
+#   CVE-2026-15830  Django 5.2.16 -> 5.2.17
+#   CVE-2026-73228  DRF 3.17.1 -> 3.17.2. request.data can bypass
+#                   DATA_UPLOAD_MAX_MEMORY_SIZE on oversized JSON and
+#                   urlencoded bodies. The one that matters most here: SparkLM
+#                   runs a single free-tier instance behind ADMISSION_LIMIT,
+#                   where an unbounded body is a cheap way to exhaust it.
+#   CVE-2026-73229  DRF 3.17.1 -> 3.17.2. AdminRenderer can disclose
+#                   GET-protected data when rendering an invalid write.
+Django==5.2.17
+djangorestframework==3.17.2
 djangorestframework-simplejwt==5.5.1
 argon2-cffi==25.1.0          # Argon2id password hashing (M3). Ships abi3 manylinux
                              # wheels, so Render needs no compiler. Required by

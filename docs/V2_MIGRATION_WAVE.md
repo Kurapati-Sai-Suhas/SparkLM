@@ -1,5 +1,31 @@
 # v2 structural migration wave — prepared, not executed (Phase 1 M12)
 
+> ## ⚠ SUPERSEDED, 2026-09-15 — do not act on the numbers below
+>
+> **The worklist is now `python manage.py v2_migration_worklist`** (read-only,
+> `--json` for machine output). It is the authoritative inventory; this
+> document is kept as the M12 record of how the analysis was reasoned about,
+> not as a list to work from.
+>
+> Two claims here are now known to be false:
+>
+> * **Judge0 is not `NOT_SUBSCRIBED`.** Probed 2026-09-14: HTTP 200, 71
+>   languages, all five SparkLM ids present. The real M14 blocker is the
+>   operator-authored references, of which **0 of 28 candidates have one**.
+> * **SAFE_TO_MIGRATE is 28, not 22**, over 130 structural questions rather
+>   than 128. The count here was derived by inspection and never implemented,
+>   so it could not be re-derived or corrected as content changed. Re-deriving
+>   it found four defect classes the prose analysis had no way to catch:
+>   structures that never reach the graded method (q382, q919), collections of
+>   structures (q95, q652, q725), arity mismatches (q543 and 14 others), and
+>   answer keys that stop matching once output is serialised canonically
+>   (q450). Buckets `BLOCKED_BY_TEST_CONTRACT_ARITY`, `UNSUPPORTED_COLLECTION`
+>   and `STATEFUL_STRUCTURE` did not exist in this document at all.
+>
+> The "Still blocked — 2 of 9" section below is also stale: M13 took the
+> `Optional[X] → X | None` decision it describes as escalated, and q108 was
+> repaired. q105 was not, and remains `BLOCKED_BY_STARTER`.
+
 **Nothing in this document has been executed.** A v2 migration changes the
 input representation and therefore what a question's stored expected outputs
 *mean*. That is oracle work, and Judge0 is `NOT_SUBSCRIBED`.

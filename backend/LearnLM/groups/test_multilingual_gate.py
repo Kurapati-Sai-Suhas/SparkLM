@@ -662,12 +662,17 @@ def test_no_execution_module_can_write_a_trust_field():
     import pathlib
 
     from groups import execution_adapter, language_readiness as lr
+    from groups import migration_readiness as mig
     from groups import structural_types as st
 
     forbidden = {"trust_state", "status", "verified_language",
                  "is_adaptive_eligible"}
+    # `migration_readiness` joins the list (M14). Its output decides which
+    # questions may later have their input representation changed, so "it only
+    # reads" has to be a property of the code rather than a claim in a
+    # docstring. The command that drives it does the database reading.
     for module in (execution_contract, execution_adapter, lr, st,
-                   content_quarantine):
+                   content_quarantine, mig):
         source = pathlib.Path(inspect.getfile(module)).read_text("utf-8")
         tree = ast.parse(source)
         for node in ast.walk(tree):

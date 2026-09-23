@@ -662,6 +662,7 @@ def test_no_execution_module_can_write_a_trust_field():
     import pathlib
 
     from groups import execution_adapter, language_readiness as lr
+    from groups import contract_migration as cmig
     from groups import migration_readiness as mig
     from groups import structural_types as st
 
@@ -671,8 +672,10 @@ def test_no_execution_module_can_write_a_trust_field():
     # questions may later have their input representation changed, so "it only
     # reads" has to be a property of the code rather than a claim in a
     # docstring. The command that drives it does the database reading.
+    # `contract_migration` joins it for the same reason: it decides whether
+    # the v1 -> v2 write may happen, and must never be able to perform it.
     for module in (execution_contract, execution_adapter, lr, st,
-                   content_quarantine, mig):
+                   content_quarantine, mig, cmig):
         source = pathlib.Path(inspect.getfile(module)).read_text("utf-8")
         tree = ast.parse(source)
         for node in ast.walk(tree):

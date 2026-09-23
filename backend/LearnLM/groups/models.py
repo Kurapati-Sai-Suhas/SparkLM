@@ -2090,6 +2090,23 @@ class RemediationAction(models.Model):
     #: question a reviewer asks of this table is precisely "which contract
     #: changes were made without execution evidence?"
     CLASS_CONTRACT_DECLARATION = "CONTRACT_DECLARATION"
+    #: A LIVE question moved from the v1 to the v2 execution contract
+    #: (Phase 1 M14, migration 0054).
+    #:
+    #: The third write to `execution_contract_version`, and different in kind
+    #: from both of the others. CONTRACT_REPAIR moves a question to v3, which
+    #: `remediate_contract` justifies because the stored inputs mean the same
+    #: thing under it. CONTRACT_DECLARATION chooses a contract for a question
+    #: with no cases yet. This one changes what EXISTING stored inputs mean --
+    #: under v1 a tree argument arrives as a string, under v2 it is built into
+    #: a node -- so every stored expected output is now being read under a
+    #: representation it was never checked against.
+    #:
+    #: That is why it gets its own label. The question this table must answer
+    #: before anyone trusts an Oracle run is "which answer keys are being
+    #: interpreted differently than when they were written?", and a migration
+    #: filed as a repair would hide exactly those rows.
+    CLASS_CONTRACT_MIGRATION = "CONTRACT_MIGRATION"
 
     #: A question moved along the status lifecycle (M2 P2.7h-8, migration
     #: 0047).
@@ -2128,6 +2145,7 @@ class RemediationAction(models.Model):
         CLASS_EXPECTED_OUTPUT_REPAIR, CLASS_INPUT_REPAIR,
         CLASS_SUITE_EXPANSION, CLASS_STATEMENT_GENERATION,
         CLASS_SIGNATURE_DECLARATION, CLASS_CONTRACT_DECLARATION,
+        CLASS_CONTRACT_MIGRATION,
         CLASS_TRUST_DEMOTION, CLASS_STATUS_TRANSITION,
         CLASS_MANUAL_REVIEW, CLASS_COMPLETE_REBUILD, CLASS_ROLLBACK)]
 

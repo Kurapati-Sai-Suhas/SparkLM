@@ -25,6 +25,7 @@ question -- q100 included -- is migrated.
 """
 
 import copy
+import re
 import threading
 
 import pytest
@@ -32,6 +33,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import DatabaseError, connection, connections, transaction
+from django.test.utils import CaptureQueriesContext
 
 from groups import contract_migration, migration_readiness, pre_image
 from groups.management.commands import migrate_contract_v2 as cmd
@@ -157,11 +159,61 @@ def world(*question_ids):
     }
 
 
+def contract_writes(queries):
+    """Every UPDATE of the contract column that actually reached the database.
+
+    Read from the SQL the command sent, not from the row afterwards. A write
+    that is rolled back leaves the row exactly as a write that never happened,
+    so only the statement log can tell "refused before the write" from
+    "written, then reverted".
+    """
+    return [query["sql"] for query in queries.captured_queries
+            if query["sql"].lstrip().upper().startswith("UPDATE")
+            and "groups_question" in query["sql"]
+            and "execution_contract_version" in query["sql"]]
+
+
+def run_capturing(operator, question_id=100, **kwargs):
+    """(exception or None, captured queries) -- nothing is swallowed unseen."""
+    raised = None
+    with CaptureQueriesContext(connection) as queries:
+        try:
+            migrate(operator, question_id, **kwargs)
+        except Exception as exc:        # noqa: BLE001 -- every caller asserts on it
+            raised = exc
+    return raised, queries
+
+
+def assert_refused_before_the_write(raised, queries):
+    """The pre-write boundary, asserted FIRST and in its own words.
+
+    Checked before the exception on purpose. If a gate is missing, the
+    exception that eventually surfaces is whatever caught the problem later
+    -- an audit-step crash, a DigestMismatch from `record_action`, or nothing
+    at all if the migration committed. Asserting on the exception first would
+    report that incidental failure as the kill. Asserting on the statement log
+    first reports the thing that actually went wrong: the contract was written
+    before anything refused it.
+    """
+    written = contract_writes(queries)
+    assert not written, (
+        "the contract column was WRITTEN before the refusal -- no pre-write "
+        "gate stopped it. What followed: "
+        + (f"{type(raised).__name__}: {str(raised)[:110]}" if raised
+           else "nothing; the migration committed"))
+
+
 def assert_refused_and_untouched(operator, question_ids, *, match,
-                                 question_id=100, **kwargs):
+                                 question_id=100, before_the_write=True,
+                                 **kwargs):
     before = world(*question_ids)
-    with pytest.raises(CommandError, match=match):
-        migrate(operator, question_id, **kwargs)
+    raised, queries = run_capturing(operator, question_id, **kwargs)
+    if before_the_write:
+        assert_refused_before_the_write(raised, queries)
+    assert isinstance(raised, CommandError), (
+        f"expected a clean refusal (CommandError), got {raised!r}")
+    assert re.search(match, str(raised)), (
+        f"refused, but not for the reason {match!r}: {raised}")
     assert world(*question_ids) == before
 
 
@@ -264,6 +316,165 @@ def test_dry_run_before_any_pre_image_reports_it_missing(q100, operator,
     # names the missing pre-image as the blocker -- and still writes nothing.
     assert_refused_and_untouched(operator, [100], match="no batch")
     assert "MISSING" in capsys.readouterr().out
+
+
+# ═════════════════════════════════════════════════════════════
+# The rollback anchor is refused BEFORE the write
+# ═════════════════════════════════════════════════════════════
+#
+# The first mutation review found that disabling the pre-image gate did not
+# make any test fail for the right reason. The migration wrote the contract,
+# `record_action` then rejected the pre-image, and the transaction reverted --
+# a final database identical to a clean refusal. Every test compared final
+# states, so none could tell the gate from the backstop.
+#
+# These observe the boundary itself: the SQL the command sent, and whether
+# the post-write backstop was ever reached.
+
+def spy_on_the_backstop(monkeypatch):
+    """Count calls to `record_action` -- the post-write backstop."""
+    calls = []
+    real = pre_image.record_action
+
+    def counting(*args, **kwargs):
+        calls.append(args[1].pk if len(args) > 1 else None)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pre_image, "record_action", counting)
+    return calls
+
+
+@pytest.mark.django_db
+def test_the_statement_log_sees_a_real_contract_write(frozen, q100, operator):
+    # Every "refused before the write" assertion below is only as good as this
+    # detector. If `contract_writes` never matched anything -- a quoting
+    # difference, a different statement shape -- they would all pass
+    # vacuously. So it must see the one write a successful migration makes,
+    # exactly once, and the write must be to v2.
+    raised, queries = run_capturing(operator, extra=APPLY)
+
+    assert raised is None
+    writes = contract_writes(queries)
+    assert len(writes) == 1, writes
+    assert "'v2'" in writes[0], writes[0]
+
+
+@pytest.mark.django_db
+def test_a_corrupt_digest_is_refused_before_the_contract_is_written(
+        frozen, q100, operator, monkeypatch):
+    """The isolated case: ONLY the stored pre-image digest is corrupted.
+
+    The question row and the pre-image's captured content are untouched, so
+    the staleness gate has nothing to find -- only digest verification can
+    refuse this, and it must do so before the contract column is written.
+    """
+    record = QuestionPreImage.objects.get(batch=frozen, question=q100)
+    QuestionPreImage.objects.filter(pk=record.pk).update(state_digest="0" * 64)
+    row_before = copy.deepcopy(pre_image.question_state(
+        Question.objects.get(pk=100)))
+    backstop = spy_on_the_backstop(monkeypatch)
+
+    raised, queries = run_capturing(operator, extra=APPLY)
+
+    assert_refused_before_the_write(raised, queries)
+    assert backstop == [], "the post-write backstop was reached"
+    assert isinstance(raised, CommandError), repr(raised)
+    assert "does not match its recorded digest" in str(raised)
+    q100.refresh_from_db()
+    assert q100.execution_contract_version == "v1"
+    assert pre_image.question_state(q100) == row_before
+    assert not RemediationAction.objects.filter(question=q100).exists()
+
+
+def _missing(operator, question, control):
+    freeze(operator, control)                  # q100 is not in the batch
+
+
+def _unfrozen(operator, question, control):
+    batch = RemediationBatch.objects.create(
+        batch_key=BATCH, purpose="m14 test", created_by=operator)
+    pre_image.capture(batch, question, operator)
+
+
+def _corrupt_digest(operator, question, control):
+    batch = freeze(operator, question, control)
+    QuestionPreImage.objects.filter(batch=batch, question=question).update(
+        state_digest="0" * 64)
+
+
+def _stale(operator, question, control):
+    freeze(operator, question, control)
+    Question.objects.filter(pk=question.pk).update(content="Edited after.")
+
+
+def _changed_expected_outputs(operator, question, control):
+    freeze(operator, question, control)
+    cases = copy.deepcopy(SAME_TREE_CASES)
+    cases[1]["expected_output"] = "true"
+    Question.objects.filter(pk=question.pk).update(hidden_test_cases=cases)
+
+
+def _changed_test_cases(operator, question, control):
+    freeze(operator, question, control)
+    cases = copy.deepcopy(SAME_TREE_CASES)
+    cases[0]["stdin"] = "[1,2,3]\n[1,2,4]"
+    Question.objects.filter(pk=question.pk).update(hidden_test_cases=cases)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("arrange,reason", [
+    (_missing, "no pre-image"),
+    (_unfrozen, "not frozen"),
+    (_corrupt_digest, "does not match its recorded digest"),
+    (_stale, "changed since its pre-image was frozen: content"),
+    (_changed_expected_outputs, "expected outputs"),
+    (_changed_test_cases, "stored inputs"),
+], ids=["missing", "unfrozen", "corrupt-digest", "stale",
+        "changed-expected-outputs", "changed-test-cases"])
+def test_every_pre_image_failure_is_refused_before_the_write(
+        operator, q100, control, monkeypatch, arrange, reason):
+    arrange(operator, q100, control)
+    before = world(100, 110)
+    backstop = spy_on_the_backstop(monkeypatch)
+
+    raised, queries = run_capturing(operator, extra=APPLY)
+
+    assert_refused_before_the_write(raised, queries)
+    assert backstop == [], "the post-write backstop was reached"
+    assert isinstance(raised, CommandError), repr(raised)
+    assert reason in str(raised)
+    assert world(100, 110) == before
+
+
+@pytest.mark.django_db
+def test_a_digest_corrupted_after_the_plan_is_refused_on_the_locked_row(
+        frozen, q100, operator, monkeypatch):
+    # The plan's check has already PASSED when the digest is corrupted. Only
+    # the anchor gate re-run on the locked row can see it -- and it must
+    # refuse before the write, not leave it to the backstop afterwards.
+    real = contract_migration.component_digests
+    calls = []
+
+    def corrupt_after_the_plan(state):
+        calls.append(1)
+        if len(calls) == 1:             # the plan's call, before the lock
+            QuestionPreImage.objects.filter(
+                batch=frozen, question=q100).update(state_digest="0" * 64)
+        return real(state)
+
+    monkeypatch.setattr(contract_migration, "component_digests",
+                        corrupt_after_the_plan)
+    backstop = spy_on_the_backstop(monkeypatch)
+
+    raised, queries = run_capturing(operator, extra=APPLY)
+
+    assert_refused_before_the_write(raised, queries)
+    assert backstop == [], "the post-write backstop was reached"
+    assert isinstance(raised, CommandError), repr(raised)
+    assert "refused before any write" in str(raised)
+    assert "does not match its recorded digest" in str(raised)
+    q100.refresh_from_db()
+    assert q100.execution_contract_version == "v1"
 
 
 # ═════════════════════════════════════════════════════════════
@@ -431,9 +642,16 @@ def test_an_edit_between_the_plan_and_the_lock_is_caught(
 
     monkeypatch.setattr(contract_migration, "component_digests",
                         edit_after_the_plan)
-    with pytest.raises(CommandError, match="stopped being migratable"):
-        migrate(operator, extra=APPLY)
+    backstop = spy_on_the_backstop(monkeypatch)
 
+    raised, queries = run_capturing(operator, extra=APPLY)
+
+    # `record_action` does not check staleness, so for this case there is no
+    # backstop at all: without the locked re-check the migration COMMITS.
+    assert_refused_before_the_write(raised, queries)
+    assert backstop == []
+    assert isinstance(raised, CommandError), repr(raised)
+    assert "stopped being migratable" in str(raised)
     q100.refresh_from_db()
     assert q100.execution_contract_version == "v1"
     assert not RemediationAction.objects.filter(question=q100).exists()
@@ -535,8 +753,12 @@ def test_a_write_that_touches_a_second_column_is_reverted(
         return real_save(self, *args, **kwargs)
 
     monkeypatch.setattr(Question, "save", widened_save)
+    # The one refusal that is AFTER the write by design: the widening can only
+    # be seen once the row has been written and re-read. So the pre-write
+    # assertion is switched off here and only here; the transaction reverting
+    # everything is what this test is about.
     assert_refused_and_untouched(operator, [100], match="status changed",
-                                 extra=APPLY)
+                                 before_the_write=False, extra=APPLY)
 
 
 # ═════════════════════════════════════════════════════════════

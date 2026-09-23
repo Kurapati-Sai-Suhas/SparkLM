@@ -136,6 +136,13 @@ def staleness(record, question):
     was frozen, the rollback anchor no longer describes the question being
     migrated, and a restore would silently discard whatever changed it.
     """
+    if record is None:
+        # Nothing to compare against is itself a refusal, not a crash. The
+        # command's gate never passes None here, but a function that decides
+        # whether a rollback anchor is usable should say so plainly rather
+        # than depend on every caller having checked first.
+        return ["there is no pre-image to compare the question against; a "
+                "migration without one has nothing to roll back to"]
     differing = pre_image.differing_fields(record, question)
     if not differing:
         return []

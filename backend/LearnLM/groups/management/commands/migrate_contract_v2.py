@@ -172,8 +172,14 @@ class Command(BaseCommand):
         self.stdout.write("")
 
         before_state = pre_image.question_state(question)
-        record, preimage_refusals = self._pre_image_gate(
-            batch, question, options["batch"])
+        try:
+            record = self._require_rollback_anchor(
+                batch, question, options["batch"])
+            preimage_refusals = []
+        except ops.GateFailure as exc:
+            # Collected, not raised, so the plan still shows everything else
+            # an operator needs -- a dry run before the freeze is useful.
+            record, preimage_refusals = None, [str(exc)]
         verdict, eligibility_refusals = contract_migration.eligibility(
             question.pk, before_state)
         digests = contract_migration.component_digests(before_state)
@@ -195,8 +201,8 @@ class Command(BaseCommand):
                 "with --alias contract --apply --confirm to migrate."))
             return
 
-        action, after_digest = self._apply(alias, batch, question, operator,
-                                           before_state)
+        action, after_digest = self._apply(alias, options["batch"], question,
+                                           operator)
 
         self.stdout.write(self.style.SUCCESS(
             f"Question {question.pk} migrated v1 -> {TARGET_CONTRACT}."))
@@ -209,37 +215,79 @@ class Command(BaseCommand):
 
     # ── gates ─────────────────────────────────────────────────────────
 
-    def _pre_image_gate(self, batch, question, batch_key):
-        """(record, [refusal, ...]) -- the write-ahead rule, plus freshness.
+    def _require_rollback_anchor(self, batch, question, batch_key):
+        """The verified, current pre-image -- or a clean refusal. THE gate.
 
-        `pre_image.require_pre_image` checks the batch is frozen, the
-        pre-image exists, and the pre-image still verifies against its own
-        digest. It does NOT check that the pre-image still describes the
-        question -- a pre-image frozen before someone edited the answer key
-        passes it. `contract_migration.staleness` adds that.
+        Every property a rollback anchor needs is checked here, and any
+        failure raises `GateFailure` rather than returning a flag a caller
+        could forget to read:
+
+          1. the batch exists and is frozen            (require_pre_image)
+          2. it holds a pre-image for this question    (require_pre_image)
+          3. that pre-image verifies against its own
+             digest -- not corrupt, not tampered       (require_pre_image)
+          4. it still describes the live row           (staleness)
+
+        Called twice. In the plan, the refusal is caught and shown. On the
+        LOCKED row inside the transaction it is not caught, and the contract
+        write never starts.
+
+        `record_action` re-checks 1-3 AFTER the write, inside the same
+        transaction. That is a backstop, not this gate -- and it does not
+        check 4 at all. For a stale pre-image this function is the only
+        protection there is, which mutation testing confirmed: with it
+        disabled, a stale migration did not merely write and roll back, it
+        committed.
+
+        This replaced a gate that returned `(record, refusals)`. Two values
+        meant two things the write path had to remember to check, and the
+        first mutation review found a variant where the refusal list came
+        back empty with no record -- stopped only because the audit step
+        happened to crash on `record.pk`.
         """
         if batch is None:
-            return None, [
+            raise ops.GateFailure(
                 f"no batch {batch_key!r}. Capture and freeze a pre-image "
                 f"first:  preimage_capture --batch {batch_key} --questions "
                 f"{question.pk} --operator <you> --apply --confirm, then "
-                f"--freeze"]
+                f"--freeze")
         try:
             record = pre_image.require_pre_image(batch, question)
         except pre_image.PreImageError as exc:
-            return None, [str(exc)]
-        return record, contract_migration.staleness(record, question)
+            raise ops.GateFailure(str(exc)) from None
+        stale = contract_migration.staleness(record, question)
+        if stale:
+            raise ops.GateFailure(stale[0])
+        return record
 
     # ── the write ─────────────────────────────────────────────────────
 
-    def _apply(self, alias, batch, question, operator, before_state):
+    def _apply(self, alias, batch_key, question, operator):
         """The only write. Every gate is re-run on the locked row first."""
         with transaction.atomic(using=alias):
             locked = (Question.objects.using(alias)
                       .select_for_update().get(pk=question.pk))
-            batch = RemediationBatch.objects.using(alias).get(pk=batch.pk)
+            # Re-read by the operator's key, not by the plan's object: the
+            # gate below owns the "no such batch" refusal, and a `.get(pk=...)`
+            # here would pre-empt it with an AttributeError when there is none.
+            batch = RemediationBatch.objects.using(alias).filter(
+                batch_key=batch_key).first()
 
-            record, stale = self._pre_image_gate(batch, locked, batch.batch_key)
+            # 1. The rollback anchor, FIRST, on the locked row, before any
+            #    write. Not caught: a refusal here ends the transaction with
+            #    the question row untouched.
+            try:
+                record = self._require_rollback_anchor(
+                    batch, locked, batch_key)
+            except ops.GateFailure as exc:
+                raise ops.GateFailure(
+                    f"question {locked.pk} stopped being migratable between "
+                    f"the plan and the write -- the rollback anchor was "
+                    f"refused before any write:\n  - {exc}\n"
+                    f"Nothing was written.") from None
+
+            # 2. Eligibility, on the same locked row.
+            #
             # A DEEP copy, not `question_state(locked)` itself: that returns
             # the row's own dict and list objects, so a write that mutated
             # `hidden_test_cases` in place and saved it would move this
@@ -248,26 +296,14 @@ class Command(BaseCommand):
             locked_state = copy.deepcopy(pre_image.question_state(locked))
             verdict, refusals = contract_migration.eligibility(
                 locked.pk, locked_state)
-            blocked = stale + refusals
-            if blocked:
+            if refusals:
                 raise ops.GateFailure(
                     f"question {locked.pk} stopped being migratable between "
                     f"the plan and the write:\n"
-                    + "\n".join(f"  - {reason}" for reason in blocked)
+                    + "\n".join(f"  - {reason}" for reason in refusals)
                     + "\nNothing was written.")
-            if record is None:
-                # Unreachable while the gate above reports a refusal for every
-                # missing, unfrozen or unverifiable pre-image -- and enforced
-                # here anyway, because the rollback anchor is the one thing
-                # this write must never proceed without. Mutation testing found
-                # that without this line, a gate that swallowed its error was
-                # stopped only by the audit step happening to need
-                # `record.pk`: a refactor of that step would have let a
-                # migration commit with nothing to roll back to.
-                raise ops.GateFailure(
-                    f"question {locked.pk} has no verified pre-image in batch "
-                    f"{batch.batch_key}; nothing was written")
 
+            # 3. Only now, the one write.
             digests = contract_migration.component_digests(locked_state)
             setattr(locked, MIGRATED_FIELD, TARGET_CONTRACT)
             locked.save(using=alias, update_fields=[MIGRATED_FIELD])
@@ -353,9 +389,15 @@ class Command(BaseCommand):
                 f"{batch.batch_key if batch else '(none)'}; required before "
                 f"--apply"))
         else:
+            # Never assume `frozen_at` is set just because a record came back:
+            # that invariant is the gate's to enforce, not the renderer's to
+            # rely on. When it was assumed, a disabled gate crashed HERE --
+            # before the write -- and the crash hid whether any pre-write
+            # protection existed at all.
+            frozen = (f"frozen {batch.frozen_at:%Y-%m-%d %H:%M}Z"
+                      if batch.frozen_at else "NOT FROZEN")
             write(self.style.SUCCESS(
-                f"  pre-image       {record.pk} in {batch.batch_key} "
-                f"(frozen {batch.frozen_at:%Y-%m-%d %H:%M}Z)"))
+                f"  pre-image       {record.pk} in {batch.batch_key} ({frozen})"))
             write(f"                  digest {record.state_digest[:16]}…  holds "
                   f"{record.captured_state().get(MIGRATED_FIELD)!r} for rollback")
         write("")

@@ -433,11 +433,17 @@ def test_an_executable_candidate_outranks_a_broken_one(root_topic, learner):
     """
     The ranking fix. Before this, the report put q98 at the top of Tree and an
     operator would have spent a session discovering it cannot run.
+
+    The broken fixture was a v1 `TreeNode` until Phase 1 M17. That question is
+    no longer SERVABLE, so it cannot rank second any more — see
+    `test_a_structurally_undeliverable_question_is_not_a_candidate`. The
+    ranking still matters for blockers serving does not exclude, and an
+    annotation naming something the harness never defines is one.
     """
     broken = make_question(root_topic, 9200, difficulty=1300.0)
     Question.objects.filter(pk=broken.pk).update(
         boilerplate_code={"python": "class Solution:\n"
-                                    "    def f(self, root: TreeNode) -> bool:\n"
+                                    "    def f(self, root: Foo) -> bool:\n"
                                     "        pass\n"})
     make_question(root_topic, 9201, difficulty=1300.0)   # plain, executable
 
@@ -447,7 +453,27 @@ def test_an_executable_candidate_outranks_a_broken_one(root_topic, learner):
     assert candidates[0]["executable"] is True
     assert candidates[1]["id"] == 9200
     assert candidates[1]["executable"] is False
-    assert "TreeNode" in candidates[1]["harness_blocker"]
+    assert "Foo" in candidates[1]["harness_blocker"]
+
+
+@pytest.mark.django_db
+def test_a_structurally_undeliverable_question_is_not_a_candidate(root_topic,
+                                                                  learner):
+    """
+    Phase 1 M17. A v1 `TreeNode` signature is handed the raw input string, so
+    the question is excluded from serving — and a question nobody is served is
+    not a verification target. It used to rank last; now it is absent.
+    """
+    structural = make_question(root_topic, 9205, difficulty=1300.0)
+    Question.objects.filter(pk=structural.pk).update(
+        boilerplate_code={"python": "class Solution:\n"
+                                    "    def f(self, root: TreeNode) -> bool:\n"
+                                    "        pass\n"})
+    make_question(root_topic, 9206, difficulty=1300.0)
+
+    candidates = coverage_for(root_topic.name).candidates
+
+    assert [c["id"] for c in candidates] == [9206]
 
 
 @pytest.mark.django_db
@@ -460,7 +486,7 @@ def test_executability_outranks_even_reachability(root_topic, learner):
     reachable_broken = make_question(root_topic, 9211, difficulty=1300.0)
     Question.objects.filter(pk=reachable_broken.pk).update(
         boilerplate_code={"python": "class Solution:\n"
-                                    "    def f(self, n: ListNode) -> int:\n"
+                                    "    def f(self, n: Foo) -> int:\n"
                                     "        pass\n"})
 
     candidates = coverage_for(root_topic.name).candidates

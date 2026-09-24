@@ -74,3 +74,26 @@ PREIMAGE_WAS_CONFIGURED = bool(os.environ.get("PREIMAGE_USER"))
 
 for _name in _PREIMAGE_KEYS:
     os.environ[_name] = ""
+
+# ── Judge0 must never be reachable under pytest (Phase 1 M17) ─────────────
+#
+# The same hole, one service over. `coding_views` reads JUDGE0_API_KEY and
+# JUDGE0_URL from the environment at import, and `.env` carries the REAL
+# RapidAPI key — the one production grades with. Any test that reaches the
+# runner without mocking it therefore made a real, billed submission: M17 ran
+# the suite under a request tripwire and found two tests doing exactly that
+# (a Run through `code-run` to prove no learner endpoint leaks provenance or
+# a reference), plus four `/languages` lookups from the oracle command. Two
+# submissions per local run, against a quota that is already negative. CI
+# never spent any only because CI has no key.
+#
+# Blanked for the same reason as PREIMAGE_*: an empty value is present, so
+# `load_dotenv` leaves it alone. And the base URL is pointed at the loopback
+# discard port, so even a request that carries no key never leaves the
+# machine — it is refused locally, which the runner already reports as a
+# transport failure. A test that needs Judge0 mocks `_run_on_judge0`, as the
+# rest of the suite does.
+JUDGE0_WAS_CONFIGURED = bool(os.environ.get("JUDGE0_API_KEY"))
+
+os.environ["JUDGE0_API_KEY"] = ""
+os.environ["JUDGE0_URL"] = "http://127.0.0.1:9"

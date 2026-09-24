@@ -127,6 +127,18 @@ C `NOT_READY` by cause: `no_starter` **1,768**, `no_entry_point` **20**.
 decide more without a compiler. It counts as servable, because refusing what
 a checker cannot prove would hide failures behind the checker's limits.
 
+**Phase 1 M17 correction.** For 47 structural v1 questions the JavaScript
+`UNKNOWN` was decidable: the JS starter carries no types, but the question's
+Python starter declares the structure, and the harness is chosen by the
+contract, not the language — no v1/v3 harness builds a `TreeNode` anywhere.
+`assess(question, lang)` now reports those `NOT_READY` (cause
+`structural_type` / `structural_unsupported`) with the Python signature as
+evidence. Only an undecided starter consults the declaration; v2 with a wired
+adapter stays `UNKNOWN`; C/C++ are unaffected; `assess_source` without a
+question is unchanged. Measured over the 1,788: JavaScript UNKNOWN→NOT_READY
+47 (all structural, 10 of them SAFE_TO_MIGRATE); Python, Java, C and C++
+unchanged.
+
 ## What is NOT verified
 
 There is no `g++` in the development environment and Judge0 is refusing

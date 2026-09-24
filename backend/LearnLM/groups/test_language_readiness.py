@@ -312,3 +312,110 @@ def test_the_two_entry_points_agree(starter, language):
     readiness = lr.assess_source(starter, language)
 
     assert (blocker is None) == readiness.ready
+
+
+# ═════════════════════════════════════════════════════════════
+# Phase 1 M17 — a structure the QUESTION declares, in an untyped starter
+# ═════════════════════════════════════════════════════════════
+#
+# 47 structural v1 questions reported JavaScript UNKNOWN, which counts as
+# servable, because the JS starter carries no types and names no structure.
+# The question's Python starter declares it; the contract, not the language,
+# decides whether any harness builds it.
+
+JS_UNTYPED = "class Solution {\n    f(root) {\n        return false;\n    }\n}\n"
+JAVA_UNTYPED = ("class Solution {\n    public boolean f(int x) {\n"
+                "        return false;\n    }\n}\n")
+PY_NODE = ("class Solution:\n"
+           "    def f(self, root: 'Node') -> int:\n        pass\n")
+PY_UNANNOTATED = ("class TreeNode:\n    def __init__(self, val=0):\n"
+                  "        self.val = val\n"
+                  "class Solution:\n    def f(self, root):\n        pass\n")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("contract", ["v1", "v3", ""])
+def test_an_untyped_js_starter_inherits_the_declared_structure(topic, contract):
+    """q100's defect: every v1/v3 harness hands JS the parsed input, not a node."""
+    question = make_question(topic, 9500, {"python": PY_STRUCTURAL,
+                                           "javascript": JS_UNTYPED},
+                             contract=contract)
+
+    result = lr.assess(question, "javascript")
+
+    assert result.verdict == lr.NOT_READY
+    assert result.cause == lr.STRUCTURAL_TYPE
+    assert "TreeNode" in result.reason and "Python starter" in result.reason
+    assert "javascript" not in lr.ready_languages(question)
+    assert "javascript" in lr.blocked_languages(question)
+
+
+@pytest.mark.django_db
+def test_java_untyped_starter_is_held_to_the_same_declaration(topic):
+    question = make_question(topic, 9501, {"python": PY_STRUCTURAL,
+                                           "java": JAVA_UNTYPED})
+    result = lr.assess(question, "java")
+    assert (result.verdict, result.cause) == (lr.NOT_READY, lr.STRUCTURAL_TYPE)
+
+
+@pytest.mark.django_db
+def test_v2_keeps_its_unknown_where_the_adapter_builds_the_structure(topic):
+    """No false NOT_READY: v2 builds TreeNode, so the honest answer stays UNKNOWN."""
+    question = make_question(topic, 9502, {"python": PY_STRUCTURAL,
+                                           "javascript": JS_UNTYPED},
+                             contract="v2")
+    assert lr.assess(question, "javascript").verdict == lr.UNKNOWN
+
+
+@pytest.mark.django_db
+def test_an_unsupported_structure_is_refused_under_every_contract(topic):
+    question = make_question(topic, 9503, {"python": PY_NODE,
+                                           "javascript": JS_UNTYPED},
+                             contract="v2")
+    result = lr.assess(question, "javascript")
+    assert (result.verdict, result.cause) == (
+        lr.NOT_READY, lr.STRUCTURAL_UNSUPPORTED)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("python", [PY_OK, PY_UNANNOTATED, None],
+                         ids=["no-structure", "unannotated", "no-python"])
+def test_no_declaration_means_no_claim(topic, python):
+    """
+    UNKNOWN stays UNKNOWN when the Python starter proves nothing: no
+    structure, a structure it never annotates (only execution could tell), or
+    no Python starter at all. Converting those would be a claim without
+    evidence.
+    """
+    boilerplate = {"javascript": JS_UNTYPED}
+    if python is not None:
+        boilerplate["python"] = python
+    question = make_question(topic, 9504, boilerplate)
+    assert lr.assess(question, "javascript").verdict == lr.UNKNOWN
+
+
+@pytest.mark.django_db
+def test_the_starters_own_evidence_still_wins(topic):
+    """Only an UNDECIDED starter consults the declaration."""
+    question = make_question(topic, 9505, {"python": PY_STRUCTURAL,
+                                           "javascript": "function f(root) {}\n"})
+    result = lr.assess(question, "javascript")
+    assert result.cause == lr.NO_SOLUTION_CLASS
+
+
+@pytest.mark.django_db
+def test_self_contained_languages_are_not_held_to_the_declaration(topic):
+    """
+    C and C++ programs read stdin themselves, so a learner can build the tree;
+    readiness there is only about `main`, before and after this change.
+    """
+    question = make_question(topic, 9506, {"python": PY_STRUCTURAL,
+                                           "cpp": CPP_WITH_MAIN,
+                                           "c": CPP_WITH_MAIN})
+    assert lr.assess(question, "cpp").verdict == lr.READY
+    assert lr.assess(question, "c").verdict == lr.READY
+
+
+def test_the_source_level_entry_point_is_unchanged():
+    """No question, no declaration to read: a lone JS starter stays UNKNOWN."""
+    assert lr.assess_source(JS_UNTYPED, "javascript", "v1").verdict == lr.UNKNOWN

@@ -614,19 +614,32 @@ sequenceDiagram
     V-->>C: 200 {question, sample_case, boilerplate_code, xai_explanation}
 ```
 
-**The `_servable_questions()` double quarantine.** Two independent classes of bad content
+**The `_servable_questions()` triple quarantine.** Three independent classes of bad content
 must never reach a student:
 
 ```python
-return Question.objects.exclude(
+deliverable = Question.objects.exclude(
     content__icontains=Question.PLACEHOLDER_MARKER
 ).exclude(hidden_test_cases=[]).exclude(hidden_test_cases__isnull=True)
+return deliverable.exclude(
+    pk__in=deliverability.undeliverable_ids(deliverable))
 ```
 
 1. **Placeholder rows** — generated but never filled with a real description.
 2. **~1,100 CSV-imported rows** that carry a genuine description but **zero test cases**.
    These are the dangerous ones: they *look* seeded, so the reseed pipeline skips them, and
    serving one yields an empty sample case followed by a guaranteed submit failure.
+3. **Structurally undeliverable rows** (Phase 1 M17) — the Python signature declares a
+   `TreeNode`/`ListNode` its contract does not build (v1, v3), or a `Node`/`ImmutableListNode`
+   no contract builds. The v1 harness hands `isSameTree` the string `"[1,2,3]"`, so a correct
+   solution is graded Wrong Answer. 127 rows at M17, q100 among them; bank 1,788 → 1,661.
+   The verdict is `language_readiness`'s own (causes `structural_type` /
+   `structural_unsupported`), read live on every call: a SQL prefilter narrows to starters
+   that mention a structural name (~165 rows, one query) and the AST decides. A question
+   migrated to v2 is servable again on the next request.
+
+None of the three is a status or trust filter. A deliverable DRAFT question is practice and
+stays servable; adaptive eligibility (PUBLISHED ∧ ORACLE_VERIFIED) is untouched.
 
 Both stay invisible until the content pipeline arms them. This is content safety enforced at
 the query layer rather than trusted to data hygiene.
@@ -1175,7 +1188,7 @@ Recorded so nobody rediscovers them at cost.
 | 7 | Mastery rows must be locked in **ascending topic id**. Any other order risks deadlock. | `services.py` |
 | 8 | The Elo farming guard must be **inside** the profile lock or concurrent first solves both score. | `services.py` |
 | 9 | Per-topic `elo_rating` is never updated. Any gate depending on it is unsatisfiable. | `hybrid_router.py` |
-| 10 | `_servable_questions()` is the only safe base queryset. Bypassing it can serve a question with zero test cases. | `coding_views.py` |
+| 10 | `_servable_questions()` is the only safe base queryset. Bypassing it can serve a question with zero test cases, or one whose declared structure its contract cannot build (M17). | `coding_views.py` |
 | 11 | A throttle backed by a non-persisting cache is silently inert and its tests still pass (they use LocMemCache). | `throttling.py` |
 | 12 | `Connection` is directional in storage, symmetric in meaning — friend queries need `OR` on both columns. | `views.py` |
 | 13 | RAG re-extracts and re-chunks the document on every request; no persisted index. | `views.py` |

@@ -18,7 +18,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from common import languages
 from common.throttling import ClientIPScopedRateThrottle
-from groups import execution_contract, judge0_diagnostics, language_readiness
+from groups import (
+    deliverability, execution_contract, judge0_diagnostics, language_readiness,
+)
 
 # Import Models
 from .models import (
@@ -79,16 +81,24 @@ def _servable_questions():
     """
     Base queryset of questions eligible to be served by the recommender.
 
-    Two quarantines, same idea: content that cannot deliver the full solve
+    Three quarantines, same idea: content that cannot deliver the full solve
     loop never reaches a user. Placeholder rows lack real descriptions;
     beyond those, ~1,100 CSV-imported rows carry a genuine description but
     ZERO judge test cases (they look seeded, so reseed skips them) — serving
     one yields an empty sample case and a guaranteed submit failure. Both
     stay invisible until the content pipeline arms them.
+
+    The third (Phase 1 M17): a signature declaring a structure its contract
+    does not build — a v1 `TreeNode` receives the raw string `"[1,2,3]"` — so
+    a correct solution is graded wrong. `deliverability` owns that rule; see
+    its docstring for why it is NOT a status or trust filter. DRAFT content
+    that can be graded stays servable as practice, as before.
     """
-    return Question.objects.exclude(
+    deliverable = Question.objects.exclude(
         content__icontains=Question.PLACEHOLDER_MARKER
     ).exclude(hidden_test_cases=[]).exclude(hidden_test_cases__isnull=True)
+    return deliverable.exclude(
+        pk__in=deliverability.undeliverable_ids(deliverable))
 
 
 def _servable_question(problem_id):
@@ -551,8 +561,9 @@ class CodeSubmitView(APIView):
             # content problem and made real faults harder to see.
             #
             # Reaching this means the client asked for a specific question by
-            # id that `_servable_questions()` excludes — no test cases, or a
-            # placeholder statement. The status and `detail` are unchanged
+            # id that `_servable_questions()` excludes — no test cases, a
+            # placeholder statement, or (M17) a declared structure its
+            # contract cannot build. The status and `detail` are unchanged
             # from when this covered only the empty-suite case, so clients
             # that already handle `question_not_gradable` need no change.
             return Response(

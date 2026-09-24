@@ -82,6 +82,12 @@ UNREGISTERED = "unregistered_language"
 #: question and the second is an architecture question.
 STRUCTURAL_UNSUPPORTED = "structural_unsupported"
 
+#: The two causes that describe the QUESTION's declared signature rather than
+#: one starter's shape (Phase 1 M17). Both mean the harness, not the learner,
+#: decides what the method receives — so no learner code can pass — and both
+#: hold in every reflection language, because the contract picks the harness.
+STRUCTURAL_CAUSES = frozenset({STRUCTURAL_TYPE, STRUCTURAL_UNSUPPORTED})
+
 #: Structural types no contract deserializes, in any language (P2.34).
 #: A signature naming one receives a raw string instead.
 #:
@@ -167,8 +173,53 @@ def assess(question, language):
                          "no starter code exists for this language",
                          NO_STARTER)
 
-    return assess_source(source, lang.key,
-                         execution_contract.contract_version(question))
+    version = execution_contract.contract_version(question)
+    result = assess_source(source, lang.key, version)
+    if result.verdict == UNKNOWN:
+        declared = _declared_structure_blocker(question, lang, version)
+        if declared is not None:
+            return declared
+    return result
+
+
+def _declared_structure_blocker(question, lang, version):
+    """
+    A structural blocker the QUESTION declares, for a starter that shows none
+    (Phase 1 M17).
+
+    JavaScript carries no types, so `_assess_declared_structures` finds a
+    structure in a JS starter only when a comment or a helper happens to name
+    it. The M14 audit counted 47 of 130 structural v1 questions whose JS
+    starter names none: all reported UNKNOWN, and UNKNOWN counts as servable.
+    q100 was one, and executing it showed what that UNKNOWN hid — a correct JS
+    solution scored 6/17, because the v1 harness hands the method parsed
+    arrays and every `.val` reads `undefined`.
+
+    The structure is not unknown. The question's Python starter declares it —
+    the signature grading, the migration classifier and the reference all
+    read — and what the harness BUILDS is decided by the contract, not by the
+    language: no v1 or v3 harness builds a `TreeNode` in any language, and no
+    contract builds `Node` anywhere. So a Python verdict of STRUCTURAL_TYPE or
+    STRUCTURAL_UNSUPPORTED is evidence about this language too.
+
+    Consulted only after this language's own starter was undecided, so
+    evidence in the starter itself always wins. v2 with a buildable structure
+    is untouched: Python is READY there, and whether this language's adapter
+    binds it is exactly what its UNKNOWN already says.
+    """
+    python = boilerplate_for(question, "python")
+    if python is None:
+        return None
+    declared = assess_source(python, "python", version)
+    if declared.cause not in STRUCTURAL_CAUSES:
+        return None
+    return Readiness(
+        lang.key, NOT_READY,
+        f"the {lang.label} starter names no type, but the question's "
+        f"signature does — its Python starter: {declared.reason}. The "
+        f"harness is chosen by the contract, not the language, so the "
+        f"{version} {lang.label} harness builds no such structure either",
+        declared.cause)
 
 
 def assess_source(source, language, version=execution_contract.DEFAULT_CONTRACT):
@@ -308,6 +359,11 @@ def _assess_declared_structures(lang, source, version):
 _STRUCTURAL_ADAPTERS = frozenset(
     key for key, template in execution_contract.V2_WRAPPERS.items()
     if "{structural_prelude_" in template)
+
+#: The same set under a public name (Phase 1 M17): hidden-test admission asks
+#: "is this language's adapter wired" and must get readiness's answer, not a
+#: second reading of the templates.
+STRUCTURAL_ADAPTERS = _STRUCTURAL_ADAPTERS
 
 
 def _assess_python(lang, source, version=execution_contract.DEFAULT_CONTRACT):

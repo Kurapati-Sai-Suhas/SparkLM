@@ -38,8 +38,14 @@ checked, and the checks below are a second opinion on top of it.
 ── Every added case must be executable ─────────────────────────────────────
 
 A case the adapter cannot bind is not coverage; it is a case that will refuse at
-grading time. Each addition is bound through `execution_adapter` under the
-question's declared contract before anything is written, and a refusal aborts.
+grading time. Each addition is checked by `suite_admission` under the
+question's declared contract, in every language that contract grades, before
+anything is written, and a refusal in any language aborts.
+
+Until Phase 1 M17 this held for v3 only: the check returned early for every
+other contract, and v1 and v2 additions — q100's thirteen among them — were
+accepted unchecked. Each contract now has its own validator, because the three
+bind the same stdin differently.
 """
 
 import copy
@@ -49,7 +55,7 @@ import pathlib
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from groups import execution_adapter, execution_contract, hidden_tests
+from groups import hidden_tests, suite_admission
 from groups import hidden_test_quality as quality
 from groups import pre_image, provenance
 from groups.management.commands import _preimage_ops as ops
@@ -326,35 +332,29 @@ class Command(BaseCommand):
 
     def _check_executable(self, question, proposed, existing_count):
         """
-        Every ADDED case must bind under the question's declared contract.
+        Every ADDED case must execute under the question's declared contract,
+        in every language that contract grades.
 
         A case the adapter cannot deliver is not coverage — it is a case that
         refuses at grading time, which is how 48 production questions came to
         be ungradable in the first place.
         """
-        version = execution_contract.contract_version(question)
-        starter = (question.boilerplate_code or {}).get("python", "")
-        if version != execution_contract.CONTRACT_V3:
-            return
         for position, case in enumerate(proposed[existing_count:],
                                         start=existing_count + 1):
-            invocation = execution_adapter.build_invocation(
-                case.get("stdin", ""), starter)
-            if not invocation.ok:
+            refused = [check for check in suite_admission.check_case(question, case)
+                       if check.refused]
+            if refused:
                 raise ops.GateFailure(
-                    f"added case {position} does not bind under {version}: "
-                    f"{invocation.outcome} — {invocation.detail}")
-            if invocation.warnings:
-                raise ops.GateFailure(
-                    f"added case {position} binds only by guessing "
-                    f"({', '.join(invocation.warnings)})")
+                    f"added case {position} is not executable under "
+                    f"{question.execution_contract_version or 'v1'}: "
+                    + "; ".join(f"[{check.language}] {check.detail}"
+                                for check in refused))
 
     # ── reporting ─────────────────────────────────────────────────────
 
     def _render_plan(self, batch, question, record, before_digest, projected,
                      current, proposed):
         write = self.stdout.write
-        starter = (question.boilerplate_code or {}).get("python", "")
 
         write(f"  batch           {batch.batch_key} ({batch.state})")
         write(f"  question        {question.pk} — {question.title[:44]}")
@@ -385,7 +385,6 @@ class Command(BaseCommand):
         for position, case in enumerate(proposed[len(current):],
                                         start=len(current) + 1):
             stdin = case.get("stdin", "")
-            invocation = execution_adapter.build_invocation(stdin, starter)
             write(self.style.SUCCESS(f"    case {position:>2}: NEW"))
             write(f"             stdin      {self._short(stdin)}")
             write(f"             expected   {case.get('expected_output')!r}")
@@ -395,8 +394,9 @@ class Command(BaseCommand):
                   f"{provenance.case_identity(stdin)[:12]}…  input "
                   f"{provenance.input_identity(stdin)[:12]}…  output "
                   f"{provenance.output_identity(str(case.get('expected_output')))[:12]}…")
-            write(f"             binds      "
-                  f"{self._short(invocation.envelope(), 60) if invocation.ok else invocation.detail}")
+            for check in suite_admission.check_case(question, case):
+                write(f"             {check.language:<10} {check.outcome:<11} "
+                      f"{check.detail}")
 
         present = {str(case.get(LABEL_KEY, "")).strip().lower()
                    for case in proposed if case.get(LABEL_KEY)}

@@ -237,9 +237,17 @@ def get_candidate_problems(session, topic=None, limit=10):
     Filtered on `is_adaptive_eligible` — PUBLISHED and ORACLE_VERIFIED — so
     an untrusted question cannot be recommended. That condition is read from
     the question, never recomputed here.
+
+    And drawn from `_servable_questions()` (Phase 1 M17). The offered set is
+    what `grade_submission` will execute, and `validate_recommendation`'s
+    servability re-check guards only the model's ANSWER, not its tool calls —
+    so a trusted row the backend would not serve must never be offered in the
+    first place. Trust and deliverability are separate facts; both must hold.
     """
+    from groups.coding_views import _servable_questions
+
     limit = max(1, min(int(limit or 10), session.max_candidates))
-    queryset = (Question.objects
+    queryset = (_servable_questions()
                 .filter(status=Question.STATUS_PUBLISHED,
                         trust_state=Question.TRUST_ORACLE_VERIFIED)
                 .select_related("topic"))

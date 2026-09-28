@@ -57,6 +57,8 @@ the failure this milestone exists to prevent.
 import ast
 import json
 
+from groups import structural_types
+
 # ── Outcomes ────────────────────────────────────────────────────────────────
 
 OK = "OK"
@@ -327,6 +329,17 @@ def build_invocation(stdin, source):
 
     _name, parameters = signature
     expanded = stdin.replace("\\n", "\n")
+    if len(parameters) > 1 and (quoted_literal(expanded) is not None
+                                or wrapped_in_one_literal(expanded)):
+        # The whole input is ONE quoted literal wrapped around several
+        # arguments (q97 stores `"aabcc\ndbbca\naadbbcbcac"`). Split on lines,
+        # the first argument would open with a quote and the last close with
+        # one — invisible to any check of a single field (M17.1).
+        return _refuse(
+            CONTRACT_MISMATCH,
+            f"the whole input is one quoted literal {expanded.strip()[:40]!r} "
+            f"wrapped around {len(parameters)} arguments; split on lines, "
+            f"the first would open with its quote and the last close with it")
     fields = _split_fields(expanded, len(parameters))
     if fields is None:
         return _refuse(
@@ -346,6 +359,78 @@ def build_invocation(stdin, source):
 
 class _Raw(str):
     """A field still in its stored text form, not yet a decoded JSON value."""
+
+
+# ── Representation faithfulness (Phase 1 M17.1) ─────────────────────────────
+#
+# A raw field reaches the method as the characters stored. That is right for
+# text — a question about trailing spaces is graded on the bytes it stored —
+# and it is exactly what goes wrong when the stored characters SPELL a value
+# rather than being one. `'hit'` bound as the five characters `'hit'`, quotes
+# and all; `['hot','dot']` on a `list[str]` parameter was split on whitespace
+# into one junk element. Neither raised a warning, so this adapter — and every
+# gate built on it, `remediate_contract`'s v3 gate among them — admitted 81
+# questions (285 cases) whose correct solutions would then fail.
+#
+# The checks are on REPRESENTATION, not on content: a field is refused only
+# when it is a complete literal that this contract would not decode. Bare text
+# is untouched, and a string that merely begins with a quote, or contains
+# one, is not a literal and is passed exactly as before.
+
+def quoted_literal(text):
+    """
+    What `text` spells as a quoted literal, or None.
+
+    `'hit'`, `"hit"`, `"a\\"b"` and the implicit concatenation `"egg" "add"`
+    all spell a string; `it's`, `"unterminated` and `hit` do not. A stray
+    trailing comma — `"0110101",`, as q957 stores it — makes Python read a
+    one-element TUPLE of strings, and is the same quoting, so it counts too.
+    `ast.literal_eval` evaluates literals only — nothing is executed.
+    """
+    stripped = (text or "").strip()
+    if not stripped or stripped[0] not in "'\"":
+        return None
+    try:
+        value = ast.literal_eval(stripped)
+    except (ValueError, SyntaxError, MemoryError, RecursionError):
+        return None
+    if isinstance(value, str):
+        return value
+    if (isinstance(value, tuple) and value
+            and all(isinstance(item, str) for item in value)):
+        return value
+    return None
+
+
+def wrapped_in_one_literal(text):
+    """
+    Whether a multi-line input is ONE quoted literal around all its lines.
+
+    q97 stores `"aabcc\\ndbbca\\naadbbcbcac"` for three parameters: split on
+    lines, the first argument opens with the quote and the last closes it.
+    A quoted string cannot hold a raw newline, so the lines are rejoined with
+    escaped newlines before asking whether the whole is one literal.
+    """
+    lines = (text or "").strip()
+    return "\n" in lines and quoted_literal(lines.replace("\n", "\\n")) is not None
+
+
+def container_literal(text):
+    """
+    Whether `text` is a Python list or tuple literal: `['hot', 'dot']`,
+    `(2, 2)`.
+
+    Callers ask this only AFTER JSON decoding failed, so a True here means
+    "written in Python's notation, not JSON's" — the notation no harness reads.
+    """
+    stripped = (text or "").strip()
+    if not stripped or stripped[0] not in "[(":
+        return False
+    try:
+        value = ast.literal_eval(stripped)
+    except (ValueError, SyntaxError, MemoryError, RecursionError):
+        return False
+    return isinstance(value, (list, tuple))
 
 
 def _split_fields(stdin, arity):
@@ -390,6 +475,18 @@ def _split_fields(stdin, arity):
 def _coerce(field, annotation, warnings):
     """(value, problem). `problem` is a string when the field contradicts the
     declared type — never a silent repair."""
+    # A declared structure is refused before anything else (M17.1). This
+    # adapter passes JSON values and builds no structure, so a `ListNode`
+    # parameter would receive a list — and `classify_annotation`'s substring
+    # hints read `ListNode` AS a list, which used to let it through.
+    structure = (structural_types.by_annotation(annotation)
+                 or structural_types.unsupported_in(annotation))
+    if structure is not None:
+        name = getattr(structure, "name", structure)
+        return None, (f"declares {name}; this contract passes JSON values and "
+                      f"builds no structure, so the method would receive a "
+                      f"plain value where it expects a node")
+
     kind = classify_annotation(annotation)
 
     if not isinstance(field, _Raw):
@@ -403,6 +500,16 @@ def _coerce(field, annotation, warnings):
     if kind == TEXT:
         # The characters, untouched. No strip, no unquote, no case change —
         # a question about trailing spaces is graded on the bytes it stored.
+        # Which is why a stored LITERAL is refused rather than unquoted: the
+        # method would receive its quotes, and silently removing them would be
+        # this adapter deciding what the author meant (M17.1).
+        spelled = quoted_literal(text)
+        if spelled is not None:
+            return None, (
+                f"stored as the quoted literal {text.strip()[:40]!r}; this "
+                f"contract passes a text field as the characters stored, so "
+                f"the method would receive the quotes, not {spelled[:30]!r}. "
+                f"Store the bare text, or the whole input as a JSON array")
         return text, None
 
     if kind == UNDECLARED:
@@ -456,7 +563,24 @@ def _coerce_sequence(stripped, annotation):
         decoded = None
 
     if isinstance(decoded, list):
-        return decoded, None
+        # The elements made a type claim too (M17.1). `[1,2]` on a `list[str]`
+        # parameter used to bind as integers the method was never declared to
+        # receive.
+        problem = _element_problem(decoded, element_kind(annotation))
+        return (None, problem) if problem else (decoded, None)
+
+    if container_literal(stripped):
+        return None, (
+            f"{stripped[:40]!r} is a Python literal, not JSON; this contract "
+            f"reads a list as JSON or as whitespace tokens, so it would bind "
+            f"{stripped.split()[:3]!r}")
+    if stripped.startswith("["):
+        # Written as a list, decodable as neither JSON nor a Python literal:
+        # `["a","b"` or `[a, b]`. Falling through to whitespace tokens would
+        # bind the brackets and commas as text. A token line that merely
+        # opens with a bracket is ambiguous at best, so it is refused too.
+        return None, (f"{stripped[:40]!r} is written as a list but is not "
+                      f"valid JSON")
 
     # Anything else falls through to tokens, INCLUDING a JSON scalar. `5` and
     # `2 7 11 15` are both stored forms for the same one-list parameter, and
@@ -473,6 +597,10 @@ def _coerce_sequence(stripped, annotation):
     values = []
     for token in tokens:
         if wanted == TEXT:
+            if quoted_literal(token) is not None:
+                return None, (f"element {token[:30]!r} is a quoted literal; "
+                              f"a token is passed as stored, so the method "
+                              f"would receive its quotes")
             values.append(token)
         elif wanted == INTEGER:
             try:
@@ -512,17 +640,44 @@ def _validate_decoded(value, kind, annotation):
     if kind == SEQUENCE:
         if not isinstance(value, list):
             return None, f"declared sequence but stored a {type(value).__name__}"
-        wanted = element_kind(annotation)
-        if wanted == TEXT and any(not isinstance(v, str) for v in value):
-            return None, "declared a sequence of text but stored a non-text element"
-        if wanted == INTEGER and any(
-                isinstance(v, bool) or not isinstance(v, int) for v in value):
-            return None, "declared a sequence of integers but stored otherwise"
-        return value, None
+        problem = _element_problem(value, element_kind(annotation))
+        return (None, problem) if problem else (value, None)
     if kind == MAPPING:
         return (value, None) if isinstance(value, dict) else (
             None, f"declared mapping but stored a {type(value).__name__}")
     return value, None
+
+
+#: What a decoded element must be for each declared element kind. A `bool` is
+#: never an integer or a number here, although Python says it is one.
+_ELEMENT_TYPES = {
+    TEXT: (str,),
+    INTEGER: (int,),
+    FLOAT: (int, float),
+    BOOLEAN: (bool,),
+    SEQUENCE: (list,),
+    MAPPING: (dict,),
+}
+
+
+def _element_problem(values, wanted):
+    """
+    Why a decoded list does not hold the declared element kind, or None.
+
+    One rule for both routes a list arrives by — a JSON-array envelope and a
+    raw field that decodes as JSON — so the two cannot disagree. Nested lists
+    are checked one level down only: `list[list[str]]` requires lists, and
+    what those lists hold is the next declaration's business.
+    """
+    types = _ELEMENT_TYPES.get(wanted)
+    if types is None:
+        return None                                   # undeclared: no claim
+    for value in values:
+        numeric = wanted in (INTEGER, FLOAT)
+        if (numeric and isinstance(value, bool)) or not isinstance(value, types):
+            return (f"declared a sequence of {wanted} values but stored the "
+                    f"element {value!r:.30}")
+    return None
 
 
 def _guess(token):

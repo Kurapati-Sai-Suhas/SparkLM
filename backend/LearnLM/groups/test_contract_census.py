@@ -428,14 +428,15 @@ def test_a_single_container_binds_as_one_argument_not_many():
 def test_two_scalars_bind_from_two_lines():
     """
     One line per parameter — and a `str` parameter takes the line as RAW
-    TEXT, not as JSON. So `abc` is the string abc, while `"abc"` is a
-    five-character string that still has its quotes. Worth pinning: it is the
-    difference between a hidden case that reads correctly and one that is
-    silently off by two characters.
+    TEXT, not as JSON. So `abc` is the string abc. `"abc"` used to bind as a
+    five-character string that still had its quotes — "silently off by two
+    characters", as this test put it. Phase 1 M17.1 makes that difference
+    LOUD instead: the quoted literal is refused, never bound off by two.
     """
     assert ea.build_invocation("abc\n2", TWO_SCALARS).arguments == ["abc", 2]
-    assert ea.build_invocation('"abc"\n2', TWO_SCALARS).arguments == \
-        ['"abc"', 2]
+    quoted = ea.build_invocation('"abc"\n2', TWO_SCALARS)
+    assert quoted.outcome == ea.CONTRACT_MISMATCH
+    assert "quoted literal" in quoted.detail
 
 
 def test_a_malformed_input_is_refused_not_guessed():

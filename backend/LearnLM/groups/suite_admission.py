@@ -23,7 +23,9 @@ contract's check for another would accept exactly the cases that fail.
 
   v1  Python and JavaScript: the whole input as JSON (an array is splatted,
       an object becomes keywords in Python and ONE argument in JavaScript),
-      else one JSON value per non-blank line, else the raw text. Java: one
+      else one JSON value per non-blank line, else the raw text — which is
+      refused when it is a quoted literal, because it arrives quotes and
+      all (M17.1). Java: one
       line per parameter. No v1 harness builds a structure in any language.
   v2  One line per declared parameter, typed by the kinds `render_v2`
       injects into all three harnesses; `TreeNode`/`ListNode` lines must
@@ -314,6 +316,15 @@ def _v2_line_problem(position, line, annotation_text):
     "[1,2,3]"; a `str` line of "123" arrives as the int 123; a scalar line
     of two tokens arrives as a list.
     """
+    # v2 never decodes JSON (M17.1). A bracketed line on ANY sequence
+    # parameter — JSON, a Python literal, a nested list — is one token of
+    # text, so a `list[list[int]]` line arrived as a list holding one string.
+    if (execution_contract.declares_sequence(annotation_text)
+            and line.strip().startswith(("[", "("))):
+        return (f"argument {position} is declared {annotation_text}, but its "
+                f"line {line.strip()[:32]!r} is written as a list; v2 reads "
+                f"whitespace-separated tokens and would pass the brackets as "
+                f"text")
     declared = _exact(annotation_text)
     if declared is None:
         return None
@@ -323,6 +334,16 @@ def _v2_line_problem(position, line, annotation_text):
     if not sequence and len(tokens) != 1:
         return (f"argument {position} is declared {shown}, but its line holds "
                 f"{len(tokens)} token(s), which v2 passes as a list")
+    if element == "str" and not sequence and line != line.strip():
+        return (f"argument {position} is declared str, but its line "
+                f"{line[:32]!r} has surrounding whitespace, which v2 strips "
+                f"when it splits the line into tokens")
+    if element == "str":
+        literal = _str_line_literal(line, tokens)
+        if literal:
+            return (f"argument {position} is declared {shown}, but {literal}; "
+                    f"v2 passes each whitespace token as stored, so the method "
+                    f"would receive the quotes and brackets as text")
     for token in tokens:
         reading = _v2_token(token)
         if reading not in _V2_ACCEPTS[element]:
@@ -332,10 +353,32 @@ def _v2_line_problem(position, line, annotation_text):
     return None
 
 
+def _str_line_literal(line, tokens):
+    """
+    How a v2 `str` / `list[str]` line is written as a quoted LITERAL, or ""
+    (M17.1).
+
+    v2 has no quoting: a token is text as stored. So `"hello"` reaches the
+    method with its quotes. It used to pass because the token read as a
+    `str`. (Bracketed list lines are refused before this, for every sequence.)
+    """
+    if execution_adapter.quoted_literal(line) is not None:
+        return f"the line {line.strip()[:32]!r} is a quoted literal"
+    quoted = next((token for token in tokens
+                   if execution_adapter.quoted_literal(token) is not None), None)
+    if quoted is not None:
+        return f"the token {quoted[:32]!r} is a quoted literal"
+    return ""
+
+
 # ── v1 ────────────────────────────────────────────────────────────────────
 
 POSITIONAL = "positional"
 KEYWORD = "keyword"
+#: Neither the whole input nor every line decoded as JSON, so the harness
+#: passes the stripped text itself as ONE argument (M17.1). Kept distinct from
+#: POSITIONAL because it is the one binding that performs no decoding at all.
+RAW = "raw"
 
 
 def _json_value(text, strict):
@@ -370,7 +413,7 @@ def v1_binding(stdin, strict=False):
         try:
             return POSITIONAL, [_json_value(line, strict) for line in lines]
         except Exception:                                  # noqa: BLE001
-            return POSITIONAL, [text]
+            return RAW, [text]
     if isinstance(parsed, list):
         return POSITIONAL, parsed
     if isinstance(parsed, dict):
@@ -436,6 +479,15 @@ def _v1(context, lang):
                 f"the v1 harness calls {node.name} with "
                 f"{_describe(mode, arguments)}, which does not fit "
                 f"{node.name}{signature}: {exc}{silently}")
+        spelled = (execution_adapter.quoted_literal(arguments[0])
+                   if mode == RAW else None)
+        if spelled is not None:
+            return LanguageCheck(
+                lang.key, REFUSED,
+                f"the input {arguments[0][:40]!r} is a quoted literal that v1 "
+                f"cannot decode as JSON, so it passes the characters as "
+                f"stored and the method receives the quotes, not "
+                f"{spelled[:30]!r}. Store one JSON value per line")
         annotations = {argument.arg: _annotation(argument)
                        for argument in node.args.args}
         for name, value in bound.arguments.items():
@@ -458,6 +510,8 @@ def _annotation(argument):
 def _describe(mode, arguments):
     if mode == KEYWORD:
         return f"keyword argument(s) {sorted(arguments)}"
+    if mode == RAW:
+        return "the undecoded text as 1 positional argument"
     return f"{len(arguments)} positional argument(s)"
 
 
@@ -493,7 +547,15 @@ def _v2(context, lang):
             f"the signature declares {sorted(set(structural))} but no "
             f"structural adapter is wired into the {lang.label} v2 harness")
 
-    arguments = migration_readiness.parse_arguments(context.prepared(lang.key))
+    prepared = context.prepared(lang.key)
+    if len(kinds) > 1 and execution_adapter.wrapped_in_one_literal(prepared):
+        return LanguageCheck(
+            lang.key, REFUSED,
+            f"the whole input {prepared.strip()[:40]!r} is one quoted literal "
+            f"wrapped around {len(kinds)} lines; v2 reads each line as stored, "
+            f"so the first argument would open with the quote and the last "
+            f"close with it")
+    arguments = migration_readiness.parse_arguments(prepared)
     if len(arguments) > len(kinds) and any(
             value.strip() for value in arguments[len(kinds):]):
         return LanguageCheck(

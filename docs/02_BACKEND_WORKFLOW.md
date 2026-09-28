@@ -638,6 +638,13 @@ return deliverable.exclude(
    that mention a structural name (~165 rows, one query) and the AST decides. A question
    migrated to v2 is servable again on the next request.
 
+   **M17.1 widened (3) to structures a starter carries without declaring**, cause
+   `structural_undeclared`: a Python starter that does not parse while the question's own starters
+   name a structural type, or an unannotated graded parameter whose name is the bank's structural
+   convention (`root`, `head`, `list1`, … — `structural_types.CONVENTIONAL_PARAMETERS`). Evidence is
+   the signature and starters, never the title. 60 more rows (the binding census's 44 plus 16 of the
+   same shape it could not see); bank 1,661 → 1,601. Still one query.
+
 None of the three is a status or trust filter. A deliverable DRAFT question is practice and
 stays servable; adaptive eligibility (PUBLISHED ∧ ORACLE_VERIFIED) is untouched.
 

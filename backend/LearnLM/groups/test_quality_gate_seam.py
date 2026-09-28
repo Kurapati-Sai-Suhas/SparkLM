@@ -26,7 +26,7 @@ from django.test import SimpleTestCase
 
 from groups import hidden_test_quality as q
 from groups.models import Question
-from groups.services import GradingService
+from groups.services import ExecutionContractError, GradingService
 
 TEXT_STARTER = "class Solution:\n    def solve(self, s: str) -> int:\n        pass\n"
 LIST_STARTER = "class Solution:\n    def solve(self, nums: list[int]) -> int:\n        pass\n"
@@ -172,11 +172,21 @@ class CanonicalInputMatrixTests(SimpleTestCase):
             "class Solution:\n    def solve(self, s: str): return s",
             "007", "007")
 
-    def test_quoted_string_is_characters(self):
+    def test_a_quoted_string_is_refused_at_the_seam(self):
+        """
+        Phase 1 M17.1 reverses what this test used to pin: `"0"` was passed as
+        three characters, quotes included, so a key written for the string 0
+        and a key written for the three characters could not be told apart.
+        The seam the gate and the grader share now refuses the stored
+        literal, and the bare text is what binds.
+        """
+        question = build_question()
+        with self.assertRaises(ExecutionContractError):
+            GradingService.prepare_stdin(question, "python", '"0"')
         self.assert_correct_solution_agrees(
-            build_question(),
+            question,
             "class Solution:\n    def solve(self, s: str): return len(s)",
-            '"0"', "3")
+            "0", "1")
 
     def test_integer_input(self):
         self.assert_correct_solution_agrees(

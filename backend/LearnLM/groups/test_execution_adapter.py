@@ -113,8 +113,18 @@ class InputAdapterTests(SimpleTestCase):
         for raw in ("true", "false", "null", "True", "None"):
             self.assertEqual(self.arguments(raw, ONE_TEXT), [raw])
 
-    def test_quoted_text_keeps_its_quotes(self):
-        self.assertEqual(self.arguments('"0"', ONE_TEXT), ['"0"'])
+    def test_quoted_text_is_refused_not_passed_with_its_quotes(self):
+        """
+        Phase 1 M17.1 reverses what this test used to pin. `"0"` bound as the
+        three characters `"0"`: the method received the quotes. That is the
+        defect behind 81 questions whose correct solutions fail, so a stored
+        LITERAL is now refused, with the representation that would bind.
+        """
+        invocation = adapter.build_invocation('"0"', ONE_TEXT)
+        self.assertEqual(invocation.outcome, adapter.CONTRACT_MISMATCH)
+        self.assertIn("quoted literal", invocation.detail)
+        # The bare text is the representation this contract passes faithfully.
+        self.assertEqual(self.arguments("0", ONE_TEXT), ["0"])
 
     def test_whitespace_inside_text_is_data(self):
         for raw in ("  lead", "trail  ", "a b c", "\ttab", " "):
@@ -175,9 +185,18 @@ class InputAdapterTests(SimpleTestCase):
         self.assertEqual(self.arguments('["flower","flow"]', ONE_LIST_STR),
                          [["flower", "flow"]])
 
-    def test_nested_lists_survive(self):
-        self.assertEqual(self.arguments("[[1,2],[3,4]]", ONE_LIST_INT),
+    def test_nested_lists_survive_where_declared(self):
+        """
+        Phase 1 M17.1: a raw JSON list's elements are held to the declared
+        element type, as the JSON-envelope path always held them. This test
+        used to bind `[[1,2],[3,4]]` to `list[int]`, so the same data was
+        accepted by one route and refused by the other.
+        """
+        nested = starter("grid: list[list[int]]")
+        self.assertEqual(self.arguments("[[1,2],[3,4]]", nested),
                          [[[1, 2], [3, 4]]])
+        invocation = adapter.build_invocation("[[1,2],[3,4]]", ONE_LIST_INT)
+        self.assertEqual(invocation.outcome, adapter.CONTRACT_MISMATCH)
 
     def test_a_lone_token_is_a_one_element_sequence(self):
         """
@@ -754,18 +773,36 @@ class ScopeTests(SimpleTestCase):
             self.assertNotIn("execution_adapter", template)
 
     def test_the_adapter_is_pure(self):
+        """
+        Standard library only, transitively. Phase 1 M17.1 lets the adapter
+        read the structural registry — so a `ListNode` parameter is refused as
+        a structure instead of being misread as a list — and that registry is
+        itself standard-library only, which is checked here too rather than
+        taken on trust.
+        """
         import ast
         import inspect
         import pathlib
-        tree = ast.parse(
-            pathlib.Path(inspect.getfile(adapter)).read_text("utf-8"))
-        imported = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported.update(a.name.split(".")[0] for a in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module.split(".")[0])
-        self.assertEqual(imported, {"ast", "json"})
+
+        from groups import structural_types
+
+        def imports_of(module):
+            tree = ast.parse(
+                pathlib.Path(inspect.getfile(module)).read_text("utf-8"))
+            imported = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.update(a.name for a in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported.update(f"{node.module}.{a.name}"
+                                    for a in node.names)
+            return imported
+
+        self.assertEqual(imports_of(adapter),
+                         {"ast", "json", "groups.structural_types"})
+        self.assertEqual({name.split(".")[0]
+                          for name in imports_of(structural_types)},
+                         {"collections", "dataclasses"})
 
     def test_the_superseded_input_contract_model_is_not_wired_anywhere(self):
         """

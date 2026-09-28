@@ -132,6 +132,33 @@ UNSUPPORTED = {
 }
 
 
+#: The parameter names this bank's signatures give a structure (Phase 1 M17.1).
+#:
+#: The convention every tree and list problem here was written in — `root`
+#: for a tree, `head` / `list1` / `l1` for a linked list. It matters when a
+#: starter leaves the parameter UNANNOTATED: the signature still says what the
+#: parameter is, only not in a way `by_annotation` can read, and no contract
+#: builds a structure for an undeclared parameter, so the method receives the
+#: stored text.
+#:
+#: Measured, not assumed: across the served bank, every question with an
+#: unannotated parameter of one of these names is a tree or linked-list
+#: problem (45 of 45), and no other question has one. `node` is deliberately
+#: absent — in graph problems it names an integer id as often as a node.
+CONVENTIONAL_PARAMETERS = {
+    "root": TREE, "root1": TREE, "root2": TREE,
+    "tree": TREE, "tree1": TREE, "tree2": TREE,
+    "head": LINKED_LIST, "heada": LINKED_LIST, "headb": LINKED_LIST,
+    "l1": LINKED_LIST, "l2": LINKED_LIST,
+    "list1": LINKED_LIST, "list2": LINKED_LIST,
+}
+
+
+def by_parameter_name(name):
+    """The structural kind a parameter's NAME conventionally carries, or None."""
+    return CONVENTIONAL_PARAMETERS.get((name or "").lower())
+
+
 def by_annotation(annotation):
     """
     The structural type an annotation declares, or None.

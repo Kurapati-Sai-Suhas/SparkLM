@@ -364,28 +364,38 @@ FORMS = [
     (TREE_V1, "v2", False),
     (PLAIN, "v1", False),
     (PLAIN, "v9", False),                            # left to the grader, as before
-    # Mentioned, never declared: the rule reads declarations.
+    # M17 left these two served; M17.1 catches them (see the escape tests).
+    # An unannotated `root` still carries a tree, and an unparseable starter
+    # that names one still declares it.
     ("# TreeNode is defined for you\nclass Solution:\n"
-     "    def f(self, root) -> int: pass\n", "v1", False),
-    # Starter defects the learner REPLACES; not proof the question cannot pass.
+     "    def f(self, root) -> int: pass\n", "v1", True),
     ("class Solution:\n    def f(self, root: TreeNode -> int: pass\n",
-     "v1", False),                                  # unparseable
+     "v1", True),                                   # unparseable
+    # Starter defects the learner REPLACES; not proof the question cannot pass.
     ("def f(root: TreeNode) -> int: pass\n", "v1", False),  # no Solution class
     ("class Solution:\n    def f(self, x: Foo) -> int: pass\n", "v1", False),
+    ("class Solution:\n    def f(self, x: int -> int: pass\n",
+     "v1", False),                                  # unparseable, no structure
 ]
+
+#: The rows M17's declared-structure rule catches on its own.
+M17_DECLARED = 9
 
 
 @pytest.mark.django_db
 def test_the_prefilter_and_the_classifier_agree_on_every_form(topic):
     """
-    The SQL narrows, the readiness classifier decides, and together they must
-    equal the classifier applied to every row — the definition the user chose.
+    The SQL narrows, the rule decides, and together they must equal the rule
+    applied to every row. Within that, M17's declared-structure part is still
+    exactly the readiness classifier — the definition the user chose then.
     """
     rows = [make_question(topic, 9200 + i, starter=starter, version=version)
             for i, (starter, version, _excluded) in enumerate(FORMS)]
     expected = {row.pk for row, (_s, _v, excluded) in zip(rows, FORMS)
                 if excluded}
 
+    by_rule = {row.pk for row in rows
+               if deliverability.blocker(row) is not None}
     by_classifier = {
         row.pk for row in rows
         if language_readiness.assess_source(
@@ -394,7 +404,8 @@ def test_the_prefilter_and_the_classifier_agree_on_every_form(topic):
         in deliverability.BLOCKING_CAUSES}
 
     assert set(deliverability.undeliverable_ids(Question.objects.all())) \
-        == expected == by_classifier
+        == expected == by_rule
+    assert by_classifier < expected and len(by_classifier) == M17_DECLARED
     assert servable_ids() == {row.pk for row in rows} - expected
 
 

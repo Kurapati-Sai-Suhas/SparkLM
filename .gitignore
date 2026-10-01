@@ -71,6 +71,8 @@ backend/LearnLM/remediation/*_suite_expansion.json
 backend/LearnLM/remediation/*_approved_cases.json
 backend/LearnLM/remediation/*_case*_input.json
 backend/LearnLM/remediation/*_reference_*.py
+# M18: the input-repair pilot manifest names questions, case files and reviews.
+backend/LearnLM/remediation/*_pilot_manifest.json
 pilot_*/reference_*.py
 
 # The reference-authoring directory `reference_create --source-file` reads

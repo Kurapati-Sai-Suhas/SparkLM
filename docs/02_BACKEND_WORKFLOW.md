@@ -29,6 +29,7 @@ parallelise.
 16. [Error Contract](#16-error-contract)
 17. [Per-Endpoint Performance Profile](#17-per-endpoint-performance-profile)
 18. [Gotchas and Landmines](#18-gotchas-and-landmines)
+19. [Operator Command: the M18 Input-Repair Pilot](#19-operator-command-the-m18-input-repair-pilot)
 
 ---
 
@@ -1201,6 +1202,57 @@ Recorded so nobody rediscovers them at cost.
 | 13 | RAG re-extracts and re-chunks the document on every request; no persisted index. | `views.py` |
 | 14 | "Question misconfigured" returns 500 for what is a data problem. | `coding_views.py` |
 | 15 | Channels' in-memory fallback works only because there is exactly one process. | `settings.py` |
+
+---
+
+## 19. Operator Command: the M18 Input-Repair Pilot
+
+`input_repair_pilot` rewrites the **stdin representation** of the cases of
+q121, q132 and q516, and of no other question, into the form every served
+v1 harness already binds as the intended value. Two defect shapes are in
+scope: comma-separated integers on a `list[int]` parameter (`3,8,2` →
+`[[3,8,2]]`), and a Python-quoted string on a `str` parameter (`'noon'` →
+`noon`). The planning logic is the pure module `groups/input_repair.py`.
+
+**What it never changes:** expected outputs, case count and order, any other
+case key, the contract (stays `v1`), `status`, `trust_state` (stays
+`UNVERIFIED`), adaptive eligibility, and every other column. q21, q98, q100,
+q105 and q110 are refused by name, and a run takes at most three questions.
+
+**Workflow** (production aliases; never Judge0):
+
+| Step | Command | What it proves |
+|---|---|---|
+| 1. Pre-image | `preimage_capture --alias preimage --batch m18-input-pilot --purpose "..." --questions 121 132 516 --operator <name> --apply --confirm` | A complete, digest-verified copy of each question exists before any write |
+| 2. Freeze | `preimage_capture --alias preimage --batch m18-input-pilot --operator <name> --freeze --apply --confirm` | Batch membership is fixed; the write-ahead rule can now pass |
+| 3. Case files | One gitignored `q<id>_cases_input.json` per question (`remediate_inputs` format: `case`, `before`, `after`), plus a gitignored `*_pilot_manifest.json` naming the batch, the files and a human title/signature review | The approval is a file, never a shell argument |
+| 4. Dry run | `input_repair_pilot --alias hiddentest --manifest <path> --reason "..." --operator <name>` | Every gate passes for every question; prints each `before -> after`, what each language receives today, and the **PLAN DIGEST** |
+| 5. Review | Read the dry run | A human approves exactly that plan |
+| 6. Apply | the same command, plus `--apply --confirm --plan-digest <digest>` | Refuses unless the digest equals a fresh re-plan, so the apply is the reviewed dry run |
+| 7. Post-check | Grade correct solutions locally (Python, JS, Java) against the live suites | The repair did what it claimed, with no Judge0 quota spent |
+| 8. Rollback dry run | `preimage_rollback --alias hiddentest --batch m18-input-pilot --operator <name>` | Each question remains restorable from its pre-image |
+
+**Gates, all run before anything is written:**
+- the batch must be frozen, and each question's live digest must equal its pre-image;
+- the question must be in the v1 input-repair class (Python's v1 admission refuses at least one case, and every case is admitted after the repair);
+- every case must decode by the closed set (JSON value, one Python string literal, comma-separated integers);
+- the new stdin must mean the same value as that case's old stdin;
+- no served language may regress, and every served language must receive the value;
+- the text must be the canonical encoding;
+- the review must say `CONSISTENT` and match the live title, method and statement digest.
+
+**All or none.** The writes run in one outer transaction. Each question gets
+its own `select_for_update` savepoint, re-validated under the lock
+immediately before the write. After the write, the command re-proves the
+landed row: no other captured field moved, the suite is exactly the plan,
+adaptive eligibility is unchanged, and the landed digest equals the projected
+one. Any failure, on any question, rolls back every question and every audit
+row.
+
+**Audit trail.** One `RemediationAction` row of class `INPUT_REPAIR` per
+question, carrying the post-write digest and the plan digest. The pre-images
+are untouched and still hold the original suites, so `preimage_rollback`
+restores any of the three.
 
 ---
 
